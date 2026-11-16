@@ -92,6 +92,15 @@ async function song(albumId: string, rel: string, common: Record<string, unknown
     });
 }
 
+/**
+ * A playable song on an album the re-file never reads (its tags are unreadable), so its artist outlives the move and the
+ * prune removes nothing: what is left is the marker the re-file itself decides.
+ */
+async function staysWithCut(artistId: string) {
+    const stays = await album(artistId, "Refile Stays Album");
+    await song(stays.id, "Refile Stays Album/01.flac", null);
+}
+
 const own = (artistId: string, rgMbid: string, source = "native_scan") =>
     prisma.ownedAlbum.create({ data: { artistId, rgMbid, source } });
 
@@ -331,6 +340,7 @@ describe("re-filing albums by their tags", () => {
     it("leaves the marker when the album that moves holds no playable song", async () => {
         const cut = await artist("Refile Cut");
         await artist("Refile Cut and Band", { mbid: FULL_ID });
+        await staysWithCut(cut.id);
         const a = await album(cut.id, "Refile Unlisted Album", { rgMbid: REAL_RG });
         const unreadable = await song(a.id, "Refile Cut and Band/Refile Unlisted Album/01.flac", {
             album: "Refile Unlisted Album", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
@@ -343,6 +353,20 @@ describe("re-filing albums by their tags", () => {
         // It still moved: only what a client lists decides the marker.
         expect(result.albumsMoved).toBe(1);
         expect(await filing("Refile Unlisted Album")).toEqual([{ artist: "Refile Cut and Band", rgMbid: REAL_RG, songs: 1 }]);
+    });
+
+    it("moves the marker when the re-file's prune removes the artist the album left, though nothing a client lists changed", async () => {
+        const cut = await artist("Refile Cut");
+        await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const a = await album(cut.id, "Refile Unlisted Album", { rgMbid: REAL_RG });
+        const unreadable = await song(a.id, "Refile Cut and Band/Refile Unlisted Album/01.flac", {
+            album: "Refile Unlisted Album", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID],
+        });
+        await prisma.track.update({ where: { id: unreadable.id }, data: { corrupt: true } });
+
+        let result!: Awaited<ReturnType<typeof refileLibrary>>;
+        expect(await markerMoves(async () => (result = await refileLibrary(musicDir)))).toBe(true);
+        expect(result.artistsRemoved).toBe(1);
     });
 
     it("moves the marker when a merge brings a playable song onto the right artist's copy, though the copy's own song is corrupt", async () => {
@@ -362,6 +386,7 @@ describe("re-filing albums by their tags", () => {
     it("leaves the marker when only the already-filed song is playable and the moved one is corrupt", async () => {
         const cut = await artist("Refile Cut");
         const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
+        await staysWithCut(cut.id);
         const stray = await album(cut.id, "Refile Half Album", { rgMbid: REAL_RG });
         const kept = await album(full.id, "Refile Half Album");
         const moved = await song(stray.id, "Refile Cut and Band/Refile Half Album/01.flac", { album: "Refile Half Album", artist: "Refile Cut & Band" });

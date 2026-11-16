@@ -1,7 +1,8 @@
 /**
  * Every place outside a scan that moves an album between the library and Discover, or removes one, moves the
  * library-changed marker exactly when the library a client lists changed: a library album gained, lost or moved. Discover
- * albums are not listed, so moving or removing those leaves it. Real database and the real marker (services/libraryChanged.ts).
+ * albums are not listed, so moving or removing those leaves it. A prune of empty albums and artists moves it once when it
+ * removes anything. Real database and the real marker (services/libraryChanged.ts).
  */
 jest.mock("../../utils/logger", () => require("./helpers/scannerMocks").loggerMock());
 jest.mock("../../workers/unifiedEnrichment", () => ({ triggerEnrichmentNow: jest.fn() }));
@@ -146,17 +147,27 @@ describe("the one-time sort of Discover albums", () => {
 });
 
 describe("pruning empty albums and artists", () => {
-    it("leaves the marker when an empty library album goes, because a client lists albums that hold a playable song", async () => {
+    it("moves the marker once when an empty library album goes", async () => {
         await album("emptylib", "LIBRARY", false);
-        expect(await markerMoves(() => pruneEmptyAlbumsAndArtists())).toBe(false);
+        expect(await markerMoves(() => pruneEmptyAlbumsAndArtists())).toBe(true);
         expect(await prisma.album.count({ where: { id: `${P}_alb_emptylib` } })).toBe(0);
     });
 
-    it("leaves the marker when an empty Discover album and an artist with no albums go", async () => {
+    it("moves the marker when an empty Discover album and an artist with no albums go", async () => {
         await album("emptydis", "DISCOVER", false);
         await prisma.artist.create({ data: { id: `${P}_art_bare`, name: `${P} artist bare`, normalizedName: `${P} artist bare`, identityKey: `${P}_ik_bare` } });
-        expect(await markerMoves(() => pruneEmptyAlbumsAndArtists())).toBe(false);
+        expect(await markerMoves(() => pruneEmptyAlbumsAndArtists())).toBe(true);
         expect(await prisma.album.count({ where: { id: `${P}_alb_emptydis` } })).toBe(0);
         expect(await prisma.artist.count({ where: { id: `${P}_art_bare` } })).toBe(0);
+    });
+
+    it("moves the marker when only an artist with no albums goes", async () => {
+        await prisma.artist.create({ data: { id: `${P}_art_alone`, name: `${P} artist alone`, normalizedName: `${P} artist alone`, identityKey: `${P}_ik_alone` } });
+        expect(await markerMoves(() => pruneEmptyAlbumsAndArtists())).toBe(true);
+    });
+
+    it("leaves the marker when nothing is removed", async () => {
+        await pruneEmptyAlbumsAndArtists();
+        expect(await markerMoves(() => pruneEmptyAlbumsAndArtists())).toBe(false);
     });
 });
