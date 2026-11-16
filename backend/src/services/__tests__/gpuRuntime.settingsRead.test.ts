@@ -13,15 +13,6 @@ jest.mock("../../utils/systemSettings", () => ({
     saveSystemSettings: jest.fn(),
 }));
 jest.mock("../../utils/redis", () => ({ redisClient: { publish: jest.fn(), get: jest.fn() } }));
-jest.mock("../../utils/db", () => ({
-    prisma: {
-        systemSettings: {
-            findUnique: () => {
-                throw new Error("the settings table was read directly");
-            },
-        },
-    },
-}));
 jest.mock("../../services/gpuPlatform", () => ({ gpuSupported: () => true }));
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "gpu-settings-read-"));
@@ -31,10 +22,17 @@ const root = path.join(dataDir, "gpu-onnx");
 let gpu: typeof import("../gpuRuntime");
 
 beforeAll(async () => {
+    const { prisma } = await import("../../utils/db");
+    jest.spyOn(prisma.systemSettings, "findUnique").mockImplementation(() => {
+        throw new Error("the settings table was read directly");
+    });
     gpu = await import("../gpuRuntime");
 });
 
-afterAll(() => {
+afterAll(async () => {
+    jest.restoreAllMocks();
+    const { prisma } = await import("../../utils/db");
+    await prisma.$disconnect();
     fs.rmSync(dataDir, { recursive: true, force: true });
 });
 

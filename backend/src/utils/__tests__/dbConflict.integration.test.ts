@@ -23,22 +23,28 @@ async function seed() {
 beforeEach(seed);
 afterEach(() => prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE '${P}%'`));
 
-/** Two transactions that each hold one artist row and then ask for the other's: Postgres ends the second one. */
+/**
+ * Two transactions that each hold one artist row and then ask for the other's. Postgres ends whichever one's deadlock
+ * check runs first, and under load that can be either, so the error comes from whichever side was ended.
+ */
 async function deadlockVictim(touch: (tx: Prisma.TransactionClient, id: string) => Promise<unknown>): Promise<unknown> {
-    // Both kinds of write update "Artist", and only the victim ever waits.
-    let victim: Promise<unknown> | undefined;
-    await prisma.$transaction(async (tx) => {
-        await touch(tx, artistId(1));
-        victim = prisma
-            .$transaction(async (tx2) => {
-                await touch(tx2, artistId(2));
-                await touch(tx2, artistId(1));
-            }, TX)
-            .then(() => null, (error: unknown) => error);
-        await untilLockWait(`UPDATE "`);
-        await touch(tx, artistId(2));
-    }, TX);
-    return victim;
+    let inner: Promise<unknown> | undefined;
+    const outer = await prisma
+        .$transaction(async (tx) => {
+            await touch(tx, artistId(1));
+            inner = prisma
+                .$transaction(async (tx2) => {
+                    await touch(tx2, artistId(2));
+                    await touch(tx2, artistId(1));
+                }, TX)
+                .then(() => null, (error: unknown) => error);
+            await untilLockWait(`UPDATE "`);
+            await touch(tx, artistId(2));
+        }, TX)
+        .then(() => null, (error: unknown) => error);
+    const ended = [outer, await inner].filter((error) => error !== null);
+    expect(ended).toHaveLength(1);
+    return ended[0];
 }
 
 const rawTouch = (tx: Prisma.TransactionClient, id: string) =>
