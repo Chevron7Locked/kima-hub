@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deleting a playlist removes its share links**, on the web and from Subsonic apps.
+- **A shared song keeps working when its file is replaced.** The link moves to the copy that takes over the song's plays and playlist places.
 - **A library scan can no longer lose a song it is adding.** A song filed into an album at the moment that album was being removed as empty used to be deleted with it.
 - **Deleting an album, artist or song also removes its share links**, instead of leaving links behind that open nothing.
 - **A failed delete no longer leaves entries without their files.** Kima removes the library entries first and the files after.
