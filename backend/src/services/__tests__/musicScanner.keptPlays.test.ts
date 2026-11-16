@@ -44,6 +44,7 @@ import { prisma } from "../../utils/db";
 import { config } from "../../config";
 import { MusicScannerService } from "../musicScanner";
 import { identifyTrack } from "../../workers/enrichment/identification";
+import * as songHistory from "../library/songHistory";
 
 jest.setTimeout(60_000);
 
@@ -159,6 +160,27 @@ describe("a recording that leaves the library and returns", () => {
             expect(await keptPlays()).toBe(0);
         } finally {
             spy.mockRestore();
+        }
+    });
+
+    it("still prunes and finishes the scan when adopting kept plays fails", async () => {
+        const config_ = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "delete" });
+        const adopt = jest.spyOn(songHistory, "adoptKeptPlays").mockRejectedValue(new Error("adoption timed out"));
+        try {
+            const scanner = new MusicScannerService();
+            expect((await scanner.scanLibrary(musicDir)).tracksAdded).toBe(1);
+            fs.unlinkSync(trackFile);
+            expect((await scanner.scanLibrary(musicDir)).tracksMissing).toBe(1);
+
+            // The retiring scan leaves an album with no songs, which the pruning after the adoption removes.
+            const result = await scanner.scanLibrary(musicDir);
+
+            expect(adopt).toHaveBeenCalled();
+            expect(result.tracksRemoved).toBe(1);
+            expect(await prisma.album.count({ where: { rgMbid: RG_MBID } })).toBe(0);
+        } finally {
+            adopt.mockRestore();
+            config_.mockRestore();
         }
     });
 });

@@ -453,8 +453,14 @@ export class MusicScannerService {
         const reconcile = await runReconcile(new Date(startTime));
         result.tracksRemoved = reconcile.removed;
         // A recording that is back on a library album takes back the plays kept when it left (the identification stage does
-        // the same as it names a song's recording; this catches the songs whose recording was already known).
-        await adoptKeptPlays();
+        // the same as it names a song's recording; this catches the songs whose recording was already known). The plays
+        // stay kept when it fails, and the next scan or identification asks again, so a failure here must not cost the
+        // pruning and the library-changed marker below.
+        try {
+            await adoptKeptPlays();
+        } catch (err) {
+            logger.error("[Scan] Adopting kept plays failed; they stay kept for the next run:", err);
+        }
 
         // Albums with no songs, then artists with no albums, go.
         // Neither the retirement nor this pruning moves the library marker: the songs went off the client's list when
