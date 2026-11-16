@@ -10,7 +10,6 @@ import { prisma } from "../utils/db";
 import { markLibraryChangedQuietly } from "../services/libraryChanged";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 import { deleteArtists, deleteEmptyArtists } from "../services/library/albumDelete";
-import { updateArtistCounts } from "../services/artistCountsService";
 import { NameIndex, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 
 interface IntegrityReport {
@@ -151,9 +150,6 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                 });
                 // Its keeps go to the real artist (a keep cannot outlive its artist), then it goes with its similar links.
                 await deleteArtists([tempArtist.id], { keepsTo: realArtist.id });
-                await updateArtistCounts(realArtist.id).catch((error) =>
-                    logger.warn("[DataIntegrity] Artist counts not updated after a temp artist merge:", error),
-                );
 
                 report.consolidatedArtists++;
                 logger.debug(`[DataIntegrity] Merged temp artist "${tempArtist.name}" into the real one`);

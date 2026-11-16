@@ -142,6 +142,8 @@ export async function deleteArtists(ids: string[], options: { within?: Tx; keeps
             const albumIds = (await tx.album.findMany({ where: { artistId: { in: artistIds } }, select: { id: true } })).map((a) => a.id);
             await removeAlbums(tx, albumIds, undefined, owed);
             if (keepsTo) {
+                // The successor may have taken albums from the artist before this call, so its counts are recounted too.
+                owed.recount.add(keepsTo);
                 for (const keep of await tx.ownedAlbum.findMany({ where: { artistId: { in: artistIds } }, select: { artistId: true, rgMbid: true } })) {
                     await moveOwnerArtist(tx, keep.artistId, keepsTo, keep.rgMbid);
                 }

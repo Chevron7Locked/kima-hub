@@ -219,6 +219,20 @@ describe("deleteArtists", () => {
         ]);
     });
 
+    it("with `keepsTo`, recounts the successor, which may hold the albums the merged artist had", async () => {
+        const gone = await artist("gone");
+        const heir = await artist("heir");
+        await album("moved", heir, { songs: 2 });
+        await prisma.artist.update({ where: { id: heir }, data: { libraryAlbumCount: 0, totalTrackCount: 0 } });
+
+        await deleteArtists([gone], { keepsTo: heir });
+
+        expect(await prisma.artist.findUniqueOrThrow({ where: { id: heir }, select: { libraryAlbumCount: true, totalTrackCount: true } })).toEqual({
+            libraryAlbumCount: 1,
+            totalTrackCount: 2,
+        });
+    });
+
     it("moves the library-changed marker only for an artist a client lists", async () => {
         const quiet = await artist("quiet");
         await album("dis", quiet, { location: "DISCOVER" });
