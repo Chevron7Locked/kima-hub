@@ -7,6 +7,7 @@ import { prisma } from "../utils/db";
 import { ConfigurationError, invalidRequest } from "../utils/errors";
 import { requireAcquirePermission } from "../middleware/auth";
 import { acquisitionService } from "../services/acquisitionService";
+import * as downloadJobs from "../services/downloads/jobs";
 import { withAlbumArtwork } from "../services/artwork";
 import { z } from "zod";
 
@@ -163,17 +164,11 @@ router.post("/download/:albumMbid", requireAcquirePermission, async (req, res) =
         const jobId = job.id;
 
         if (created) {
+            // A job a webhook already settled is left alone; a real failure tells the user, the batch and the import.
             const markFailed = (message: string) =>
-                prisma.downloadJob
-                    .update({
-                        where: { id: jobId },
-                        data: {
-                            status: "failed",
-                            error: message,
-                            completedAt: new Date(),
-                        },
-                    })
-                    .catch(() => {});
+                downloadJobs.fail([{ id: jobId }], message).catch((error: any) => {
+                    logger.error(`[Releases] Could not fail job ${jobId}:`, error?.message || error);
+                });
 
             // Config errors throw and acquisition failures resolve {success:false}; both fail the job.
             void acquisitionService

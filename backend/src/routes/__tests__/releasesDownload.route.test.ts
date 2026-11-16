@@ -16,6 +16,7 @@ import express from "express";
 import request from "supertest";
 import { prisma } from "../../utils/db";
 import { acquisitionService } from "../../services/acquisitionService";
+import * as downloadJobs from "../../services/downloads/jobs";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import releasesRoutes from "../releases";
 import { mountAsServer } from "./helpers/serverMount";
@@ -34,6 +35,7 @@ beforeAll(async () => {
 beforeEach(async () => {
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await prisma.discoveryBatch.deleteMany({ where: { userId: USER } });
+    await prisma.notification.deleteMany({ where: { userId: USER } });
     acquire.mockReset().mockResolvedValue({ success: true } as any);
 });
 
@@ -41,9 +43,17 @@ afterAll(async () => {
     acquire.mockRestore();
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await prisma.discoveryBatch.deleteMany({ where: { userId: USER } });
+    await prisma.notification.deleteMany({ where: { userId: USER } });
     await prisma.user.deleteMany({ where: { id: USER } });
     await closeEngineConnections();
 });
+
+/** The background acquisition has answered and whatever it told the job module has been written. */
+async function acquisitionSettled() {
+    await acquire.mock.results[0].value.catch(() => {});
+    await new Promise((resolve) => setImmediate(resolve));
+    await downloadJobs.whenIdle();
+}
 
 const jobs = () => prisma.downloadJob.findMany({ where: { userId: USER } });
 
@@ -87,4 +97,46 @@ it("records the album on the job", async () => {
     const job = await prisma.downloadJob.findUniqueOrThrow({ where: { id: res.body.jobId } });
     expect(job).toMatchObject({ subject: "Low - Hey What", type: "album", targetMbid: RG, status: "pending" });
     expect(job.metadata).toEqual({ artistName: "Low", albumTitle: "Hey What", albumMbid: RG });
+});
+
+describe("an acquisition that does not start", () => {
+    it("fails the job through the download-job module, and the user is told once", async () => {
+        acquire.mockResolvedValue({ success: false, error: "No indexer has it" } as any);
+
+        const res = await tap().expect(200);
+        await acquisitionSettled();
+
+        const job = await prisma.downloadJob.findUniqueOrThrow({ where: { id: res.body.jobId } });
+        expect(job).toMatchObject({ status: "failed", error: "No indexer has it" });
+        expect(job.metadata).toMatchObject({ statusText: "No indexer has it", notificationSent: true });
+        expect(await prisma.notification.count({ where: { userId: USER, type: "download_failed" } })).toBe(1);
+    });
+
+    it("fails the job the same way when the acquisition throws", async () => {
+        acquire.mockRejectedValue(new Error("Lidarr unreachable"));
+
+        const res = await tap().expect(200);
+        await acquisitionSettled();
+
+        const job = await prisma.downloadJob.findUniqueOrThrow({ where: { id: res.body.jobId } });
+        expect(job).toMatchObject({ status: "failed", error: "Lidarr unreachable" });
+        expect(await prisma.notification.count({ where: { userId: USER, type: "download_failed" } })).toBe(1);
+    });
+
+    it("does not overwrite a job a webhook already completed, and tells nobody of a failure", async () => {
+        acquire.mockImplementation(async (_release, ctx: any) => {
+            await downloadJobs.complete([{ id: ctx.existingJobId }]);
+            return { success: false, error: "late" } as any;
+        });
+
+        const res = await tap().expect(200);
+        await acquisitionSettled();
+        // A wrongful write is not tracked by the module, so give it time to land before reading.
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        const job = await prisma.downloadJob.findUniqueOrThrow({ where: { id: res.body.jobId } });
+        expect(job.status).toBe("completed");
+        expect(job.error).toBeNull();
+        expect(await prisma.notification.count({ where: { userId: USER, type: "download_failed" } })).toBe(0);
+    });
 });
