@@ -109,4 +109,39 @@ describe("checking an import's downloads", () => {
         expect(requestScan).not.toHaveBeenCalled();
         expect(await row(id)).toMatchObject({ status: "completed", progress: 100 });
     });
+
+    it("has the import marked as scanning before the scan is asked for", async () => {
+        const id = await downloading(["completed"]);
+        let statusAtRequest: string | undefined;
+        (requestScan as jest.Mock).mockImplementationOnce(async () => {
+            statusAtRequest = (await row(id))?.status;
+            return { queued: true, jobId: "scan-1" };
+        });
+
+        await spotifyImportService.checkImportCompletion(id);
+
+        expect(statusAtRequest).toBe("scanning");
+    });
+
+    it("asks for no scan when another process already moved the import on", async () => {
+        const id = await downloading(["completed"]);
+        (requestScan as jest.Mock).mockClear();
+        await prisma.spotifyImportJob.update({ where: { id }, data: { status: "creating_playlist", progress: 90 } });
+
+        await spotifyImportService.checkImportCompletion(id);
+
+        expect(requestScan).not.toHaveBeenCalled();
+        expect(await row(id)).toMatchObject({ status: "creating_playlist", progress: 90 });
+    });
+
+    it("puts the import back to waiting when the scan cannot be asked for, so the next check tries again", async () => {
+        const id = await downloading(["completed"]);
+        (requestScan as jest.Mock).mockRejectedValueOnce(new Error("queue down"));
+
+        await expect(spotifyImportService.checkImportCompletion(id)).rejects.toThrow("queue down");
+        expect(await row(id)).toMatchObject({ status: "downloading" });
+
+        await spotifyImportService.checkImportCompletion(id);
+        expect(await row(id)).toMatchObject({ status: "scanning", progress: 75 });
+    });
 });

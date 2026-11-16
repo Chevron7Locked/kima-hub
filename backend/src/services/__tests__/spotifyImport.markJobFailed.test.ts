@@ -4,6 +4,13 @@
  * The real notification service on the real database.
  */
 
+const loggerLines: string[] = [];
+jest.mock("../../utils/playlistLogger", () => {
+    const actual = jest.requireActual("../../utils/playlistLogger");
+    const logger = new Proxy({}, { get: () => (message: unknown) => { if (typeof message === "string") loggerLines.push(message); } });
+    return { ...actual, createPlaylistLogger: () => logger };
+});
+
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { spotifyImportService } from "../spotifyImport";
@@ -12,14 +19,14 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 const USER = "sif_user";
 const JOB = "sif_job";
 
-const importJob = (pendingTracks: unknown[]) =>
+const importJob = (pendingTracks: unknown[], status = "downloading") =>
     prisma.spotifyImportJob.create({
         data: {
             id: JOB,
             userId: USER,
             spotifyPlaylistId: "pl",
             playlistName: "Road Trip",
-            status: "downloading",
+            status,
             albumsTotal: 1,
             tracksTotal: 1,
             pendingTracks: pendingTracks as any,
@@ -75,4 +82,47 @@ it("tells the user once and keeps a partly matched import", async () => {
 
     expect((await trayRows()).map((n) => n.message)).toEqual(['"Road Trip": Worker crashed']);
     expect((await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: JOB } })).status).toBe("failed");
+});
+
+describe("a late worker failure", () => {
+    // Give the tray the time it would need to show a row, so "no row" is a real answer.
+    const settle = () => new Promise((r) => setTimeout(r, 300));
+
+    it("does not announce a failure for an import that completed meanwhile, and leaves it completed", async () => {
+        await importJob([{ artist: "Interpol", title: "Evil", preMatchedTrackId: "t1" }], "completed");
+
+        await spotifyImportService.markJobFailed(JOB, "Worker crashed");
+        await settle();
+
+        expect(await trayRows()).toEqual([]);
+        expect((await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: JOB } })).status).toBe("completed");
+    });
+
+    it("does not announce, or remove, a completed import that kept no matched listing", async () => {
+        await importJob([{ artist: "Interpol", title: "Evil" }], "completed");
+
+        await spotifyImportService.markJobFailed(JOB, "Worker crashed");
+        await settle();
+
+        expect(await trayRows()).toEqual([]);
+        expect((await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: JOB } })).status).toBe("completed");
+    });
+
+    it("lets go of the import's log, so a later cancel does not find it", async () => {
+        loggerLines.length = 0;
+        const preview = {
+            summary: { total: 1, inLibrary: 1 },
+            albumsToDownload: [],
+            matchedTracks: [{ spotifyTrack: { spotifyId: "s1", title: "Evil", artist: "Interpol", album: "A", albumId: "" }, localTrack: { id: "t1" } }],
+        } as never;
+        const started = await spotifyImportService.startImport(USER, "pl", "Road Trip", [], preview);
+        await spotifyImportService.markJobFailed(started.id, "Worker crashed");
+        loggerLines.length = 0;
+
+        await spotifyImportService.cancelJob(started.id);
+
+        expect(loggerLines).not.toContain("Job cancelled by user");
+        await prisma.spotifyImportJob.deleteMany({ where: { id: started.id } });
+        await redisClient.del(`import:job:${started.id}`);
+    });
 });

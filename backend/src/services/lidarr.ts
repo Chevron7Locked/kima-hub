@@ -409,7 +409,7 @@ class LidarrService {
             // request takes the tag off, so Discover's cleanup leaves the artist alone.
             const discoveryTagId = await this.getOrCreateDiscoveryTag();
             let discoveryOwned = !!discoveryTagId && !!artist.tags?.includes(discoveryTagId);
-            if (discovery && !discoveryOwned && discoveryTagId) {
+            if (isDiscovery && !discoveryOwned && discoveryTagId) {
                 // An earlier cleanup could take the tag off an artist that is Discover's by Kima's records; put it
                 // back here too, or Discover refuses that artist for good. Discover brings the check, because the
                 // module that holds it imports this one.

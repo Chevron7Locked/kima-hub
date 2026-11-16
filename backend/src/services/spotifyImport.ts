@@ -850,6 +850,9 @@ function recordDownloadsCheck(job: ImportJob, fields: { status?: ImportJob["stat
   );
 }
 
+/** Every state but scanning: the write that undoes the move to scanning leaves an import that has moved on since. */
+const NOT_SCANNING: ImportJob["status"][] = ["pending", "fetching", "downloading", "creating_playlist", "completed", "failed", "cancelled"];
+
 /** A new import job's id. */
 const newImportJobId = () => `import_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
@@ -2062,31 +2065,35 @@ class SpotifyImportService {
       `All ${finalStatuses.length} download jobs finished (${finalCompleted} completed, ${finalFailed} failed)`,
     );
 
-    // The counting above took time, and the cache read at the top can be older still: a scan is not asked for an import
-    // that was cancelled, closed or handed on meanwhile.
-    const current = await prisma.spotifyImportJob.findUnique({ where: { id: importJobId }, select: { status: true } });
-    if (!current || NOT_WAITING_FOR_DOWNLOADS.includes(current.status as ImportJob["status"])) {
-      logger.debug(`   Job is ${current?.status ?? "gone"}, no scan requested`);
-      return;
-    }
-
-    const { requestScan } = await import("../workers/scanRequest");
-    const scanResult = await requestScan({
-      userId: job.userId,
-      source: "spotify-import",
-      spotifyImportJobId: importJobId,
-    });
-
-    jobLogger?.info(
-      scanResult.queued
-        ? `Queued library scan (bullJobId=${scanResult.jobId})`
-        : `Library scan not re-queued: ${scanResult.reason}`,
-    );
-
+    // The counting above took time, and the cache read at the top can be older still, so the import is claimed first:
+    // a scan is asked for only when this write finds it still waiting, not when it was cancelled, closed or handed on.
+    const waitingProgress = job.progress;
     job.status = "scanning";
     job.progress = 75;
     job.updatedAt = new Date();
-    await recordDownloadsCheck(job, { status: "scanning" });
+    if (!(await recordDownloadsCheck(job, { status: "scanning" }))) {
+      logger.debug(`   Job is no longer waiting for its downloads, no scan requested`);
+      return;
+    }
+
+    try {
+      const { requestScan } = await import("../workers/scanRequest");
+      const scanResult = await requestScan({
+        userId: job.userId,
+        source: "spotify-import",
+        spotifyImportJobId: importJobId,
+      });
+
+      jobLogger?.info(
+        scanResult.queued
+          ? `Queued library scan (bullJobId=${scanResult.jobId})`
+          : `Library scan not re-queued: ${scanResult.reason}`,
+      );
+    } catch (error) {
+      // No scan is coming, so none will move the import on: back to waiting, and the next check asks again.
+      await updateImportJobFields(importJobId, { status: "downloading", progress: waitingProgress }, NOT_SCANNING);
+      throw error;
+    }
   }
 
   /** Builds the import's playlist once the scan that followed its downloads is done (the scan processor asks). */
@@ -3379,43 +3386,57 @@ class SpotifyImportService {
    * some tracks is kept so the user can see what happened.
    */
   async markJobFailed(importJobId: string, errorMessage: string): Promise<void> {
-    const job = await getImportJob(importJobId);
-    if (!job) return;
-    job.error = errorMessage;
-    notifyImportFailed(job);
+    try {
+      const job = await getImportJob(importJobId);
+      if (!job) return;
+      job.error = errorMessage;
 
-    const hasMatchedTracks = (job.pendingTracks || []).some(
-      (t) => t.preMatchedTrackId,
-    );
-
-    if (!hasMatchedTracks) {
-      logger.info(
-        `[Spotify Import] Job ${importJobId} failed with zero matched tracks, cleaning up`,
+      const hasMatchedTracks = (job.pendingTracks || []).some(
+        (t) => t.preMatchedTrackId,
       );
 
-      eventBus.emit({
-        type: "import:progress",
-        userId: job.userId,
-        payload: {
-          jobId: job.id,
-          playlistName: job.playlistName,
-          status: "failed",
-          progress: 0,
-          albumsTotal: job.albumsTotal,
-          albumsCompleted: job.albumsCompleted,
-          tracksMatched: 0,
-          tracksTotal: job.tracksTotal,
-          error: errorMessage,
-        },
-      });
+      // A late failure handler does not turn an import that completed or was cancelled meanwhile into a failed one,
+      // and only a failure that was written is announced.
+      if (!hasMatchedTracks) {
+        const { count } = await prisma.spotifyImportJob.updateMany({
+          where: { id: importJobId, status: { notIn: ["completed", "cancelled"] } },
+          data: { status: "failed", error: errorMessage, updatedAt: new Date() },
+        });
+        if (count === 0) return;
+        notifyImportFailed(job);
 
-      await this.cleanupImportArtifacts(importJobId);
-      return;
+        logger.info(
+          `[Spotify Import] Job ${importJobId} failed with zero matched tracks, cleaning up`,
+        );
+
+        eventBus.emit({
+          type: "import:progress",
+          userId: job.userId,
+          payload: {
+            jobId: job.id,
+            playlistName: job.playlistName,
+            status: "failed",
+            progress: 0,
+            albumsTotal: job.albumsTotal,
+            albumsCompleted: job.albumsCompleted,
+            tracksMatched: 0,
+            tracksTotal: job.tracksTotal,
+            error: errorMessage,
+          },
+        });
+
+        await this.cleanupImportArtifacts(importJobId);
+        return;
+      }
+
+      // Only the status and the error: the counts and the listing are whatever a dismissal or a scan left them.
+      if (await updateImportJobFields(importJobId, { status: "failed", error: errorMessage }, ["completed", "cancelled"])) {
+        notifyImportFailed(job);
+      }
+    } finally {
+      // The import is over for this process, whichever way it ended.
+      jobLoggers.delete(importJobId);
     }
-
-    // Only the status and the error: the counts and the listing are whatever a dismissal or a scan left them.
-    // A late failure handler does not turn an import that completed or was cancelled meanwhile into a failed one.
-    await updateImportJobFields(importJobId, { status: "failed", error: errorMessage }, ["completed", "cancelled"]);
   }
 }
 
