@@ -101,24 +101,22 @@ export interface ListenScope {
 /**
  * `nameKey` (nameFold.ts) as SQL, for a column or expression: trimmed, unaccented, lowercased, with everything
  * but letters and digits removed. A name with no letters or digits keeps itself, so "!!!" still finds "!!!" rather than
- * every other name made of symbols. The argument is a fixed column expression written here, never a value. Unlike
- * `nameKey` it does not compose decomposed text first: Postgres can only do that on a UTF8 database, and this must run
- * on any.
+ * every other name made of symbols. The argument is a fixed column expression written in code, never a value (it is
+ * exported only so the fold can be checked against `nameKey` on a real database). Unlike `nameKey` it does not compose
+ * decomposed text first: Postgres can only do that on a UTF8 database, and this must run on any.
  */
 export function nameKeySql(expr: string): Prisma.Sql {
-    return Prisma.raw(nameKeySqlText(expr));
-}
-
-function nameKeySqlText(expr: string): string {
-    return `coalesce(nullif(regexp_replace(lower(unaccent(kima_text_trim(${expr}))), '[^[:alnum:]]', '', 'g'), ''), ${expr})`;
+    return Prisma.raw(
+        `coalesce(nullif(regexp_replace(lower(unaccent(kima_text_trim(${expr}))), '[^[:alnum:]]', '', 'g'), ''), ${expr})`,
+    );
 }
 
 /**
- * The folded edited title and the folded file title of an album or song, as a set-returning function to put after
- * `CROSS JOIN LATERAL`, so a kept name is compared with either by a plain equality the planner can hash.
+ * The folded edited title and the folded file title of the album or song a table alias names, as a set-returning function
+ * to put after `CROSS JOIN LATERAL`, so a kept name is compared with either by a plain equality the planner can hash.
  */
-function shownOrFileTitleKeys(alias: "ka" | "k" | "b"): Prisma.Sql {
-    return Prisma.raw(`unnest(ARRAY[${nameKeySqlText(`${alias}."displayTitle"`)}, ${nameKeySqlText(`${alias}.title`)}])`);
+function shownOrFileTitleKeys(table: "ka" | "k" | "b"): Prisma.Sql {
+    return Prisma.sql`unnest(ARRAY[${nameKeySql(`${table}."displayTitle"`)}, ${nameKeySql(`${table}.title`)}])`;
 }
 
 /**
