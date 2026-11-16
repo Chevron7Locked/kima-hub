@@ -4,7 +4,7 @@
  * Real database; no mocks.
  */
 import { prisma } from "../../../utils/db";
-import { lockPlayHistory } from "../../playRecording";
+import { PLAY_HISTORY_LOCK_NAMESPACE, lockPlayHistory } from "../../playRecording";
 import { deleteAlbums, deleteArtists, deleteSongs } from "../albumDelete";
 import { adoptKeptPlays } from "../songHistory";
 
@@ -13,6 +13,7 @@ const id = (n: string) => `${P}${n}`;
 const REC = "11111111-1111-4111-8111-111111111111";
 const REC2 = "22222222-2222-4222-8222-222222222222";
 
+// Plays go first: a song or artist deleted under a play that kept nothing fails on the Play check.
 async function clear(): Promise<void> {
     await prisma.play.deleteMany({ where: { userId: { in: [id("user"), id("user2")] } } });
     await prisma.shareLink.deleteMany({ where: { token: { startsWith: P } } });
@@ -351,7 +352,7 @@ describe("adoptKeptPlays: a returning recording takes back its kept plays", () =
         await prisma.$transaction(async (tx) => {
             expect(await adoptKeptPlays(tx)).toBe(1);
             const [{ locked }] = await prisma.$queryRaw<Array<{ locked: boolean }>>`
-                SELECT pg_try_advisory_xact_lock(7002::int, hashtext(${id("user")})) AS locked`;
+                SELECT pg_try_advisory_xact_lock(${PLAY_HISTORY_LOCK_NAMESPACE}::int, hashtext(${id("user")})) AS locked`;
             expect(locked).toBe(false);
         });
     });

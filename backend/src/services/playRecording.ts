@@ -125,7 +125,7 @@ async function lockPlayDedupe(
 export const PLAY_HISTORY_REPAIR_MAX_MS = 5 * 60_000;
 
 /** A second namespace, for the lock on one listener's whole play history (see `lockPlayHistory`). */
-const PLAY_HISTORY_LOCK_NAMESPACE = 7002;
+export const PLAY_HISTORY_LOCK_NAMESPACE = 7002;
 
 /**
  * Guards one listener's play history as a whole. Recording a play takes it shared, so recordings never wait for one

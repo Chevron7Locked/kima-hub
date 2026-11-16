@@ -159,7 +159,7 @@ async function keepPlays(tx: Tx, ids: string[]): Promise<void> {
         UPDATE "Play" p
            SET "keptTitle" = COALESCE(t."displayTitle", t.title),
                "keptArtistName" = ar.name,
-               "keptAlbumTitle" = al.title,
+               "keptAlbumTitle" = COALESCE(al."displayTitle", al.title),
                "keptRecordingMbid" = t."recordingMbid",
                "keptDuration" = t.duration
           FROM "Track" t
@@ -261,7 +261,8 @@ export async function adoptKeptPlays(db: Tx | typeof prisma = prisma, mbids?: st
     };
     if (db !== prisma) return attach(db as Tx);
     try {
-        return await prisma.$transaction(attach);
+        // A whole library's kept plays can outlast Prisma's 5 s default; the sweep allows itself the same.
+        return await prisma.$transaction(attach, { timeout: 120_000 });
     } catch (error) {
         // The chosen song was deleted between the question and the write (the foreign key says so): the plays stay kept,
         // and the next scan or identification asks again.

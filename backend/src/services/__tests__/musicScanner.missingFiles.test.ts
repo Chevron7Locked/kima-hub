@@ -86,6 +86,8 @@ async function seedChildren(trackId: string): Promise<void> {
 async function wipe(): Promise<void> {
     // Track deletion cascades to play/liked/stage/embedding. The rows are
     // wiped by the values the scan itself wrote, since the ids are cuids.
+    // Plays first: a song deleted under a play that kept nothing fails on the Play check.
+    await prisma.$executeRawUnsafe(`DELETE FROM "Play" WHERE "userId" = $1`, USER);
     await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE "filePath" = $1`, REL);
     await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE "rgMbid" = $1`, RG_MBID);
     await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE name = $1`, ARTIST_NAME);

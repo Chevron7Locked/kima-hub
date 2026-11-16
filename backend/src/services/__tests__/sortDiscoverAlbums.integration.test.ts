@@ -88,6 +88,8 @@ async function plays(key: string, songs: number[]) {
 }
 
 async function cleanup() {
+    // Plays first: a song deleted under a play that kept nothing fails on the Play check.
+    await prisma.play.deleteMany({ where: { userId: USER } });
     await prisma.playlist.deleteMany({ where: { userId: USER } });
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await prisma.discoveryBatch.deleteMany({ where: { userId: USER } });

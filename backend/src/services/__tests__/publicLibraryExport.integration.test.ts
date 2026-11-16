@@ -92,6 +92,8 @@ afterAll(async () => {
         `DELETE FROM track_embeddings WHERE track_id = ANY($1)`,
         ["trk_a", "trk_b", "trk_c", "trk_unmapped", "trk_unanalysed", "trk_suggested", "trk_missing"],
     );
+    // Plays first: a song deleted under a play that kept nothing fails on the Play check.
+    await prisma.$executeRawUnsafe(`DELETE FROM "Play" WHERE "userId" = ANY($1)`, ["usr_pub", "usr_other"]);
     await prisma.$executeRawUnsafe(
         `DELETE FROM "Track" WHERE id = ANY($1)`,
         ["trk_a", "trk_b", "trk_c", "trk_unmapped", "trk_unanalysed", "trk_suggested", "trk_missing"],
