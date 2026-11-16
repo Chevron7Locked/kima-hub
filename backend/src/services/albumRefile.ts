@@ -15,6 +15,7 @@ import { artistIdentityKey, artistSortName, normalizeArtistName, resolveArtist }
 import { albumFolder, electAlbumArtist, fileCredit, isOldCut, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
 import { moveAlbumRgMbid, moveDiscoverExclusions, moveDiscoveryAlbums, moveOwnerArtist, moveOwnership } from "./mbidReassign";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
+import { deleteAlbums, deleteArtists } from "./library/albumDelete";
 import { artistIsListed, markLibraryChangedQuietly } from "./libraryChanged";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 import { backfillAllArtistCounts } from "./artistCountsService";
@@ -293,11 +294,10 @@ async function restoreCutName(mbid: string, filesName: string): Promise<string |
                         await tx.album.update({ where: { id: row.id }, data: { artistId: current.id } });
                     }
                 }
-                // Every ownership record of the twin, with an album row or not.
-                for (const owned of await tx.ownedAlbum.findMany({ where: { artistId: twin.id }, select: { rgMbid: true } })) {
-                    await moveOwnerArtist(tx, twin.id, current.id, owned.rgMbid);
-                }
-                await tx.artist.delete({ where: { id: twin.id } });
+                // Every ownership record of the twin, with an album row or not, goes to the artist that stays. Its albums
+                // are all moved or retired by now, so the delete owes no one a word: the run's end rebuilds Discover's
+                // snapshot and recounts the artists.
+                await deleteArtists([twin.id], { within: tx, keepsTo: current.id });
             }
             await tx.artist.update({
                 where: { id: current.id },
@@ -436,7 +436,9 @@ async function retireIfEmpty(tx: Tx, staleRow: AlbumRow, staleKeeper: AlbumRow, 
     const row = await tx.album.findUnique({ where: { id: staleRow.id }, select: ALBUM_FIELDS });
     if (!row || (await tx.track.count({ where: { albumId: row.id } })) > 0) return keeper;
 
-    await tx.album.delete({ where: { id: row.id } });
+    // Its songs are gone, so it was listed to no one and holds no playlist entry: nothing to tell afterwards, and the run's
+    // end rebuilds Discover's snapshot and recounts the artists.
+    await deleteAlbums([row.id], { within: tx });
     // Share links name an album by id with no foreign key: they follow the album to the survivor.
     await tx.shareLink.updateMany({ where: { entityType: "album", entityId: row.id }, data: { entityId: keeper.id } });
     const details = {
