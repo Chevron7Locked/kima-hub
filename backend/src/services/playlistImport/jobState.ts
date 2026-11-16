@@ -4,6 +4,8 @@ import { notificationService } from "../notificationService";
 import { prisma, Prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { eventBus } from "../eventBus";
+import * as jobMoves from "../downloads/jobs";
+import { ACTIVE_STATUSES } from "../downloads/jobStatuses";
 import type { ImportJob } from "./types";
 export const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
 
@@ -88,11 +90,29 @@ export const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed
 
 /**
  * Fails an import from outside the import (the stuck-work check, the stale-job cleanup). It leaves only a state that is
- * not final, so an import another path completed, cancelled or failed keeps its outcome and its reason, and it tells the
- * person's open import page. False when the import was already closed or is gone.
+ * not final, so an import another path completed, cancelled or failed keeps its outcome and its reason. When it fails the
+ * import it tells the person's open import page and their notification tray (as every other failure of an import does),
+ * and cancels the import's downloads still pending or processing, so nothing goes on fetching for an import that is
+ * over. The import is failed first: the check each cancelled download asks of its import then finds it closed and
+ * leaves it, with its reason, and tells nobody again. A download that cannot be cancelled is logged, not raised: the
+ * import has failed either way. False, and nothing else done, when the import was already closed or is gone.
  */
-export function failImportJob(importJobId: string, error: string): Promise<boolean> {
-  return updateImportJobFields(importJobId, { status: "failed", error }, CLOSED_IMPORT_STATES);
+export async function failImportJob(importJobId: string, error: string): Promise<boolean> {
+  if (!(await updateImportJobFields(importJobId, { status: "failed", error }, CLOSED_IMPORT_STATES))) return false;
+
+  const row = await prisma.spotifyImportJob.findUnique({ where: { id: importJobId } });
+  if (row) notifyImportFailed(toImportJob(row));
+
+  try {
+    const running = await prisma.downloadJob.findMany({
+      where: { metadata: { path: ["spotifyImportJobId"], equals: importJobId }, status: { in: ACTIVE_STATUSES } },
+      select: { id: true },
+    });
+    if (running.length > 0) await jobMoves.cancel(running, "Import failed");
+  } catch (cancelError) {
+    logger.error(`[Spotify Import] Job ${importJobId}: could not cancel its downloads:`, cancelError);
+  }
+  return true;
 }
 
 /**
