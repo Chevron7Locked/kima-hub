@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Subsonic songs show their own genre tags** when Kima has them, and their album's genres otherwise.
+- **Subsonic apps on a server not set to UTC no longer see the library change time hours off.**
 - **Subsonic genre filters match the genre exactly:** "rock" no longer also lists "punk rock". Kima radio and stations keep their broader match.
 - **Subsonic apps that read the OpenSubsonic genre list see every genre** an album or song shows.
 - **A shared link never streams a play it didn't count.** A second request from the same listener waits briefly for the first one's play to be counted, and is refused at the play limit or asked to try again if it wasn't.
