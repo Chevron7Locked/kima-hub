@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A song that can't be read answers a clean error** instead of a broken half-reply, and an empty file answers "not found" however a player asks for it.
+- **A shared link's play isn't given back while the same listener is still streaming it** from a second request.
 - **A shared link's play counts only once audio reaches the listener.** A listener who disconnects before the audio starts, or an app that only checks the song, no longer uses up one of the link's plays.
 - **Subsonic apps show the same album year as the web:** your own year edit first, then the original release year, in album lists, year filters, random songs and sorting.
 - **Albums in Subsonic apps show the album's own genres,** falling back to the artist's.
