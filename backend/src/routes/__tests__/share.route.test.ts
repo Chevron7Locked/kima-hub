@@ -10,7 +10,7 @@ import jwt from 'jsonwebtoken';
 import sharp from 'sharp';
 import fs from 'fs';
 import http from 'http';
-import type { AddressInfo } from 'net';
+import type { AddressInfo, Socket } from 'net';
 import path from 'path';
 import shareRoutes, { settleShareBackgroundWork } from '../../routes/share';
 import { prisma } from '../../utils/db';
@@ -718,6 +718,17 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             expect(await playsOf(token)).toBe(1);
         });
 
+        it('counts no play for a HEAD request, which sends no audio', async () => {
+            const { token, id } = await own({ maxPlays: 1 });
+
+            const res = await request(app).head(`/share/${token}/stream/${songs.playable}`);
+            await settleShareBackgroundWork();
+
+            expect(res.status).toBe(200);
+            expect(await playsOf(token)).toBe(0);
+            expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+        });
+
         it('still refuses a follow-up request once the link has expired', async () => {
             const { token } = await own({ maxPlays: 1 });
             await get(token, songs.playable);
@@ -1371,6 +1382,86 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             } finally {
                 stall.release();
                 stall.restore();
+                await new Promise((resolve) => server.close(resolve));
+            }
+
+            expect(await playsOf(token)).toBe(0);
+            expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+        });
+
+        it('does not keep a play whose listener left after the headers went out and before any audio did', async () => {
+            const { token, id } = await own({ maxPlays: 1 });
+            const server = http.createServer(app).listen(0);
+            const sockets: Socket[] = [];
+            const closed: Promise<void>[] = [];
+            server.on('connection', (socket) => {
+                sockets.push(socket);
+                closed.push(new Promise((resolve) => socket.once('close', () => resolve())));
+            });
+            // The streaming module is stood in for: it sends the headers, the connection then goes in the same turn (the
+            // response has not heard of it), and the first of the audio is written to it.
+            let wrote!: () => void;
+            const written = new Promise<void>((resolve) => (wrote = resolve));
+            const streaming = jest.spyOn(AudioStreamingService.prototype, 'streamFileWithRangeSupport').mockImplementation(async (_req, res) => {
+                res.status(200).set({ 'Accept-Ranges': 'bytes', 'Content-Length': '4' });
+                res.flushHeaders();
+                sockets.forEach((socket) => socket.destroy());
+                res.write(Buffer.from('abcd'));
+                wrote();
+            });
+            try {
+                const { port } = server.address() as AddressInfo;
+                over(port, `/share/${token}/stream/${songs.playable}`).then(drain).catch(() => undefined);
+                await written;
+                await Promise.all(closed);
+                await settleShareBackgroundWork();
+            } finally {
+                streaming.mockRestore();
+                await new Promise((resolve) => server.close(resolve));
+            }
+
+            expect(await playsOf(token)).toBe(0);
+            expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+        });
+
+        it('takes no window and counts no play for a listener who left before the window was taken', async () => {
+            const { token, id } = await own({ maxPlays: 1 });
+            const server = http.createServer(app).listen(0);
+            const closed: Promise<void>[] = [];
+            server.on('connection', (socket) => closed.push(new Promise((resolve) => socket.once('close', () => resolve()))));
+            // The look for the listener's window is held, so the listener can go before the window would be taken.
+            const realGet = redisClient.get.bind(redisClient) as (key: string) => Promise<string | null>;
+            let release!: () => void;
+            let reached!: () => void;
+            const gate = new Promise<void>((resolve) => (release = resolve));
+            const held = new Promise<void>((resolve) => (reached = resolve));
+            let looked!: () => void;
+            const answered = new Promise<void>((resolve) => (looked = resolve));
+            const look = jest.spyOn(redisClient, 'get').mockImplementation(((key: string) =>
+                key.startsWith('share:play:')
+                    ? (reached(), gate.then(() => realGet(key)).then((value) => (looked(), value)))
+                    : realGet(key)) as never);
+            const taking = jest.spyOn(redisClient, 'set');
+            const counting = jest.spyOn(prisma, '$executeRaw');
+            try {
+                const { port } = server.address() as AddressInfo;
+                const asking = http.get({ host: '127.0.0.1', port, path: `/share/${token}/stream/${songs.playable}`, headers: { 'User-Agent': 'one-listener' } });
+                asking.on('error', () => undefined);
+                await held;
+                asking.destroy();
+                await Promise.all(closed);
+                release();
+                // The request goes on in the turn the look answers in: by the next turn it has taken a window, or has not.
+                await answered;
+                await new Promise((resolve) => setImmediate(resolve));
+                await settleShareBackgroundWork();
+                expect(taking.mock.calls.filter(([key]) => String(key).startsWith('share:play:'))).toEqual([]);
+                expect(counting).not.toHaveBeenCalled();
+            } finally {
+                release();
+                look.mockRestore();
+                taking.mockRestore();
+                counting.mockRestore();
                 await new Promise((resolve) => server.close(resolve));
             }
 

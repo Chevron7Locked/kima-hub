@@ -340,13 +340,30 @@ async function countPlay(shareId: string): Promise<boolean> {
     return updated > 0;
 }
 
+/** Whether the listener is still there: the response is open and so is its socket (a response is the last to hear of a socket that went). */
+const listenerThere = (res: Response) => !res.destroyed && res.socket?.destroyed === false;
+
+/** The responses of a stream that had audio written to a connection still open. */
+const audioWritten = new WeakSet<Response>();
+
 /**
- * Whether the audio stream began: bytes went out. The streaming module sets 200 or 206 with the file's headers
- * (`Accept-Ranges`) just before it pipes, and the headers leave with the first chunk; every other end (304, 404, 416, 500,
- * a listener who left first) has another status, no such header, or nothing sent.
+ * Notes when audio is written to a listener who is still there: the streaming module sets 200 or 206 with the file's headers
+ * (`Accept-Ranges`) and pipes the file, so a chunk written under those headers to a connection that is still open is the
+ * audio reaching the listener. Headers that went out alone do not count, nor a chunk written to a connection that has gone
+ * (it is dropped), nor a HEAD (its body is never sent), nor any other answer (304, 404, 416, 500).
  */
-const streamStarted = (res: Response) =>
-    (res.statusCode === 200 || res.statusCode === 206) && res.getHeader("Accept-Ranges") !== undefined && res.headersSent;
+function watchAudio(res: Response): void {
+    const write = res.write.bind(res) as (...args: unknown[]) => boolean;
+    res.write = ((chunk: unknown, ...rest: unknown[]) => {
+        const isAudio = (res.statusCode === 200 || res.statusCode === 206) && res.getHeader("Accept-Ranges") !== undefined;
+        const hasBytes = (typeof chunk === "string" || chunk instanceof Uint8Array) && chunk.length > 0;
+        if (isAudio && hasBytes && res.req.method !== "HEAD" && listenerThere(res)) audioWritten.add(res);
+        return write(chunk, ...rest);
+    }) as Response["write"];
+}
+
+/** Whether the audio stream began: audio was written to a listener still there. */
+const streamStarted = (res: Response) => audioWritten.has(res);
 
 /** The longest a response waits for its play to be given back before it ends: a stalled database must not hold a listener's connection open. */
 const TAKE_BACK_WAIT_MS = 3000;
@@ -584,6 +601,7 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
         // Only a request that will be answered with audio reaches the window: one that is refused above (not in the share,
         // not playable, no file) neither joins a play nor keeps its window alive.
         //
+        watchAudio(res);
         // A listener's follow-up requests (a seek, the next range) belong to a play already counted for that listener: they
         // are not a new play, and the limit, which that play may just have reached, does not apply to them. Expiry still
         // does. Another listener's play is not this one's: it has its own window.
@@ -596,6 +614,8 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
             if (outOfPlays(shareLink)) {
                 return sendEnded(res, "play-limit");
             }
+            // A listener who has gone takes no window and counts no play: there is nobody to answer.
+            if (!listenerThere(res)) return;
             // The first request of a listener's play takes the window and counts it. A request that finds the window taken
             // belongs to that play: two requests of one listener arriving together are one play.
             const claim = await claimPlayWindow(playKey);
