@@ -82,6 +82,11 @@ function sendEnded(res: Response, reason: EndedReason): void {
     });
 }
 
+/** The play could not be started now: nothing streams, and the listener is asked to try again. */
+function sendTryAgain(res: Response): void {
+    res.status(503).set("Retry-After", "1").json({ error: "Could not start the play, try again" });
+}
+
 /** The share link for `token`, or null once the response has gone out: 404 unknown, 410 expired. */
 async function loadLiveShareLink(token: string, res: Response) {
     const shareLink = await prisma.shareLink.findUnique({ where: { token } });
@@ -141,25 +146,53 @@ export async function settleShareBackgroundWork(): Promise<void> {
 /**
  * A response of a play counts itself open while it streams, in a count kept under its window's token: it is added to as the
  * response begins, only while the window is still that token's, and every response renews it along with the window, and
- * the mark of the play having streamed (KEYS[3], when it is there).
+ * the mark of the play having streamed (KEYS[3], when it is there). Answers whether it was added, and the state of the
+ * play's count (KEYS[4]): "pending" while the response that took the window is still counting the play, "limit" or "error"
+ * when that failed, and "" once it is counted.
  */
 const OPEN_RESPONSE = `
-if redis.call("get", KEYS[1]) ~= ARGV[1] then return 0 end
+if redis.call("get", KEYS[1]) ~= ARGV[1] then return {0, ""} end
 redis.call("incr", KEYS[2])
 redis.call("pexpire", KEYS[2], ARGV[2])
 redis.call("pexpire", KEYS[3], ARGV[2])
 redis.call("pexpire", KEYS[1], ARGV[2])
-return 1`;
+return {1, redis.call("get", KEYS[4]) or ""}`;
 /**
  * A response is over. A response that streamed (ARGV[1] is "1") marks its play as played, in a key of its own because the
  * count is spent when the last response leaves and a later follow-up must still find the mark. Answers how many responses
- * of the play are still open after it (0 once the count is spent) and whether the play has been played.
+ * of the play are still open after it (0 once the count is spent), whether the play has been played, and whether the play
+ * is to be given back: the last response left and none of them streamed. In that same step the window (KEYS[3], while it
+ * holds ARGV[3]) is freed, so no request can join a play that is about to be given back.
  */
 const LEAVE_RESPONSE = `
 if ARGV[1] == "1" then redis.call("set", KEYS[2], "1", "PX", ARGV[2]) end
 local open = redis.call("decr", KEYS[1])
 if open <= 0 then redis.call("del", KEYS[1]) open = 0 end
-return {open, redis.call("exists", KEYS[2])}`;
+local played = redis.call("exists", KEYS[2])
+local refund = 0
+if ARGV[1] ~= "1" and open == 0 and played == 0 then
+  refund = 1
+  if redis.call("get", KEYS[3]) == ARGV[3] then redis.call("del", KEYS[3]) end
+end
+return {open, played, refund}`;
+/**
+ * The response that took a window has settled the counting of its play (KEYS[2] is the play's count state, KEYS[1] the
+ * window, KEYS[3] the count of responses open, KEYS[4] the played mark, ARGV[1] the token). Counted: the state is cleared.
+ * Not counted (ARGV[2] is "limit" or "error"): the window is freed while it is still this token's, so no later request
+ * follows a play that never was. Responses that joined meanwhile are still open, and read the state to learn why they do
+ * not stream, and the played mark is set for them (whether or not the claimer's own leaving set it), so none of them gives
+ * back a play that was never added; with none open, nothing of the play is left.
+ */
+const FINISH_COUNT = `
+if ARGV[2] == "counted" then return redis.call("del", KEYS[2]) end
+if tonumber(redis.call("get", KEYS[3]) or "0") > 0 then
+  redis.call("set", KEYS[2], ARGV[2], "PX", ARGV[3])
+  redis.call("set", KEYS[4], "1", "PX", ARGV[3])
+else
+  redis.call("del", KEYS[2], KEYS[4])
+end
+if redis.call("get", KEYS[1]) == ARGV[1] then redis.call("del", KEYS[1]) end
+return 1`;
 /**
  * Frees the window only while it holds this token, a window that ended and was taken again being another play's, and no
  * response of it is open. The play's played mark (KEYS[3]) goes with it.
@@ -173,8 +206,14 @@ return redis.call("del", KEYS[1])`;
 const PLAY_WINDOW_MS = PLAY_WINDOW_SECONDS * 1000;
 /** How often a request looks for its listener's window and tries to take it, before it streams without one. */
 const PLAY_JOIN_TURNS = 3;
+/** The longest a request that joined a play waits for the response that took the window to count it, and how often it looks. */
+const COUNT_WAIT_MS = 3000;
+const COUNT_POLL_MS = 25;
+/** How long a play's count reads "pending": well past the window, so a slow count is never read as a settled one. */
+const COUNT_PENDING_MS = 5 * 60 * 1000;
 const openCountKey = (token: string) => `share:open:${token}`;
 const playedKey = (token: string) => `share:played:${token}`;
+const countStateKey = (token: string) => `share:count:${token}`;
 
 /**
  * The window this listener's play of the song holds, as a claim, or null when there is none: a listener's requests keep one
@@ -206,10 +245,12 @@ interface PlayClaim {
     key: string;
     token: string | null;
     open: boolean;
+    /** The state of the play's count when this response was added to it: "pending", "limit", "error", or "" once counted. */
+    count: string;
     left: Promise<PlayAfterLeaving> | null;
 }
 
-const newClaim = (key: string, token: string | null): PlayClaim => ({ key, token, open: false, left: null });
+const newClaim = (key: string, token: string | null): PlayClaim => ({ key, token, open: false, count: "", left: null });
 
 /**
  * What renewing a window found: "renewed" while it held this token; "ended" when it ran out or another claim took it, which
@@ -246,33 +287,42 @@ async function renewClaim(claim: PlayClaim): Promise<Renewal> {
 async function openResponse(claim: PlayClaim): Promise<void> {
     if (claim.token === null) return;
     try {
-        claim.open = (await redisClient.eval(OPEN_RESPONSE, 3, claim.key, openCountKey(claim.token), playedKey(claim.token), claim.token, String(PLAY_WINDOW_MS))) === 1;
+        const [opened, count] = (await redisClient.eval(
+            OPEN_RESPONSE, 4, claim.key, openCountKey(claim.token), playedKey(claim.token), countStateKey(claim.token), claim.token, String(PLAY_WINDOW_MS),
+        )) as [number, string];
+        claim.open = opened === 1;
+        claim.count = count;
     } catch (error) {
         logger.warn(`[Share] Could not count a response of a play: ${(error as Error).message}`);
     }
 }
 
-/** What leaving left of a play: the responses of it still open, and whether any response of it has streamed. */
+/**
+ * What leaving left of a play: the responses of it still open, whether any response of it has streamed, and whether the
+ * play is to be given back (the window is already freed when it is).
+ */
 interface PlayAfterLeaving {
     open: number;
     played: boolean;
+    refund: boolean;
 }
 
 /**
  * This response is over, however often it is asked; `streamed` is whether it streamed audio, and the first ask decides. A
- * response that was never counted (Redis was down) leaves nothing open and nothing played.
+ * response that was never counted open (Redis was down, or its window had ended) leaves nothing open and nothing played,
+ * so its play is given back.
  */
 function leaveResponse(claim: PlayClaim, streamed: boolean): Promise<PlayAfterLeaving> {
     return (claim.left ??= track((async (): Promise<PlayAfterLeaving> => {
-        if (claim.token === null || !claim.open) return { open: 0, played: false };
+        if (claim.token === null || !claim.open) return { open: 0, played: false, refund: !streamed };
         try {
-            const [open, played] = (await redisClient.eval(
-                LEAVE_RESPONSE, 2, openCountKey(claim.token), playedKey(claim.token), streamed ? "1" : "0", String(PLAY_WINDOW_MS),
-            )) as [number, number];
-            return { open, played: played === 1 };
+            const [open, played, refund] = (await redisClient.eval(
+                LEAVE_RESPONSE, 3, openCountKey(claim.token), playedKey(claim.token), claim.key, streamed ? "1" : "0", String(PLAY_WINDOW_MS), claim.token,
+            )) as [number, number, number];
+            return { open, played: played === 1, refund: refund === 1 };
         } catch (error) {
             logger.warn(`[Share] Could not leave a play window's count: ${(error as Error).message}`);
-            return { open: 0, played: false };
+            return { open: 0, played: false, refund: !streamed };
         }
     })()));
 }
@@ -310,15 +360,27 @@ function keepWindowWhileOpen(res: Response, claim: PlayClaim): void {
     });
 }
 
-/** Takes the window for this play. Null when a request of the same play took it first; a claim with no token when Redis is down. */
+/**
+ * Takes the window for this play. Null when a request of the same play took it first; a claim with no token when Redis is
+ * down. The play's count is "pending" from before the window exists, so a request that finds the window always finds it.
+ */
 async function claimPlayWindow(key: string): Promise<PlayClaim | null> {
     const token = randomUUID();
     try {
-        return (await redisClient.set(key, token, "EX", PLAY_WINDOW_SECONDS, "NX")) === "OK" ? newClaim(key, token) : null;
+        await redisClient.set(countStateKey(token), "pending", "PX", COUNT_PENDING_MS);
+        if ((await redisClient.set(key, token, "EX", PLAY_WINDOW_SECONDS, "NX")) === "OK") return newClaim(key, token);
     } catch (error) {
         logger.warn(`[Share] Redis unavailable, counting every request: ${(error as Error).message}`);
         return newClaim(key, null);
     }
+    // Another request of the play took the window, so the state made for this try is of no use. Failing to clear it is only
+    // a key left to expire: this request still belongs to that play and must not count one of its own.
+    try {
+        await redisClient.del(countStateKey(token));
+    } catch (error) {
+        logger.warn(`[Share] Could not clear a play's count state: ${(error as Error).message}`);
+    }
+    return null;
 }
 
 /** Frees the window if it is still this claim's and no response of the play is open. */
@@ -329,6 +391,47 @@ async function releasePlayWindow(claim: PlayClaim): Promise<void> {
     } catch (error) {
         logger.warn(`[Share] Could not release a play window: ${(error as Error).message}`);
     }
+}
+
+/**
+ * The claimer has settled the counting of its play: "counted", or why it was not ("limit": the share had no play left;
+ * "error": counting failed). The requests that joined the play meanwhile read it, and a play that was not counted frees its
+ * window.
+ */
+async function finishCount(claim: PlayClaim, outcome: "counted" | "limit" | "error"): Promise<void> {
+    if (claim.token === null) return;
+    try {
+        await redisClient.eval(
+            FINISH_COUNT, 4, claim.key, countStateKey(claim.token), openCountKey(claim.token), playedKey(claim.token), claim.token, outcome, String(PLAY_WINDOW_MS),
+        );
+    } catch (error) {
+        logger.warn(`[Share] Could not settle the count of a play: ${(error as Error).message}`);
+    }
+}
+
+/**
+ * What a request that joined a play found of its count: "counted" (stream on), "limit" or "error" (the play was never
+ * counted, so it does not stream), "unsettled" when it was still being counted after COUNT_WAIT_MS, and "gone" when the
+ * listener left while it waited.
+ */
+type CountOutcome = "counted" | "limit" | "error" | "unsettled" | "gone";
+
+async function countOutcome(res: Response, claim: PlayClaim): Promise<CountOutcome> {
+    let state = claim.count;
+    const deadline = Date.now() + COUNT_WAIT_MS;
+    while (state === "pending" && claim.token !== null) {
+        if (!listenerThere(res)) return "gone";
+        if (Date.now() >= deadline) return "unsettled";
+        await new Promise((resolve) => setTimeout(resolve, COUNT_POLL_MS));
+        try {
+            state = (await redisClient.get(countStateKey(claim.token))) ?? "";
+        } catch (error) {
+            logger.warn(`[Share] Could not read the count of a play: ${(error as Error).message}`);
+            return "unsettled";
+        }
+    }
+    if (state === "") return "counted";
+    return state === "limit" ? "limit" : "error";
 }
 
 /** Counts one play if the share has one left, as one statement so two listeners cannot both take the last. */
@@ -398,8 +501,8 @@ function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, claim: PlayC
     let undone: Promise<void> | null = null;
     const undo = () =>
         (undone ??= track((async () => {
-            const after = await leaveResponse(claim, false);
-            if (after.open > 0 || after.played) return;
+            // Leaving decides whether the play goes back and frees its window in the same step.
+            if (!(await leaveResponse(claim, false)).refund) return;
             try {
                 await prisma.$executeRaw`
                     UPDATE "share_links" SET "playCount" = GREATEST("playCount" - 1, 0) WHERE "id" = ${shareId}
@@ -407,7 +510,8 @@ function keepPlayOnlyIfStreamStarts(res: Response, shareId: string, claim: PlayC
             } catch (error) {
                 logger.error(`[Share] Could not give back a play: ${(error as Error).message}`);
             }
-            await releasePlayWindow(claim);
+            // A response that was never counted open has no step above to free its window.
+            if (!claim.open) await releasePlayWindow(claim);
         })()));
 
     const end = res.end.bind(res) as (...args: unknown[]) => Response;
@@ -616,6 +720,11 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
                 // Watched from the moment it is counted open, so every way this request ends leaves the count.
                 keepPlayOnlyIfStreamStarts(res, shareLink.id, joined);
                 keepWindowWhileOpen(res, joined);
+                // A play that was never counted does not stream: it waits for the request that took the window to count it.
+                const outcome = await countOutcome(res, joined);
+                if (outcome === "gone") return;
+                if (outcome === "limit") return sendEnded(res, "play-limit");
+                if (outcome !== "counted") return sendTryAgain(res);
                 inPlay = true;
                 continue;
             }
@@ -633,24 +742,24 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
             try {
                 counted = await countPlay(shareLink.id);
             } catch (error) {
-                // The play was not counted, so the window it took must not let the listener's next request play free.
+                // The play was not counted, so the window it took must not let the listener's next request play free, and
+                // a request that joined it meanwhile must not stream it.
                 await leaveUncountedPlay(claim);
-                await releasePlayWindow(claim);
+                await finishCount(claim, "error");
                 throw error;
             }
             if (!counted) {
                 await leaveUncountedPlay(claim);
-                await releasePlayWindow(claim);
+                await finishCount(claim, "limit");
                 return sendEnded(res, "play-limit");
             }
+            await finishCount(claim, "counted");
             keepPlayOnlyIfStreamStarts(res, shareLink.id, claim);
             keepWindowWhileOpen(res, claim);
             inPlay = true;
         }
         // Never streamed outside a play: an unwatched response would be a play that is not counted.
-        if (!inPlay) {
-            return res.status(503).set("Retry-After", "1").json({ error: "Could not start the play, try again" });
-        }
+        if (!inPlay) return sendTryAgain(res);
 
         const mimeType = getMimeType(track.filePath);
         const streamingService = getAudioStreamingService(

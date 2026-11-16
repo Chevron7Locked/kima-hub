@@ -703,6 +703,32 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
         return { release, stalled, counted, restore: () => spy.mockRestore() };
     };
     const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    /**
+     * Holds the statement whose text contains `fragment` until `release`, then runs it, or fails it when `failWith` is given;
+     * `reached` says when it is held.
+     */
+    const holdStatement = (fragment: string, failWith?: Error) => {
+        const realExecute: any = prisma.$executeRaw.bind(prisma);
+        let release!: () => void;
+        let markReached!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        const reached = new Promise<void>((resolve) => (markReached = resolve));
+        const spy = jest.spyOn(prisma, '$executeRaw').mockImplementation(((...args: unknown[]) =>
+            String((args[0] as TemplateStringsArray)?.join?.(' ')).includes(fragment)
+                ? (markReached(), held.then(() => (failWith ? Promise.reject(failWith) : realExecute(...args))))
+                : realExecute(...args)) as never);
+        return { release, reached, restore: () => spy.mockRestore() };
+    };
+    /** Waits until `count` responses are open on the play this share's window holds. */
+    const openOn = async (shareId: string, count: number) => {
+        for (let tries = 0; tries < 200; tries++) {
+            const [key] = await redisClient.keys(`share:play:${shareId}*`);
+            const window = key ? await redisClient.get(key) : null;
+            if (window && Number(await redisClient.get(`share:open:${window}`)) === count) return;
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        throw new Error(`no ${count} responses open on the play of ${shareId}`);
+    };
 
     describe('counting plays', () => {
         it("serves a listener's follow-up requests for a play already counted, though the play limit is now reached", async () => {
@@ -906,8 +932,8 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                 // It waited for the take-back a few seconds, not until the stall ended (the case's own limit is 15 s).
                 expect(Date.now() - started).toBeLessThan(8_000);
                 expect(logged).toHaveBeenCalledWith(expect.stringContaining('Giving back a play'));
-                // The window is still held while the take-back has not finished.
-                expect(await redisClient.keys(`*${id}*`)).not.toEqual([]);
+                // The window was freed with the leaving, so nothing can join a play that is being given back.
+                expect(await redisClient.keys(`*${id}*`)).toEqual([]);
 
                 release();
                 await settleShareBackgroundWork();
@@ -1052,7 +1078,7 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
         });
 
         it('lets a request that lost the window to its own listener join the play, so a first request that then fails cannot give back a play it is streaming', async () => {
-            const { token } = await own({ maxPlays: 1 });
+            const { token, id } = await own({ maxPlays: 1 });
             const stall = stallCounting();
             // Both requests look for the listener's window before either has taken it, and so both find none.
             const realGet = redisClient.get.bind(redisClient) as (key: string) => Promise<string | null>;
@@ -1085,8 +1111,10 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                 answers[0]();
                 await stall.stalled;
                 answers[1]();
-                await heard;
+                // The one that lost the window joins the play, and waits for the one that took it to count it.
+                await openOn(id, 2);
                 stall.release();
+                await heard;
 
                 expect((await Promise.all(requests)).sort()).toEqual([200, 500]);
                 await settleShareBackgroundWork();
@@ -1125,6 +1153,155 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             expect(await playsOf(token)).toBe(0);
         });
 
+        describe('a request that joins a play while it is being counted', () => {
+            it('ends as play-limit, and streams nothing, when that play turns out not to be counted', async () => {
+                const { token, id } = await own({ maxPlays: 1 });
+                const stall = stallCounting();
+                const streaming = jest.spyOn(AudioStreamingService.prototype, 'streamFileWithRangeSupport');
+                const server = http.createServer(app).listen(0);
+                try {
+                    const { port } = server.address() as AddressInfo;
+                    const listen = (headers: Record<string, string> = {}) => over(port, `/share/${token}/stream/${songs.playable}`, headers).then(drain);
+                    const first = listen();
+                    await stall.stalled;
+                    const joiner = listen({ Range: 'bytes=5-' });
+                    await openOn(id, 2);
+                    // Another listener took the last play while this one was being counted.
+                    await prisma.shareLink.update({ where: { token }, data: { playCount: 1 } });
+                    stall.release();
+
+                    expect(await Promise.all([first, joiner])).toEqual([410, 410]);
+                    await settleShareBackgroundWork();
+                    expect(streaming).not.toHaveBeenCalled();
+                } finally {
+                    stall.release();
+                    stall.restore();
+                    streaming.mockRestore();
+                    server.closeAllConnections();
+                    server.close();
+                }
+                expect(await playsOf(token)).toBe(1);
+            }, 15_000);
+
+            it('is asked to try again, and streams nothing, when the count is still not settled after a few seconds, and leaves the play to the one counting it', async () => {
+                const { token, id } = await own();
+                const stall = stallCounting();
+                const streaming = jest.spyOn(AudioStreamingService.prototype, 'streamFileWithRangeSupport');
+                const server = http.createServer(app).listen(0);
+                try {
+                    const { port } = server.address() as AddressInfo;
+                    const listen = (headers: Record<string, string> = {}) => over(port, `/share/${token}/stream/${songs.playable}`, headers).then(drain);
+                    const first = listen();
+                    await stall.stalled;
+
+                    const joiner = await listen({ Range: 'bytes=5-' });
+                    expect(joiner).toBe(503);
+                    expect(streaming).not.toHaveBeenCalled();
+
+                    // The play is still the first request's: it is counted when its count answers, and streams.
+                    stall.release();
+                    expect(await first).toBe(200);
+                    await settleShareBackgroundWork();
+                } finally {
+                    stall.release();
+                    stall.restore();
+                    streaming.mockRestore();
+                    server.closeAllConnections();
+                    server.close();
+                }
+                expect(await playsOf(token)).toBe(1);
+                expect(await redisClient.keys(`*${id}*`)).not.toEqual([]);
+            }, 15_000);
+
+            it('does not give back a play that was never added when the one counting it was not counted open', async () => {
+                const { token, id } = await own({ maxPlays: 1 });
+                const logged = expectLog('warn');
+                // Redis fails the first request as it is counted open on its window, so the leaving of it leaves no played mark.
+                const failOpen = jest.spyOn(redisClient, 'eval').mockRejectedValueOnce(new Error('down'));
+                const stall = stallCounting();
+                const server = http.createServer(app).listen(0);
+                try {
+                    const { port } = server.address() as AddressInfo;
+                    const listen = (headers: Record<string, string> = {}) => over(port, `/share/${token}/stream/${songs.playable}`, headers).then(drain);
+                    const first = listen();
+                    await stall.stalled;
+                    const joiner = listen({ Range: 'bytes=5-' });
+                    await openOn(id, 1);
+                    // Another listener took the last play while this one was being counted.
+                    await prisma.shareLink.update({ where: { token }, data: { playCount: 1 } });
+                    stall.release();
+
+                    expect(await Promise.all([first, joiner])).toEqual([410, 410]);
+                    await settleShareBackgroundWork();
+                    expect(logged).toHaveBeenCalledWith(expect.stringContaining('Could not count a response'));
+                } finally {
+                    stall.release();
+                    stall.restore();
+                    failOpen.mockRestore();
+                    server.closeAllConnections();
+                    server.close();
+                }
+                expect(await playsOf(token)).toBe(1);
+            }, 15_000);
+
+            it('is asked to try again, and streams nothing, when counting that play failed', async () => {
+                const { token, id } = await own();
+                const failing = holdStatement('+ 1', new Error('database went away'));
+                const logged = expectLog('error');
+                const streaming = jest.spyOn(AudioStreamingService.prototype, 'streamFileWithRangeSupport');
+                const server = http.createServer(app).listen(0);
+                try {
+                    const { port } = server.address() as AddressInfo;
+                    const listen = (headers: Record<string, string> = {}) => over(port, `/share/${token}/stream/${songs.playable}`, headers).then(drain);
+                    const first = listen();
+                    await failing.reached;
+                    const joiner = listen({ Range: 'bytes=5-' });
+                    await openOn(id, 2);
+                    failing.release();
+
+                    expect(await Promise.all([first, joiner])).toEqual([500, 503]);
+                    await settleShareBackgroundWork();
+                    expect(streaming).not.toHaveBeenCalled();
+                    expect(logged).toHaveBeenCalled();
+                } finally {
+                    failing.release();
+                    failing.restore();
+                    streaming.mockRestore();
+                    server.closeAllConnections();
+                    server.close();
+                }
+                expect(await playsOf(token)).toBe(0);
+                // Nothing of the play that was never counted is left to follow.
+                expect(await redisClient.keys(`*${id}*`)).toEqual([]);
+            }, 15_000);
+        });
+
+        it('gives a play back in one step with leaving it, so a request that arrives while the give-back runs counts its own play', async () => {
+            const { token } = await own();
+            const giveBack = holdStatement('GREATEST(');
+            const server = http.createServer(app).listen(0);
+            try {
+                const { port } = server.address() as AddressInfo;
+                const listen = (headers: Record<string, string> = {}) => over(port, `/share/${token}/stream/${songs.playable}`, headers).then(drain);
+                // Nothing plays for the first request (304): its play is given back, and the statement that does it is held.
+                const first = listen({ 'If-None-Match': '*' });
+                await giveBack.reached;
+
+                // The play it counted is already free of its window, so this request is not a follow-up of it.
+                expect(await listen()).toBe(200);
+                giveBack.release();
+                expect(await first).toBe(304);
+                await settleShareBackgroundWork();
+            } finally {
+                giveBack.release();
+                giveBack.restore();
+                server.closeAllConnections();
+                server.close();
+            }
+            // The first request's play went back, the second's stayed.
+            expect(await playsOf(token)).toBe(1);
+        }, 15_000);
+
         describe('a first request that fails while a seek of the same play is open', () => {
             it('leaves the window and the play to the seek that is using them', async () => {
                 const long = await longSong('long3', 12);
@@ -1140,13 +1317,16 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                     await stall.stalled;
                     const [key] = await redisClient.keys(`*${id}*`);
                     const window = await redisClient.get(key);
-                    // The listener's seek finds the window and plays on, held open.
-                    seek = await listen(long.id, { Range: 'bytes=5-' });
-                    seek.pause();
+                    // The listener's seek finds the window and waits for the first request to count the play.
+                    const seeking = listen(long.id, { Range: 'bytes=5-' });
+                    await openOn(id, 2);
 
                     stall.release();
                     // Nothing plays for the first request (304), and its play is given back, unless a seek is playing.
                     expect(await first).toBe(304);
+                    // The seek plays on, held open.
+                    seek = await seeking;
+                    seek.pause();
                     await settleShareBackgroundWork();
 
                     expect(await redisClient.get(key)).toBe(window);
@@ -1326,16 +1506,15 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             describe('a play that never streamed', () => {
                 /** The counts of open responses and the played marks, which are kept under a window's token and not under its share. */
                 const tokenKeys = async () => [...(await redisClient.keys('share:open:*')), ...(await redisClient.keys('share:played:*'))];
-                /** Holds the first request to reach the streaming module until `release`, and passes every other. */
-                const holdFirstToStream = () => {
+                /** Holds the request with a range (the seek) when it reaches the streaming module until `release`, and passes every other. */
+                const holdSeekToStream = () => {
                     const real = AudioStreamingService.prototype.streamFileWithRangeSupport;
-                    let calls = 0;
                     let release!: () => void;
                     let arrive!: () => void;
                     const held = new Promise<void>((resolve) => (release = resolve));
                     const reached = new Promise<void>((resolve) => (arrive = resolve));
                     const spy = jest.spyOn(AudioStreamingService.prototype, 'streamFileWithRangeSupport').mockImplementation(function (this: AudioStreamingService, ...args) {
-                        if (++calls > 1) return real.apply(this, args);
+                        if (args[0].headers.range === undefined) return real.apply(this, args);
                         arrive();
                         return held.then(() => real.apply(this, args));
                     });
@@ -1346,21 +1525,22 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                     const long = await longSong('long-gone-nowhere', 50);
                     const { token, id } = await own({}, long.id);
                     const stall = stallCounting();
-                    const hold = holdFirstToStream();
+                    const hold = holdSeekToStream();
                     const before = await tokenKeys();
                     const server = http.createServer(app).listen(0);
                     try {
                         const { port } = server.address() as AddressInfo;
                         const listen = (headers: Record<string, string>) => over(port, `/share/${token}/stream/${long.id}`, headers);
-                        // The first request takes the window and waits to count its play; the listener's seek finds the window,
-                        // and is held just before it would stream.
+                        // The first request takes the window and waits to count its play; the listener's seek finds the window
+                        // and waits for the count, then is held just before it would stream.
                         const first = listen({ 'If-None-Match': '*' }).then(drain);
                         await stall.stalled;
                         const seek = listen({ 'If-None-Match': '*', Range: 'bytes=5-' }).then(drain);
-                        await hold.reached;
+                        await openOn(id, 2);
 
                         // The first request fails with the seek open, so the play is left to the seek.
                         stall.release();
+                        await hold.reached;
                         expect(await first).toBe(304);
                         await settleShareBackgroundWork();
                         expect(await playsOf(token)).toBe(1);
@@ -1450,8 +1630,9 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
                 await Promise.all(closed);
                 stall.release();
                 await stall.counted;
-                // The rest of the request ran in the turn the count answered in; what it left running is tracked.
-                await new Promise((resolve) => setImmediate(resolve));
+                // The rest of the request goes on once the count answered: it frees the window as it gives the play back,
+                // and what it left running from then on is tracked.
+                for (let tries = 0; tries < 200 && (await redisClient.keys(`*${id}*`)).length > 0; tries++) await pause(20);
                 await settleShareBackgroundWork();
             } finally {
                 stall.release();
