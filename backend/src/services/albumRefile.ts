@@ -50,6 +50,8 @@ const READ_CONCURRENCY = 8;
 const ALBUM_TRANSACTION_MS = 60_000;
 
 type Tx = Prisma.TransactionClient;
+/** What a delete inside a transaction owes once the transaction commits (see library/albumDelete.ts). */
+type Settle = () => Promise<void>;
 
 interface Song {
     id: string;
@@ -271,8 +273,9 @@ async function restoreCutName(mbid: string, filesName: string): Promise<string |
     const name: string = found.value.name;
     if (!isOldCut(holder.name, name)) return null;
     const identityKey = artistIdentityKey(name);
+    const afterCommit: Settle[] = [];
 
-    return prisma.$transaction(
+    const renamed = await prisma.$transaction(
         async (tx) => {
             const current = await tx.artist.findUnique({ where: { mbid } });
             if (!current || current.hasUserOverrides || current.name !== holder.name) return null;
@@ -289,7 +292,7 @@ async function restoreCutName(mbid: string, filesName: string): Promise<string |
                     }
                     if (same) {
                         await tx.track.updateMany({ where: { albumId: row.id }, data: { albumId: same.id } });
-                        await retireIfEmpty(tx, row, same, current.id);
+                        await retireIfEmpty(tx, row, same, current.id, afterCommit);
                     } else {
                         await tx.album.update({ where: { id: row.id }, data: { artistId: current.id } });
                     }
@@ -297,7 +300,7 @@ async function restoreCutName(mbid: string, filesName: string): Promise<string |
                 // Every ownership record of the twin, with an album row or not, goes to the artist that stays. Its albums
                 // are all moved or retired by now, so the delete owes no one a word: the run's end rebuilds Discover's
                 // snapshot and recounts the artists.
-                await deleteArtists([twin.id], { within: tx, keepsTo: current.id });
+                afterCommit.push((await deleteArtists([twin.id], { within: tx, keepsTo: current.id })).settle);
             }
             await tx.artist.update({
                 where: { id: current.id },
@@ -308,9 +311,12 @@ async function restoreCutName(mbid: string, filesName: string): Promise<string |
         { timeout: ALBUM_TRANSACTION_MS },
     ).catch((error) => {
         if (!(error instanceof KeptAsItIs)) throw error;
+        afterCommit.length = 0;
         logger.info(`[Refile] Kept "${holder.name}" as it is: "${name}" holds a copy of one of its albums a person edited or Discover holds`);
         return null;
     });
+    for (const settle of afterCommit) await settle();
+    return renamed;
 }
 
 /** Thrown to roll a rename back when it would merge into an album a person edited or Discover holds. */
@@ -334,8 +340,9 @@ async function refileAlbum(
     const target = await resolveArtist(prisma, { name: candidate.name, mbid: candidate.mbid });
     const title = songs[0].credit!.albumTitle;
     const identityKey = albumIdentityKey(title);
+    const afterCommit: Settle[] = [];
 
-    return prisma.$transaction(
+    const filed = await prisma.$transaction(
         async (tx) => {
             const tracks = await tx.track.findMany({
                 where: { id: { in: songs.map((s) => s.id) } },
@@ -401,7 +408,7 @@ async function refileAlbum(
                 if (row.id === keeper.id) continue;
                 const ids = misfiled.filter((t) => t.album.id === row.id).map((t) => t.id);
                 await tx.track.updateMany({ where: { id: { in: ids } }, data: { albumId: keeper.id } });
-                keeper = await retireIfEmpty(tx, row, keeper, target.id);
+                keeper = await retireIfEmpty(tx, row, keeper, target.id, afterCommit);
             }
 
             // Every library album is owned by its artist, as the scanner records it.
@@ -422,6 +429,8 @@ async function refileAlbum(
         },
         { timeout: ALBUM_TRANSACTION_MS },
     );
+    for (const settle of afterCommit) await settle();
+    return filed;
 }
 
 /**
@@ -429,7 +438,13 @@ async function refileAlbum(
  * the details it lacks and the row's records: a placeholder survivor adopts a real release-group id (unless a person
  * set the survivor's), otherwise everything keyed on the row's id moves to the survivor's.
  */
-async function retireIfEmpty(tx: Tx, staleRow: AlbumRow, staleKeeper: AlbumRow, targetArtistId: string): Promise<AlbumRow> {
+async function retireIfEmpty(
+    tx: Tx,
+    staleRow: AlbumRow,
+    staleKeeper: AlbumRow,
+    targetArtistId: string,
+    afterCommit: Settle[],
+): Promise<AlbumRow> {
     await tx.$queryRaw`SELECT id FROM "Album" WHERE id IN (${staleRow.id}, ${staleKeeper.id}) FOR UPDATE`;
     // As they are now that they are locked: enrichment may have changed an id or a cover meanwhile.
     const keeper = await tx.album.findUniqueOrThrow({ where: { id: staleKeeper.id }, select: ALBUM_FIELDS });
@@ -438,9 +453,10 @@ async function retireIfEmpty(tx: Tx, staleRow: AlbumRow, staleKeeper: AlbumRow, 
 
     // Its songs are gone, so it was listed to no one and holds no playlist entry: nothing to tell afterwards, and the run's
     // end rebuilds Discover's snapshot and recounts the artists.
-    await deleteAlbums([row.id], { within: tx });
-    // Share links name an album by id with no foreign key: they follow the album to the survivor.
+    // Share links name an album by id with no foreign key: they follow the album to the survivor, before the delete
+    // that would remove every link naming the row.
     await tx.shareLink.updateMany({ where: { entityType: "album", entityId: row.id }, data: { entityId: keeper.id } });
+    afterCommit.push((await deleteAlbums([row.id], { within: tx })).settle);
     const details = {
         // The merged album arrived when its earlier copy did.
         ...(row.createdAt < keeper.createdAt ? { createdAt: row.createdAt } : {}),
@@ -465,4 +481,37 @@ async function retireIfEmpty(tx: Tx, staleRow: AlbumRow, staleKeeper: AlbumRow, 
     // The row's own artist's ownership becomes the target's.
     await moveOwnerArtist(tx, row.artistId, targetArtistId, survivor.rgMbid);
     return survivor;
+}
+
+/**
+ * Hands every album of one artist to another that takes its place (a temp artist the real one has replaced), inside
+ * the caller's transaction. An album the successor lacks moves whole. One it already holds under the same name merges
+ * into the successor's copy as a twin does in the re-file: songs (with their plays, likes and playlist places, which
+ * hang on the song) move over, the emptied row passes on its details and records and goes. A pair where either copy
+ * was edited by a person or is Discover's is not merged: it stays where it is. The artist goes, with its keeps handed
+ * to the successor, only when no album is left under it. `afterCommit` is what the caller runs once the transaction
+ * commits. `kept` is the number of albums left behind (then the artist stays).
+ */
+export async function mergeArtistInto(
+    tx: Tx,
+    fromArtistId: string,
+    toArtistId: string,
+): Promise<{ merged: boolean; kept: number; afterCommit: Settle[] }> {
+    const afterCommit: Settle[] = [];
+    const closed = (row: AlbumRow) => row.location !== "LIBRARY" || row.hasUserOverrides;
+    const rows = await tx.album.findMany({ where: { artistId: fromArtistId }, select: ALBUM_FIELDS });
+    for (const row of rows) {
+        const same = await tx.album.findUnique({ where: { artistId_identityKey: { artistId: toArtistId, identityKey: row.identityKey } }, select: ALBUM_FIELDS });
+        if (!same) {
+            await tx.album.update({ where: { id: row.id }, data: { artistId: toArtistId } });
+        } else if (!closed(row) && !closed(same)) {
+            await tx.track.updateMany({ where: { albumId: row.id }, data: { albumId: same.id } });
+            await retireIfEmpty(tx, row, same, toArtistId, afterCommit);
+        }
+    }
+    // Counted after the moves: a song filed in meanwhile keeps its album, and the artist stays with it.
+    const kept = await tx.album.count({ where: { artistId: fromArtistId } });
+    if (kept > 0) return { merged: false, kept, afterCommit };
+    afterCommit.push((await deleteArtists([fromArtistId], { within: tx, keepsTo: toArtistId })).settle);
+    return { merged: true, kept: 0, afterCommit };
 }

@@ -18,6 +18,7 @@ async function wipe(): Promise<void> {
     await prisma.$executeRawUnsafe(`DELETE FROM "DiscoveryTrack" WHERE id LIKE 'dint_%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "DiscoveryAlbum" WHERE id LIKE 'dint_%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "DiscoverExclusion" WHERE id LIKE 'dint_%'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM share_links WHERE token LIKE 'dint_%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "User" WHERE id LIKE 'dint_%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id LIKE 'dint_%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE 'dint_%'`);
@@ -180,6 +181,69 @@ describe("data integrity check", () => {
             { artistId: id("m_real"), rgMbid: id("m_both"), source: "native_scan" },
             { artistId: id("m_real"), rgMbid: id("m_only"), source: "discovery_liked" },
         ]);
+    });
+
+    describe("a temp artist whose album the real artist already holds", () => {
+        async function seedPair(overrides: { tempAlbum?: object; realAlbum?: object } = {}) {
+            await prisma.user.create({ data: { id: id("c_user"), username: id("c_user"), passwordHash: "x" } });
+            await prisma.artist.create({ data: { id: id("c_real"), name: "Dint c", normalizedName: "dint c", mbid: "0000aaaa-0000-4000-8000-0000000000c1", identityKey: id("c_rk") } });
+            await prisma.artist.create({ data: { id: id("c_temp"), name: "Dint c", normalizedName: "dint c", mbid: "temp-dint-c", identityKey: id("c_tk") } });
+            // The same album under both: one name key, so the album can not simply change artist.
+            await prisma.album.create({
+                data: { id: id("c_ralb"), rgMbid: id("c_rrg"), artistId: id("c_real"), identityKey: id("c_same"), title: "Dint c Album", primaryType: "Album", ...overrides.realAlbum },
+            });
+            await prisma.album.create({
+                data: { id: id("c_talb"), rgMbid: id("c_trg"), artistId: id("c_temp"), identityKey: id("c_same"), title: "Dint c Album", primaryType: "Album", coverUrl: "cover-from-temp", ...overrides.tempAlbum },
+            });
+            await prisma.album.create({
+                data: { id: id("c_other"), rgMbid: id("c_org"), artistId: id("c_temp"), identityKey: id("c_diff"), title: "Dint c Other", primaryType: "Album" },
+            });
+            const song = (sid: string, albumId: string, no: number) =>
+                prisma.track.create({ data: { id: id(sid), albumId, title: sid, trackNo: no, duration: 100, filePath: `/tmp/${id(sid)}.flac`, fileModified: new Date(), fileSize: 1 } });
+            await song("c_real_song", id("c_ralb"), 1);
+            await song("c_temp_song", id("c_talb"), 2);
+            await song("c_other_song", id("c_other"), 1);
+            await prisma.play.create({ data: { userId: id("c_user"), trackId: id("c_temp_song"), playedAt: new Date() } });
+            await prisma.shareLink.create({ data: { token: id("c_tok"), entityType: "album", entityId: id("c_talb"), createdBy: id("c_user") } });
+        }
+
+        it("merges into the real artist's copy: songs and their history move over, the empty copy goes, the run finishes", async () => {
+            await seedPair();
+
+            const report = await runDataIntegrityCheck();
+
+            expect(report.consolidatedArtists).toBeGreaterThanOrEqual(1);
+            expect(await prisma.artist.count({ where: { id: id("c_temp") } })).toBe(0);
+            expect(await prisma.album.count({ where: { id: id("c_talb") } })).toBe(0);
+            expect((await prisma.track.findUniqueOrThrow({ where: { id: id("c_temp_song") } })).albumId).toBe(id("c_ralb"));
+            expect((await prisma.track.findUniqueOrThrow({ where: { id: id("c_other_song") } })).albumId).toBe(id("c_other"));
+            expect((await prisma.album.findUniqueOrThrow({ where: { id: id("c_other") } })).artistId).toBe(id("c_real"));
+            expect(await prisma.play.count({ where: { trackId: id("c_temp_song") } })).toBe(1);
+            expect((await prisma.album.findUniqueOrThrow({ where: { id: id("c_ralb") } })).coverUrl).toBe("cover-from-temp");
+            expect((await prisma.shareLink.findUniqueOrThrow({ where: { token: id("c_tok") } })).entityId).toBe(id("c_ralb"));
+        });
+
+        it("leaves a pair alone when the real artist's copy was edited by a person, and the temp artist with it", async () => {
+            await seedPair({ realAlbum: { hasUserOverrides: true } });
+
+            const report = await runDataIntegrityCheck();
+
+            expect(report.consolidatedArtists).toBe(0);
+            expect(await prisma.artist.count({ where: { id: id("c_temp") } })).toBe(1);
+            expect((await prisma.track.findUniqueOrThrow({ where: { id: id("c_temp_song") } })).albumId).toBe(id("c_talb"));
+            // The album with no clash still moved.
+            expect((await prisma.album.findUniqueOrThrow({ where: { id: id("c_other") } })).artistId).toBe(id("c_real"));
+        });
+
+        it("leaves a pair alone when the temp artist's copy is Discover's", async () => {
+            await seedPair({ tempAlbum: { location: "DISCOVER" } });
+
+            await runDataIntegrityCheck();
+
+            expect(await prisma.album.count({ where: { id: id("c_talb") } })).toBe(1);
+            expect((await prisma.album.findUniqueOrThrow({ where: { id: id("c_ralb") } })).location).toBe("LIBRARY");
+            expect(await prisma.artist.count({ where: { id: id("c_temp") } })).toBe(1);
+        });
     });
 
     it("removes an artist with no albums, with its keeps", async () => {

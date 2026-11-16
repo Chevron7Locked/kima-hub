@@ -20,6 +20,7 @@ import { parseFile } from "music-metadata";
 import { prisma } from "../../utils/db";
 import { refileLibrary } from "../albumRefile";
 import { backfillAllArtistCounts } from "../artistCountsService";
+import * as ownedIndexVersion from "../discovery/ownedIndexVersion";
 import { shutdownStop, useShutdownCheck } from "../../utils/stopCheck";
 import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 
@@ -678,6 +679,30 @@ describe("re-filing albums by their tags", () => {
 
         expect(await prisma.album.count({ where: { id: stray.id } })).toBe(0);
         expect((await prisma.shareLink.findUnique({ where: { token: "refile-tok" } }))!.entityId).toBe(kept.id);
+    });
+
+    it("settles the delete of a merged-away album after the merge commits, not before", async () => {
+        const cut = await artist("Refile Cut");
+        const full = await artist("Refile Cut and Band", { mbid: FULL_ID });
+        const stray = await album(cut.id, "Refile Settle");
+        const kept = await album(full.id, "Refile Settle");
+        const credit = { album: "Refile Settle", albumartist: "Refile Cut and Band", musicbrainz_albumartistid: [FULL_ID] };
+        await song(stray.id, "Refile Cut and Band/Refile Settle/01.flac", credit);
+        await song(kept.id, "Refile Cut and Band/Refile Settle/02.flac", credit);
+        // What the delete owes (the owned-album index forgotten) runs once the row is gone for everyone reading, not inside
+        // the transaction (the run's end forgets it too, so there is more than one call).
+        const gone: Promise<number>[] = [];
+        const forget = jest.spyOn(ownedIndexVersion, "forgetOwnedIndex").mockImplementation(() => {
+            gone.push(prisma.album.count({ where: { id: stray.id } }));
+        });
+        try {
+            await refileLibrary(musicDir);
+
+            expect(gone.length).toBeGreaterThan(1);
+            expect((await Promise.all(gone)).every((count) => count === 0)).toBe(true);
+        } finally {
+            forget.mockRestore();
+        }
     });
 
     it("breaks a vote tie by path order in code, whatever order the database sorts paths in", async () => {

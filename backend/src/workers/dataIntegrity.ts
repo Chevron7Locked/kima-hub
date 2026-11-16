@@ -9,7 +9,8 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { markLibraryChangedQuietly } from "../services/libraryChanged";
 import { PLAYABLE_SONG } from "../utils/playableSong";
-import { deleteArtists, deleteEmptyArtists } from "../services/library/albumDelete";
+import { deleteEmptyArtists } from "../services/library/albumDelete";
+import { mergeArtistInto } from "../services/albumRefile";
 import { NameIndex, relocateDiscoverAlbums } from "../services/discovery/discoverEvidence";
 
 interface IntegrityReport {
@@ -144,15 +145,22 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
 
             if (realArtist) {
                 libraryAlbumsMoved += await prisma.album.count({ where: { artistId: tempArtist.id, tracks: { some: PLAYABLE_SONG } } });
-                await prisma.album.updateMany({
-                    where: { artistId: tempArtist.id },
-                    data: { artistId: realArtist.id },
-                });
-                // Its keeps go to the real artist (a keep cannot outlive its artist), then it goes with its similar links.
-                await deleteArtists([tempArtist.id], { keepsTo: realArtist.id });
+                // One transaction per artist: an album the real artist already holds merges into it (its songs and their
+                // history move over), the rest move, and the temp artist goes with its keeps handed on (a keep cannot
+                // outlive its artist). An album a person edited, or Discover's, is not merged: it stays, and so does the
+                // temp artist, until a person decides.
+                const { merged, kept, afterCommit } = await prisma.$transaction(
+                    (tx) => mergeArtistInto(tx, tempArtist.id, realArtist.id),
+                    { timeout: 60_000 },
+                );
+                for (const settle of afterCommit) await settle();
 
-                report.consolidatedArtists++;
-                logger.debug(`[DataIntegrity] Merged temp artist "${tempArtist.name}" into the real one`);
+                if (merged) {
+                    report.consolidatedArtists++;
+                    logger.debug(`[DataIntegrity] Merged temp artist "${tempArtist.name}" into the real one`);
+                } else {
+                    logger.info(`[DataIntegrity] Temp artist "${tempArtist.name}" kept: ${kept} album(s) clash with the real artist's and were edited or are Discover's`);
+                }
             }
         }
         // Albums holding a playable song under another artist change what a client lists; Discover's, and ones with no playable song, were never listed.
