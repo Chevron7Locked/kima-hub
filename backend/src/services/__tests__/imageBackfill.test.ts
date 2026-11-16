@@ -5,20 +5,36 @@
 
 jest.mock("../imageStorage", () => ({
     ...jest.requireActual("../imageStorage"),
-    downloadAndStoreImage: jest.fn(),
+    stageDownloadedImage: jest.fn(),
 }));
 
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { backfillAllImages, getImageBackfillProgress } from "../imageBackfill";
-import { downloadAndStoreImage } from "../imageStorage";
+import { stageDownloadedImage } from "../imageStorage";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 
 jest.setTimeout(30_000);
 
 const P = "zz-imgbf";
-const download = downloadAndStoreImage as jest.Mock;
+const download = stageDownloadedImage as jest.Mock;
+
+/** What each staged picture was told: put in place, or thrown away. */
+const placed: Record<string, "published" | "discarded"> = {};
+
+/** A downloaded picture waiting to be put in place at `address`. */
+function staged(address: string) {
+    return {
+        address,
+        publish: async () => {
+            placed[address] = "published";
+        },
+        discard: async () => {
+            placed[address] = "discarded";
+        },
+    };
+}
 
 async function clean() {
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
@@ -55,8 +71,9 @@ beforeEach(async () => {
     await clean();
     jest.restoreAllMocks();
     download.mockReset();
+    for (const address of Object.keys(placed)) delete placed[address];
     // Only our own rows are stored; any row another test left behind fails.
-    download.mockImplementation(async (_url: string, id: string) => (ours(id) ? `native:x/${id}.jpg` : null));
+    download.mockImplementation(async (_url: string, id: string) => (ours(id) ? staged(`native:x/${id}.jpg`) : null));
 });
 
 afterAll(async () => {
@@ -98,7 +115,7 @@ describe("backfillAllImages progress", () => {
         let during: ReturnType<typeof getImageBackfillProgress> | undefined;
         download.mockImplementation(async (_url: string, id: string) => {
             during ??= getImageBackfillProgress();
-            return ours(id) ? `native:x/${id}.jpg` : null;
+            return ours(id) ? staged(`native:x/${id}.jpg`) : null;
         });
 
         await backfillAllImages();
@@ -114,7 +131,7 @@ describe("backfillAllImages and an address edited while it downloads", () => {
         download.mockImplementation(async (_url: string, id: string) => {
             if (id === `${P}-ar-1`) await prisma.artist.update({ where: { id }, data: { heroUrl: "http://example.invalid/edited.jpg" } });
             if (id === `${P}-al-1`) await prisma.album.update({ where: { id }, data: { coverUrl: "http://example.invalid/edited-cover.jpg" } });
-            return ours(id) ? `native:x/${id}.jpg` : null;
+            return ours(id) ? staged(`native:x/${id}.jpg`) : null;
         });
 
         await backfillAllImages();
@@ -124,6 +141,10 @@ describe("backfillAllImages and an address edited while it downloads", () => {
         expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}-al-1` } })).coverUrl).toBe("http://example.invalid/edited-cover.jpg");
         expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}-al-2` } })).coverUrl).toBe(`native:x/${P}-al-2.jpg`);
         expect(getImageBackfillProgress()).toMatchObject({ success: 3, skipped: 2, failed: 0 });
+        // The picture of an edited row is thrown away, not put in place.
+        expect(placed[`native:x/${P}-ar-1.jpg`]).toBe("discarded");
+        expect(placed[`native:x/${P}-al-1.jpg`]).toBe("discarded");
+        expect(placed[`native:x/${P}-ar-2.jpg`]).toBe("published");
     });
 });
 
@@ -145,7 +166,7 @@ describe("backfillAllImages closing log line", () => {
         let stop = false;
         download.mockImplementation(async (_url: string, id: string) => {
             stop = true;
-            return ours(id) ? `native:x/${id}.jpg` : null;
+            return ours(id) ? staged(`native:x/${id}.jpg`) : null;
         });
         const info = jest.spyOn(logger, "info").mockImplementation(() => {});
 
@@ -161,7 +182,7 @@ describe("backfillAllImages closing log line", () => {
         await seed();
         let stop = false;
         download.mockImplementation(async (_url: string, id: string, _kind: string, signal?: AbortSignal) => {
-            if (id !== `${P}-al-3`) return ours(id) ? `native:x/${id}.jpg` : null;
+            if (id !== `${P}-al-3`) return ours(id) ? staged(`native:x/${id}.jpg`) : null;
             stop = true;
             await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve()));
             return null;

@@ -3,7 +3,7 @@
 // download is the only thing replaced, and the sign-in is stood in.
 jest.mock("../../../services/imageStorage", () => ({
     ...jest.requireActual("../../../services/imageStorage"),
-    downloadAndStoreImage: jest.fn(async () => null),
+    stageDownloadedImage: jest.fn(async () => null),
 }));
 
 import express from "express";
@@ -13,14 +13,14 @@ import artistsRouter from "../artists";
 import { prisma } from "../../../utils/db";
 import { isBackfillInProgress } from "../../../services/artistCountsService";
 import { getImageBackfillProgress } from "../../../services/imageBackfill";
-import { downloadAndStoreImage } from "../../../services/imageStorage";
+import { stageDownloadedImage } from "../../../services/imageStorage";
 import { useShutdownCheck, whenRequestWorkEnded } from "../../../utils/stopCheck";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import { mountAsServer } from "../../__tests__/helpers/serverMount";
 import { scopeArtists } from "../../__tests__/helpers/scopeArtists";
 
 const P = "zz-backfill-stop";
-const download = downloadAndStoreImage as jest.Mock;
+const download = stageDownloadedImage as jest.Mock;
 const app = mountAsServer(
     mountAsServer(express().use(express.json()), "/library", backfillRouter, "/api/library", { standIn: true }),
     "/library",

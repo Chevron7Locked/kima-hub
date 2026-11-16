@@ -6,14 +6,14 @@
 
 jest.mock("../imageStorage", () => ({
     ...jest.requireActual("../imageStorage"),
-    downloadAndStoreImage: jest.fn(async () => null),
+    stageDownloadedImage: jest.fn(async () => null),
 }));
 
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { backfillAllArtistCounts } from "../artistCountsService";
 import { backfillAllImages, getImageBackfillProgress } from "../imageBackfill";
-import { downloadAndStoreImage } from "../imageStorage";
+import { stageDownloadedImage } from "../imageStorage";
 import { dataCacheService } from "../dataCache";
 import { audiobookCacheService } from "../audiobookCache";
 import { audiobookshelfService } from "../audiobookshelf";
@@ -23,7 +23,7 @@ import { expectLog } from "../../__tests__/helpers/expectedLogs";
 jest.setTimeout(60_000);
 
 const P = "zz-bgstop";
-const download = downloadAndStoreImage as jest.Mock;
+const download = stageDownloadedImage as jest.Mock;
 
 async function clean() {
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });

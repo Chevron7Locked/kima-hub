@@ -7,7 +7,7 @@
 
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { downloadAndStoreImage, isNativePath } from "./imageStorage";
+import { isNativePath, stageDownloadedImage } from "./imageStorage";
 import { redisClient } from "../utils/redis";
 import { flushShownChanges, notePictureChange } from "./shownChanges";
 import { sleepUnlessStopped, stopSignal, type StopCheck } from "../utils/stopCheck";
@@ -172,21 +172,39 @@ async function backfillImages(kind: BackfillKind, stop: StopCheck, signal: Abort
                             return;
                         }
 
-                        const localPath = await downloadAndStoreImage(row.url, row.id, kind, signal);
+                        const staged = await stageDownloadedImage(row.url, row.id, kind, signal);
 
-                        if (localPath) {
-                            // Only where the row still holds the address that was read: one a person set during the download stands.
-                            let own: string | null;
-                            if (kind === "artist") {
-                                const written = await prisma.artist.updateMany({ where: { id: row.id, heroUrl: row.url }, data: { heroUrl: localPath } });
-                                if (written.count === 0) return skipEdited();
-                                own = (await prisma.artist.findUnique({ where: { id: row.id }, select: { userHeroUrl: true } }))?.userHeroUrl ?? null;
-                            } else {
-                                const written = await prisma.album.updateMany({ where: { id: row.id, coverUrl: row.url }, data: { coverUrl: localPath } });
-                                if (written.count === 0) return skipEdited();
-                                own = (await prisma.album.findUnique({ where: { id: row.id }, select: { userCoverUrl: true } }))?.userCoverUrl ?? null;
+                        if (staged) {
+                            const localPath = staged.address;
+                            // Only where the row still holds the address that was read: one a person set during the download
+                            // stands, and so does any picture stored under the same name. The row's address and the file
+                            // change together: the file is renamed into place while the row's change is still uncommitted.
+                            let placed: { own: string | null } | null;
+                            try {
+                                placed = await prisma.$transaction(async (tx) => {
+                                    let own: string | null;
+                                    try {
+                                        own =
+                                            kind === "artist"
+                                                ? (await tx.artist.update({ where: { id: row.id, heroUrl: row.url }, data: { heroUrl: localPath }, select: { userHeroUrl: true } })).userHeroUrl
+                                                : (await tx.album.update({ where: { id: row.id, coverUrl: row.url }, data: { coverUrl: localPath }, select: { userCoverUrl: true } })).userCoverUrl;
+                                    } catch (err) {
+                                        // No row holds the address that was read any more.
+                                        if ((err as { code?: string }).code === "P2025") return null;
+                                        throw err;
+                                    }
+                                    await staged.publish();
+                                    return { own };
+                                });
+                            } catch (err) {
+                                await staged.discard();
+                                throw err;
                             }
-                            notePictureChange(kind, row.id, { was: row.url, now: localPath, own });
+                            if (!placed) {
+                                await staged.discard();
+                                return skipEdited();
+                            }
+                            notePictureChange(kind, row.id, { was: row.url, now: localPath, own: placed.own });
 
                             // Update Redis cache
                             try {

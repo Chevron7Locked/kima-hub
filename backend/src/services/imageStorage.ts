@@ -191,37 +191,89 @@ export interface FileVersion {
  * is false: a pass holding old bytes must not overwrite a newer write.
  */
 async function writeAtomically(filePath: string, bytes: Buffer, readAs?: FileVersion): Promise<boolean> {
-    await sweepOrphanParts(path.dirname(filePath));
-    const partial = `${filePath}.${process.pid}.${randomUUID()}.part`;
+    const staged = await stageFile(filePath, bytes);
     try {
-        await fs.promises.writeFile(partial, bytes);
         if (readAs) {
             // A file deleted meanwhile counts as changed too: the pass does not bring it back.
             const now = await fs.promises.stat(filePath).catch(() => null);
             if (!now || now.mtimeMs !== readAs.mtimeMs || now.size !== readAs.size) {
-                await fs.promises.rm(partial, { force: true });
+                await staged.discard();
                 return false;
             }
         }
-        await fs.promises.rename(partial, filePath);
+        await staged.publish();
         return true;
     } catch (err) {
-        await fs.promises.rm(partial, { force: true });
+        await staged.discard();
         throw err;
     }
 }
 
+/** A file written under a temporary name beside its final one: `publish` renames it into place, `discard` removes it. */
+interface StagedFile {
+    publish(): Promise<void>;
+    discard(): Promise<void>;
+}
+
+/** Writes `bytes` under a temporary name beside `filePath`, sweeping the folder's orphans first. Throws, leaving nothing, when the write fails. */
+async function stageFile(filePath: string, bytes: Buffer): Promise<StagedFile> {
+    await sweepOrphanParts(path.dirname(filePath));
+    const partial = `${filePath}.${process.pid}.${randomUUID()}.part`;
+    try {
+        await fs.promises.writeFile(partial, bytes);
+    } catch (err) {
+        await fs.promises.rm(partial, { force: true });
+        throw err;
+    }
+    return {
+        publish: async () => {
+            try {
+                await fs.promises.rename(partial, filePath);
+            } catch (err) {
+                await fs.promises.rm(partial, { force: true });
+                throw err;
+            }
+        },
+        discard: () => fs.promises.rm(partial, { force: true }),
+    };
+}
+
 /**
- * The one way a stored picture is written: `bytes` as a JPEG (converted unless already one), atomically. Answers the
- * stored picture's version, and null (writing nothing) when the bytes are no picture; throws when the write fails,
- * leaving no partial file.
+ * A stored picture written under a temporary name, not yet in place: the file under the final name is untouched until
+ * `publish`, so a caller can first check that nothing changed meanwhile, and `discard` when it did. `version` is what
+ * the stored picture's version will be.
  */
-export async function storeAsJpeg(filePath: string, bytes: Buffer): Promise<string | null> {
+export interface StagedPicture {
+    version: string;
+    publish(): Promise<void>;
+    discard(): Promise<void>;
+}
+
+/** `bytes` as a JPEG (converted unless already one) staged for `filePath`. Null (writing nothing) when the bytes are no picture; throws when the write fails. */
+export async function stageAsJpeg(filePath: string, bytes: Buffer): Promise<StagedPicture | null> {
     const picture = await asJpeg(bytes);
     if (!picture) return null;
-    await writeAtomically(filePath, picture);
-    await dropResizedCopies(filePath);
-    return coverVersion(picture);
+    const staged = await stageFile(filePath, picture);
+    return {
+        version: coverVersion(picture),
+        publish: async () => {
+            await staged.publish();
+            await dropResizedCopies(filePath);
+        },
+        discard: staged.discard,
+    };
+}
+
+/**
+ * The one way a stored picture is written in place: `bytes` as a JPEG (converted unless already one), atomically.
+ * Answers the stored picture's version, and null (writing nothing) when the bytes are no picture; throws when the write
+ * fails, leaving no partial file.
+ */
+export async function storeAsJpeg(filePath: string, bytes: Buffer): Promise<string | null> {
+    const staged = await stageAsJpeg(filePath, bytes);
+    if (!staged) return null;
+    await staged.publish();
+    return staged.version;
 }
 
 /**
@@ -339,16 +391,23 @@ export async function replaceWithJpeg(
     return (await writeAtomically(filePath, picture, readAs)) ? "replaced" : "changed";
 }
 
+/** A downloaded picture staged for its stored name: `address` is what the row will hold once `publish` has put it in place. */
+export interface StagedImage {
+    address: string;
+    publish(): Promise<void>;
+    discard(): Promise<void>;
+}
+
 /**
- * Download an image from URL and save locally, as a JPEG
- * Returns the stored cover's address (e.g., "native:artists/artistId.jpg?v=<version>") or null on failure
+ * Downloads an image and stages it as a JPEG under a temporary name, leaving any file already stored for `id` untouched
+ * until `publish`. For a caller that must check something first: it publishes, or discards. Null on failure.
  */
-export async function downloadAndStoreImage(
+export async function stageDownloadedImage(
     url: string,
     id: string,
     type: "artist" | "album",
     signal?: AbortSignal
-): Promise<string | null> {
+): Promise<StagedImage | null> {
     if (!url) return null;
     // A stop ends the download at once; a download with no signal keeps its own 30 s limit.
     if (signal?.aborted) return null;
@@ -391,14 +450,41 @@ export async function downloadAndStoreImage(
             return null;
         }
 
-        const version = await storeAsJpeg(filePath, buffer);
-        if (!version) {
+        const staged = await stageAsJpeg(filePath, buffer);
+        if (!staged) {
             logger.debug(`[ImageStorage] Not a readable picture despite its content type: ${contentType}`);
             return null;
         }
-        logger.debug(`[ImageStorage] Saved ${type} image: ${filename}`);
 
-        return storedCoverValue(`${subdir}/${filename}`, version);
+        return {
+            address: storedCoverValue(`${subdir}/${filename}`, staged.version),
+            publish: async () => {
+                await staged.publish();
+                logger.debug(`[ImageStorage] Saved ${type} image: ${filename}`);
+            },
+            discard: staged.discard,
+        };
+    } catch (error: any) {
+        logger.debug(`[ImageStorage] Download failed: ${error.message}`);
+        return null;
+    }
+}
+
+/**
+ * Download an image from URL and save locally, as a JPEG
+ * Returns the stored cover's address (e.g., "native:artists/artistId.jpg?v=<version>") or null on failure
+ */
+export async function downloadAndStoreImage(
+    url: string,
+    id: string,
+    type: "artist" | "album",
+    signal?: AbortSignal
+): Promise<string | null> {
+    const staged = await stageDownloadedImage(url, id, type, signal);
+    if (!staged) return null;
+    try {
+        await staged.publish();
+        return staged.address;
     } catch (error: any) {
         logger.debug(`[ImageStorage] Download failed: ${error.message}`);
         return null;
