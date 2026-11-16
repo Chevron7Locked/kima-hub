@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { announcePlaylistsChanged, playlistsHoldingTracks } from "../../services/playlistEvents";
+import { deleteAlbums } from "../../services/library/albumDelete";
 import { prisma, Prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { deezerService } from "../../services/deezer";
@@ -7,8 +7,6 @@ import { lidarrService } from "../../services/lidarr";
 import { safeError } from "../../utils/errors";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
-import { albumIsListed, markLibraryChangedQuietly } from "../../services/libraryChanged";
-import { forgetOwnedIndex } from "../../services/discovery/ownedIndexVersion";
 import fs from "fs";
 import pLimit from "p-limit";
 import { toAudioFeaturesDTO } from "../../utils/audioFeatures";
@@ -231,18 +229,7 @@ router.delete("/albums/:id", async (req, res) => {
       logger.warn("[DELETE] Could not delete album folder:", err);
     }
 
-    // Asked before the delete, for its songs are gone after it.
-    const wasListed = await albumIsListed(album.id);
-    // Its songs' playlist entries go with it: tell those playlists once it is gone.
-    const playlists = await playlistsHoldingTracks(prisma, { albumId: album.id });
-    await prisma.album.delete({
-      where: { id: album.id },
-    });
-    announcePlaylistsChanged(playlists);
-    // Discover's owned-album snapshot reads this album's row: rebuild it now, not when it expires.
-    forgetOwnedIndex();
-    // An album holding a playable song gone is a change to what a client lists; one with only Discover, missing or corrupt songs was never listed.
-    if (wasListed) await markLibraryChangedQuietly("album deleted");
+    await deleteAlbums([album.id]);
 
     logger.debug(
       `[DELETE] Deleted album: ${album.title} (${deletedFiles} files)`,

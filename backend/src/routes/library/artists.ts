@@ -2,7 +2,7 @@ import { Router } from "express";
 import fs from "fs";
 import path from "path";
 import { artistNamed, isMbid, normalizeArtistName } from "../../services/artistIdentity";
-import { announcePlaylistsChanged, playlistsHoldingTracks } from "../../services/playlistEvents";
+import { deleteArtists } from "../../services/library/albumDelete";
 import { AlbumLocation } from "@prisma/client";
 import { prisma, Prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
@@ -41,8 +41,6 @@ import { editionlessKey } from "../../services/albumIdentity";
 import { getEffectiveYear } from "../../utils/dateFilters";
 import { PLAYABLE_SONG } from "../../utils/playableSong";
 import { popularSongs } from "../../services/popularSongs";
-import { artistIsListed, markLibraryChangedQuietly } from "../../services/libraryChanged";
-import { forgetOwnedIndex } from "../../services/discovery/ownedIndexVersion";
 
 /**
  * The artist list's order for `sortBy`; anything unknown sorts by name. Names sort on `sortName` (article-stripped,
@@ -804,18 +802,7 @@ router.delete("/artists/:id", async (req, res) => {
       }
     }
 
-    // Asked before the delete, for its songs are gone after it.
-    const wasListed = await artistIsListed(artist.id);
-    // Its songs' playlist entries go with it: tell those playlists once it is gone.
-    const playlists = await playlistsHoldingTracks(prisma, { album: { artistId: artist.id } });
-    await prisma.artist.delete({
-      where: { id: artist.id },
-    });
-    announcePlaylistsChanged(playlists);
-    // Its albums went with it, and Discover's owned-album snapshot read them.
-    forgetOwnedIndex();
-    // An artist holding a playable song gone is a change to what a client lists; one with only Discover, missing or corrupt songs was never listed.
-    if (wasListed) await markLibraryChangedQuietly("artist deleted");
+    await deleteArtists([artist.id]);
 
     res.json({
       message: "Artist deleted successfully",
