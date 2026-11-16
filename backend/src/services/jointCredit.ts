@@ -42,12 +42,6 @@ export function leadingParts(name: string): string[] {
     return parts.reverse();
 }
 
-/** The first artist a joint credit names, or null when the credit is a single name. */
-export function firstOfJointCredit(name: string): string | null {
-    const parts = leadingParts(name);
-    return parts.length ? parts[parts.length - 1] : null;
-}
-
 /**
  * The one question MusicBrainz is asked about a name: its exact phrase on artist and alias, in each spelling of the
  * joining word ("a & b", "a and b", "a + b"). Built from the name's letters and digits alone, so every spelling and case
