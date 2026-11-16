@@ -208,7 +208,7 @@ function ImportPlaylistPageContent() {
             const cached = queryClient.getQueryData<PreviewStatus>(["preview-status", previewJobId]);
             if (cached && cached.status !== "running") return cached;
             // Otherwise poll the backend (handles SSE reconnect gap)
-            return api.get<PreviewStatus>(`/spotify/preview/${encodeURIComponent(previewJobId)}`);
+            return api.get<PreviewStatus>(`/spotify/preview/${encodeURIComponent(String(previewJobId))}`);
         },
         enabled: !!previewJobId && step === "previewing",
         // Poll every 3s while pending/running; stop once terminal
@@ -1017,7 +1017,7 @@ function ImportPlaylistPageContent() {
                                     variant="primary"
                                     onClick={() =>
                                         router.push(
-                                            `/playlist/${encodeURIComponent(importJob.createdPlaylistId)}`
+                                            `/playlist/${encodeURIComponent(String(importJob.createdPlaylistId))}`
                                         )
                                     }
                                     className="bg-success hover:bg-success hover:brightness-110"

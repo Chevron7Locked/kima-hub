@@ -81,6 +81,20 @@ describe("create user", () => {
         expect((button("Create") as HTMLButtonElement).disabled).toBe(true);
     });
 
+    it("says what is wrong under the password field while it is typed", async () => {
+        await fill("12345");
+        expect(dom.host.querySelector('[role="alert"]')?.textContent).toContain("at least 6 characters");
+        type(field("Password (6+ chars)"), tooLong);
+        expect(dom.host.querySelector('[role="alert"]')?.textContent).toContain("at most 72 characters");
+        type(field("Password (6+ chars)"), "123456");
+        expect(dom.host.querySelector('[role="alert"]')).toBeNull();
+    });
+
+    it("says nothing about the password before anything is typed", async () => {
+        await act(async () => dom.root.render(<UserManagementSection settings={settings} onUpdate={vi.fn()} />));
+        expect(dom.host.querySelector('[role="alert"]')).toBeNull();
+    });
+
     it("keeps Create off for a password under 6 characters", async () => {
         await fill("12345");
         expect((button("Create") as HTMLButtonElement).disabled).toBe(true);

@@ -141,6 +141,9 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
         }
     };
 
+    // Shown from the first character typed, so the Create button's being off is explained.
+    const typedPasswordProblem = newPassword ? passwordProblem(newPassword) : null;
+
     if (currentUser?.role !== "admin") {
         return null;
     }
@@ -174,13 +177,19 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
                                 placeholder="Username"
                                 className="flex-1"
                             />
-                            <SettingsInput
-                                type="password"
-                                value={newPassword}
-                                onChange={setNewPassword}
-                                placeholder="Password (6+ chars)"
-                                className="flex-1"
-                            />
+                            <div className="flex-1">
+                                <SettingsInput
+                                    type="password"
+                                    value={newPassword}
+                                    onChange={setNewPassword}
+                                    placeholder="Password (6+ chars)"
+                                />
+                                {typedPasswordProblem && (
+                                    <p role="alert" className="mt-1.5 text-xs text-danger-light">
+                                        {typedPasswordProblem}
+                                    </p>
+                                )}
+                            </div>
                         </div>
                         <div className="inline-flex gap-3 items-center">
                             <SettingsSelect
