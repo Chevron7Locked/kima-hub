@@ -158,6 +158,22 @@ describe("repairCoverFormatsOnce", () => {
         expect(await marker()).not.toBeNull();
     });
 
+    it("leaves a .jpg over the 20 MB cap unread, logs it, and still finishes", async () => {
+        const huge = path.join(covers, "albums", "huge.jpg");
+        put(huge, Buffer.alloc(0));
+        fs.truncateSync(huge, 20 * 1024 * 1024 + 1);
+        put(path.join(covers, "albums", "p.jpg"), await picture("png"));
+        const read = jest.spyOn(fs.promises, "readFile");
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(read.mock.calls.some((c) => String(c[0]).endsWith("huge.jpg"))).toBe(false);
+        expect(fs.statSync(huge).size).toBe(20 * 1024 * 1024 + 1);
+        expect(result).toMatchObject({ converted: 1, failed: 0 });
+        expect((logger.warn as jest.Mock).mock.calls.some((c) => String(c[0]).includes("huge.jpg"))).toBe(true);
+        expect(await marker()).not.toBeNull();
+    });
+
     it("leaves no temporary file behind, and does not touch an orphan .part name", async () => {
         put(path.join(covers, "albums", "p.jpg"), await picture("png"));
         put(path.join(covers, "albums", "q.jpg.1.abc.part"), await picture("png"));

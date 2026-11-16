@@ -228,6 +228,11 @@ async function repairCoverFormats({ shouldStop }: StopCheck): Promise<CoverRepai
                     }
                     continue;
                 }
+                // Read whole to convert, so a file past the cap that stored pictures never reach is left unread, as the artists' are.
+                if (read.size > MAX_PICTURE_BYTES) {
+                    logger.warn(`[COVER-REPAIR] ${file} is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB; left as it is`);
+                    continue;
+                }
                 const bytes = await fs.promises.readFile(file);
                 const outcome = await replaceWithJpeg(file, bytes, { mtimeMs: read.mtimeMs, size: read.size });
                 if (outcome === "replaced") {
