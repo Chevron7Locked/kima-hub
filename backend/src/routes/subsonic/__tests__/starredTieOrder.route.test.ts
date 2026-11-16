@@ -45,6 +45,15 @@ afterAll(async () => {
     await prisma.$disconnect();
 });
 
+// Express routes a call whatever its letter case, so the key follows the route that answered, not the path's text.
+it("answers getStarred2 under starred2 however its name is cased, and the legacy getStarred under starred", async () => {
+    const v2 = await request(app).get("/getstarred2.view").query({ u: USER, f: "json" }).expect(200).then((r) => r.body["subsonic-response"]);
+    expect(v2.starred2).toBeDefined();
+    const legacy = await request(app).get("/getStarred.view").query({ u: USER, f: "json" }).expect(200).then((r) => r.body["subsonic-response"]);
+    expect(legacy.starred).toBeDefined();
+    expect(legacy.starred2).toBeUndefined();
+});
+
 it("songs liked at the same instant list by song id", async () => {
     const body = await request(app).get("/getStarred2.view").query({ u: USER, f: "json" }).expect(200).then((r) => r.body["subsonic-response"]);
     const ids = (body.starred2.song ?? []).map((s: { id: string }) => s.id).filter((id: string) => id.startsWith(MARK));

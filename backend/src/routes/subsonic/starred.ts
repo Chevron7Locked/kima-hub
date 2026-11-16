@@ -9,7 +9,9 @@ import { one, many } from "../../utils/subsonicParams";
 
 export const starredRouter = Router();
 
-starredRouter.all(["/getStarred2.view", "/getStarred.view"], wrap(async (req, res) => {
+// getStarred2 and the legacy getStarred answer with the same songs under different keys. Which one answers is decided by
+// the route it is mounted on, not by the request's path text (a router matches any letter case).
+const starredRoute = (key: "starred2" | "starred") => wrap(async (req, res) => {
     const userId = req.user!.id;
     // Only playable songs.
     const liked = await prisma.likedTrack.findMany({
@@ -29,7 +31,6 @@ starredRouter.all(["/getStarred2.view", "/getStarred.view"], wrap(async (req, re
     });
 
     const shown = await shownGenresOfSongs(liked.map((l) => ({ id: l.track.id, album: l.track.album, artist: l.track.album.artist })));
-    const key = req.path.includes("getStarred2") ? "starred2" : "starred";
     return subsonicOk(req, res, {
         [key]: {
             ...(liked.length > 0 ? {
@@ -44,7 +45,9 @@ starredRouter.all(["/getStarred2.view", "/getStarred.view"], wrap(async (req, re
             } : {}),
         },
     });
-}));
+});
+starredRouter.all("/getStarred2.view", starredRoute("starred2"));
+starredRouter.all("/getStarred.view", starredRoute("starred"));
 
 starredRouter.all("/setRating.view", wrap(async (req, res) => {
     const id = one(req, "id");

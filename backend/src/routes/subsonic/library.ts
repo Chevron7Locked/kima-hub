@@ -32,8 +32,9 @@ function indexLetter(sortName: string): string {
     return /^\p{L}$/u.test(folded) ? folded : "#";
 }
 
-// getIndexes is the legacy alias for getArtists used by DSub and some older clients
-libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res) => {
+// getIndexes is the legacy alias for getArtists used by DSub and some older clients. Which one answers is decided by the
+// route it is mounted on, not by the request's path text (a router matches any letter case).
+const artistIndexRoute = (key: "artists" | "indexes") => wrap(async (req, res) => {
     // Artists with a playable album, each counting those albums as search3 does (the cached count ignores playability).
     // Ordered by the same sortName the buckets are keyed on.
     const artists = await prisma.$queryRaw<
@@ -60,9 +61,8 @@ libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res
             artist: artistList,
         }));
 
-    const responseKey = req.path.includes("getIndexes") ? "indexes" : "artists";
     subsonicOk(req, res, {
-        [responseKey]: {
+        [key]: {
             // When the library a client lists last changed: a scan that changed songs, or an edit of a shown name
             // (services/libraryChanged.ts), never analysis writes, Discover songs or artist syncs.
             "@_lastModified": await libraryChangedAt(),
@@ -70,7 +70,9 @@ libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res
             index: indexes,
         },
     });
-}));
+});
+libraryRouter.all("/getArtists.view", artistIndexRoute("artists"));
+libraryRouter.all("/getIndexes.view", artistIndexRoute("indexes"));
 
 // ===================== FOLDER BROWSING =====================
 

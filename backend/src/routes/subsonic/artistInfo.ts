@@ -7,7 +7,9 @@ import { one } from "../../utils/subsonicParams";
 
 export const artistInfoRouter = Router();
 
-artistInfoRouter.all(["/getArtistInfo2.view", "/getArtistInfo.view"], wrap(async (req, res) => {
+// getArtistInfo2 and the legacy getArtistInfo answer with the same facts under different keys. Which one answers is
+// decided by the route it is mounted on, not by the request's path text (a router matches any letter case).
+const artistInfoRoute = (infoKey: "artistInfo2" | "artistInfo") => wrap(async (req, res) => {
     const id = one(req, "id");
     if (!id) return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
 
@@ -67,7 +69,6 @@ artistInfoRouter.all(["/getArtistInfo2.view", "/getArtistInfo.view"], wrap(async
 
     const picture = artistPicture(artist);
     const imageAddress = artistPictureAddress(artist);
-    const infoKey = req.path.includes("getArtistInfo2") ? "artistInfo2" : "artistInfo";
     return subsonicOk(req, res, {
         [infoKey]: {
             biography: artist.userSummary || artist.summary || undefined,
@@ -85,4 +86,6 @@ artistInfoRouter.all(["/getArtistInfo2.view", "/getArtistInfo.view"], wrap(async
             } : {}),
         },
     });
-}));
+});
+artistInfoRouter.all("/getArtistInfo2.view", artistInfoRoute("artistInfo2"));
+artistInfoRouter.all("/getArtistInfo.view", artistInfoRoute("artistInfo"));

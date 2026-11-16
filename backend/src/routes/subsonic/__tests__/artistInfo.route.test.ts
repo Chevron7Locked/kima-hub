@@ -40,6 +40,15 @@ afterAll(async () => {
     await closeEngineConnections();
 });
 
+// Express routes a call whatever its letter case, so the key follows the route that answered, not the path's text.
+it("answers getArtistInfo2 under artistInfo2 and the legacy getArtistInfo under artistInfo, however the name is cased", async () => {
+    const v2 = await request(app).get(`/rest/getartistinfo2.view?id=${P}main&f=json`);
+    expect(v2.body["subsonic-response"].artistInfo2).toBeDefined();
+    const legacy = await request(app).get(`/rest/getArtistInfo.view?id=${P}main&f=json`);
+    expect(legacy.body["subsonic-response"].artistInfo).toBeDefined();
+    expect(legacy.body["subsonic-response"].artistInfo2).toBeUndefined();
+});
+
 it("names similar artists whose names carry accents or an ampersand", async () => {
     const res = await request(app).get(`/rest/getArtistInfo2.view?id=${P}main&f=json`);
     expect(res.status).toBe(200);

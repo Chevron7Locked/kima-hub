@@ -101,6 +101,16 @@ describe('subsonic getArtists / getIndexes ordering', () => {
         expect(bucketOf(idx, artistId('3'))).toBe('R');
     });
 
+    // Express routes a call whatever its letter case, so the key follows the route that answered, not the path's text.
+    it('answers getArtists under artists and getIndexes under indexes, however the name is cased', async () => {
+        const artists = await ask('/getartists.view');
+        expect(artists.artists).toBeDefined();
+        expect(artists.indexes).toBeUndefined();
+        const legacy = await ask('/getINDEXES.view');
+        expect(legacy.indexes).toBeDefined();
+        expect(legacy.artists).toBeUndefined();
+    });
+
     it('answers getIndexes the same way', async () => {
         const { root, indexes: idx } = await indexes('/getIndexes.view');
         expect(root).toBeDefined();
