@@ -250,7 +250,9 @@ describe("data integrity check", () => {
         await prisma.artist.create({ data: { id: id("o_bare"), name: "Dint bare", identityKey: id("o_bk") } });
         await prisma.ownedAlbum.create({ data: { artistId: id("o_bare"), rgMbid: id("o_rg"), source: "native_scan" } });
 
-        const report = await runDataIntegrityCheck();
+        // An artist with no albums is not one a client lists, and whatever emptied it moved the marker then, so removing it leaves the marker.
+        let report!: Awaited<ReturnType<typeof runDataIntegrityCheck>>;
+        expect(await markerMoves(async () => { report = await runDataIntegrityCheck(); })).toBe(false);
 
         expect(report.orphanedArtists).toBeGreaterThanOrEqual(1);
         expect(await prisma.artist.count({ where: { id: id("o_bare") } })).toBe(0);
