@@ -18,6 +18,7 @@ import { activeDownloads } from "../utils/metrics";
 import { sourcePauseController } from "./sourcePauseController";
 import { isRateLimited } from "./enrichmentErrorCodeClassifier";
 import { failureCause } from "../utils/outcome";
+import { ensureDiscoverTag } from "./discovery/lidarrRemoval";
 import { failImportedDownload, removeFailedDownload } from "./lidarrFailures";
 import type { LidarrQueueItem } from "../types/lidarr";
 
@@ -165,7 +166,7 @@ class SimpleDownloadManager {
                 albumTitle,
                 musicPath,
                 artistMbid,
-                isDiscovery
+                isDiscovery ? { restoreTag: ensureDiscoverTag } : undefined
             );
 
             await downloadJobs.start(jobId, {

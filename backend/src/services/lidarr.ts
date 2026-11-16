@@ -98,6 +98,14 @@ function isTransient(error: any): boolean {
     return error?.isAxiosError === true || /database is locked/i.test(error?.message ?? "");
 }
 
+/**
+ * What a Discover caller brings to `addAlbum`: the check that puts Discover's tag back on an artist Kima's records show
+ * is Discover's. A library request passes nothing.
+ */
+export interface DiscoveryAdd {
+    restoreTag(artist: LidarrArtist, tagId: number): Promise<"tagged" | "not Discover's" | "refused">;
+}
+
 class LidarrService {
     private client: AxiosInstance | null = null;
     private enabled: boolean;
@@ -326,8 +334,9 @@ class LidarrService {
         albumTitle: string,
         rootFolderPath: string,
         artistMbid?: string,
-        isDiscovery: boolean = false
+        discovery?: DiscoveryAdd
     ): Promise<{ album: LidarrAlbum; searchCommandId?: number } | null> {
+        const isDiscovery = discovery !== undefined;
         const client = await this.requireClient();
 
         if (await sourcePauseController.isPaused("lidarr")) {
@@ -400,11 +409,11 @@ class LidarrService {
             // request takes the tag off, so Discover's cleanup leaves the artist alone.
             const discoveryTagId = await this.getOrCreateDiscoveryTag();
             let discoveryOwned = !!discoveryTagId && !!artist.tags?.includes(discoveryTagId);
-            if (isDiscovery && !discoveryOwned && discoveryTagId) {
+            if (discovery && !discoveryOwned && discoveryTagId) {
                 // An earlier cleanup could take the tag off an artist that is Discover's by Kima's records; put it
-                // back here too, or Discover refuses that artist for good. Imported late: the removal module uses this one.
-                const { ensureDiscoverTag } = await import("./discovery/lidarrRemoval");
-                discoveryOwned = (await ensureDiscoverTag(artist, discoveryTagId)) === "tagged";
+                // back here too, or Discover refuses that artist for good. Discover brings the check, because the
+                // module that holds it imports this one.
+                discoveryOwned = (await discovery.restoreTag(artist, discoveryTagId)) === "tagged";
             }
             if (isDiscovery && !discoveryOwned) {
                 logger.warn(

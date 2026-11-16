@@ -1,16 +1,15 @@
 /**
  * addAlbum: Discover adds only under an artist it tagged, only the exact MBID,
  * only without files; a library request untags the artist; an untagged artist Kima's records show is Discover's gets
- * its tag back first (that check is tested with the removal module); every request
+ * its tag back first (the caller supplies that check; the removal module tests it); every request
  * accepts any edition; a search that grabs nothing is explained from Lidarr's
  * release list; a Lidarr outage is reported as one, never as "not found".
  */
 
 import { AcquisitionErrorType, lidarrService } from "../lidarr";
-import { ensureDiscoverTag } from "../discovery/lidarrRemoval";
 
-jest.mock("../discovery/lidarrRemoval", () => ({ ensureDiscoverTag: jest.fn() }));
-const ensureTag = ensureDiscoverTag as jest.Mock;
+// Lidarr's module never imports the removal module (which imports it): the caller hands the tag check in.
+const ensureTag = jest.fn();
 
 const TAG = 22;
 const ARTIST_MBID = "artist-mbid";
@@ -48,7 +47,7 @@ beforeEach(() => {
 });
 
 const addForDiscover = (rgMbid: string, title: string) =>
-    lidarrService.addAlbum(rgMbid, "Interpol", title, "/music", ARTIST_MBID, true);
+    lidarrService.addAlbum(rgMbid, "Interpol", title, "/music", ARTIST_MBID, { restoreTag: ensureTag });
 
 it("leaves an artist the user already had in Lidarr alone", async () => {
     jest.spyOn(service, "getArtistList").mockResolvedValue([artist([])]);
@@ -122,7 +121,7 @@ it("takes the Discover tag off an artist the user asks for an album by", async (
     const untag = jest.spyOn(service, "removeTagsFromArtist").mockResolvedValue(true);
     catalog = [album("rg-asked", "Antics")];
 
-    await lidarrService.addAlbum("rg-asked", "Interpol", "Antics", "/music", ARTIST_MBID, false);
+    await lidarrService.addAlbum("rg-asked", "Interpol", "Antics", "/music", ARTIST_MBID);
 
     expect(untag).toHaveBeenCalledWith(5, [TAG]);
 });
@@ -142,13 +141,13 @@ it("reports an album Lidarr holds in full as owned without searching", async () 
     catalog = [{ ...album("rg-asked", "Antics", 11), statistics: { trackFileCount: 11, percentOfTracks: 100 } as any }];
 
     await expect(
-        lidarrService.addAlbum("rg-asked", "Interpol", "Antics", "/music", ARTIST_MBID, false)
+        lidarrService.addAlbum("rg-asked", "Interpol", "Antics", "/music", ARTIST_MBID)
     ).rejects.toMatchObject({ type: AcquisitionErrorType.ALREADY_OWNED });
     expect(client.post).not.toHaveBeenCalled();
 });
 
 describe("a search that grabs nothing", () => {
-    const addForLibrary = () => lidarrService.addAlbum("rg-asked", "Interpol", "Antics", "/music", ARTIST_MBID, false);
+    const addForLibrary = () => lidarrService.addAlbum("rg-asked", "Interpol", "Antics", "/music", ARTIST_MBID);
 
     beforeEach(() => {
         jest.spyOn(service, "getArtistList").mockResolvedValue([artist([])]);
