@@ -30,6 +30,14 @@
  * in one transaction, or answers the job already running, or that another retry was here first; `dismiss` and `dismissAllSettled` take settled jobs off the
  * list and leave running ones; `remove` cancels running ones and deletes the rows once the checks that read them have.
  *
+ * Whether a job is tried again is answered here, apart from the replacement of a retried pending song, which the
+ * retry route still makes through `retryOnce` because its pending-track rows live outside this module. A person's retry of a failed job: `findRetryable`
+ * finds it, `planRetry` says what the retry is (or why it cannot be), and `retryAlbum` makes the replacement through
+ * `retryOnce`. A release Lidarr gave up on: `countFailedRelease` uses one attempt, and says when the person's limit is
+ * reached and the job must fail. A request to download an album that has just failed waits: `recentlyFailed`. The
+ * status groups and their predicates (`isActive`, `isFailed`, `isSettled`, `isCompleted`) are the one way to ask of a
+ * job's status; a group's `includes` is not.
+ *
  * Lidarr and slskd are not talked to here: that stays with the download manager.
  * The move returns the jobs it settled, with the metadata as it now is, so a caller
  * can see which of its jobs it was that settled.
@@ -42,7 +50,7 @@ import { yieldToEventLoop } from "../../utils/async";
 import { eventBus } from "../eventBus";
 import { notificationService } from "../notificationService";
 import { notificationPolicyService } from "../notificationPolicyService";
-import { ACTIVE_STATUSES, FAILED_STATUSES, SETTLED_STATUSES } from "./jobStatuses";
+import { ACTIVE_STATUSES, FAILED_STATUSES, SETTLED_STATUSES, isActive } from "./jobStatuses";
 
 /** What a caller holds of a job it wants to move: only the id is read. */
 export type JobRef = { id: string };
@@ -67,7 +75,11 @@ export type StartInput = {
     metadata?: Record<string, unknown>;
 };
 
-export { JOB_STATUSES, ACTIVE_STATUSES, FAILED_STATUSES, SETTLED_STATUSES } from "./jobStatuses";
+export {
+    JOB_STATUSES, ACTIVE_STATUSES, FAILED_STATUSES, SETTLED_STATUSES,
+    isActive, isFailed, isSettled, isCompleted, isJobStatus,
+} from "./jobStatuses";
+export type { JobStatus } from "./jobStatuses";
 
 /** Whether a settled job ended because the user stopped it, not because the download failed. */
 export function isCancelled(job: { metadata: Prisma.JsonValue }): boolean {
@@ -161,7 +173,7 @@ export async function dismiss(userId: string, id: string): Promise<DismissResult
     if ((await prisma.downloadJob.updateMany(settled)).count > 0) return "dismissed";
     const stays = await prisma.downloadJob.findFirst({ where: { id, userId }, select: { status: true } });
     if (!stays) return "missing";
-    if (ACTIVE_STATUSES.includes(stays.status)) return "running";
+    if (isActive(stays.status)) return "running";
     // It settled between the two reads.
     await prisma.downloadJob.updateMany(settled);
     return "dismissed";
@@ -227,6 +239,128 @@ export async function retryOnce<T>(
             return { running };
         });
     }
+}
+
+/** The start of the stand-in album id a retried import job gets when its album has no MusicBrainz id. */
+export const NO_ALBUM_ID = "retry_";
+
+/** A failed job of the person's that a retry may start from, or null: it is not theirs, not failed, or not there. */
+export function findRetryable(userId: string, id: string) {
+    return prisma.downloadJob.findFirst({ where: { id, userId, status: { in: FAILED_STATUSES } } });
+}
+
+/** What trying a failed job again means, or why it cannot be tried. `refused` is the reason to give the person. */
+export type RetryPlan =
+    | { kind: "pending-track"; playlistId: string; pendingTrackId: string }
+    /** A Spotify import album: Soulseek first, then Lidarr when `targetMbid` is a real album id (null when it has none). */
+    | { kind: "import"; artistName: string; albumTitle: string; targetMbid: string | null }
+    | { kind: "album"; targetMbid: string; artistName: string; albumTitle: string }
+    | { refused: string };
+
+/**
+ * Reads a failed job and says what a retry of it is. A retry of a playlist's pending song needs the song; a Spotify
+ * import album needs its names; a library album needs its album id, and takes its artist and title from its own record,
+ * or else from its "Artist - Album" subject, split at the first " - " (a job from before the record was kept).
+ */
+export function planRetry(job: { subject: string; targetMbid: string | null; metadata: Prisma.JsonValue }): RetryPlan {
+    const metadata = job.metadata && typeof job.metadata === "object" && !Array.isArray(job.metadata) ? job.metadata : {};
+    const text = (key: string) => (typeof metadata[key] === "string" && metadata[key] ? (metadata[key] as string) : undefined);
+
+    if (metadata.downloadType === "pending-track-retry") {
+        const playlistId = text("playlistId");
+        const pendingTrackId = text("pendingTrackId");
+        if (!playlistId || !pendingTrackId) return { refused: "Cannot retry: missing playlistId or pendingTrackId" };
+        return { kind: "pending-track", playlistId, pendingTrackId };
+    }
+
+    if (metadata.downloadType === "spotify_import") {
+        const artistName = text("artistName");
+        const albumTitle = text("albumTitle");
+        if (!artistName || !albumTitle) return { refused: "Cannot retry: missing artist/album info" };
+        // A placeholder id is no album: nothing running can share it, and Lidarr has nothing to look for.
+        const hasAlbumId = !!job.targetMbid && !job.targetMbid.startsWith(NO_ALBUM_ID);
+        return { kind: "import", artistName, albumTitle, targetMbid: hasAlbumId ? job.targetMbid : null };
+    }
+
+    if (!job.targetMbid) return { refused: "Cannot retry: missing album MBID" };
+    const split = job.subject.indexOf(" - ");
+    return {
+        kind: "album",
+        targetMbid: job.targetMbid,
+        artistName: text("artistName") ?? (split > 0 ? job.subject.slice(0, split) : job.subject),
+        albumTitle: text("albumTitle") ?? (split > 0 ? job.subject.slice(split + 3) : job.subject),
+    };
+}
+
+/**
+ * Retries a failed album job once (`retryOnce`), making its replacement from the plan. A library copy waits pending for
+ * the download manager to start it. A Spotify import copy is already running, because the caller searches Soulseek for
+ * it at once. Either copy keeps the failed job's metadata less the marks of its failure.
+ */
+export function retryAlbum(
+    failed: {
+        id: string;
+        userId: string;
+        type: string;
+        subject: string;
+        targetMbid: string | null;
+        artistMbid: string | null;
+        discoveryBatchId: string | null;
+        metadata: Prisma.JsonValue;
+    },
+    plan: Extract<RetryPlan, { kind: "import" | "album" }>
+): Promise<RetryOutcome<Awaited<ReturnType<typeof create>>>> {
+    const base = { userId: failed.userId, artistMbid: failed.artistMbid, discoveryBatchId: failed.discoveryBatchId };
+    const metadata = withoutFailureMarks(failed.metadata) as Prisma.InputJsonObject;
+    if (plan.kind === "import") {
+        return retryOnce(failed, plan.targetMbid ? { type: "album", targetMbid: plan.targetMbid } : null, (tx) =>
+            create(
+                {
+                    ...base,
+                    type: "album",
+                    targetMbid: failed.targetMbid || `${NO_ALBUM_ID}${Date.now()}`,
+                    subject: `${plan.artistName} - ${plan.albumTitle}`,
+                    status: "processing",
+                    metadata: { ...metadata, retryAttempt: true },
+                },
+                tx
+            )
+        );
+    }
+    return retryOnce(failed, { type: failed.type, targetMbid: plan.targetMbid }, (tx) =>
+        create({ ...base, type: failed.type, targetMbid: plan.targetMbid, subject: failed.subject, metadata }, tx)
+    );
+}
+
+/** How long an album that failed is left alone before a request to download it again may start it. */
+const RECENT_FAILURE_MS = 30_000;
+
+/**
+ * Whether the person's library job for this target failed in the last 30 seconds, so a request to download it
+ * again waits. It locks the row it finds, skipping rows another transaction holds, so two requests at once agree. Pass
+ * the transaction's client.
+ */
+export async function recentlyFailed(key: ActiveKey, db: Pick<Prisma.TransactionClient, "$queryRaw">): Promise<boolean> {
+    const found = await db.$queryRaw<{ id: string }[]>`
+        SELECT id
+        FROM "DownloadJob"
+        WHERE "targetMbid" = ${key.targetMbid}
+          AND "userId" = ${key.userId}
+          AND type = ${key.type}
+          AND "discoveryBatchId" IS NOT DISTINCT FROM ${key.discoveryBatchId ?? null}::text
+          AND status = ANY(${FAILED_STATUSES}::text[])
+          AND "completedAt" >= ${new Date(Date.now() - RECENT_FAILURE_MS)}
+        FOR UPDATE SKIP LOCKED
+    `;
+    return found.length > 0;
+}
+
+const DEFAULT_MAX_ATTEMPTS = 3;
+
+/** How many releases Lidarr may try for one of the person's jobs before it fails: their own setting, or three. */
+async function attemptLimit(userId: string): Promise<number> {
+    const config = await prisma.userDiscoverConfig.findUnique({ where: { userId }, select: { maxRetryAttempts: true } });
+    return config?.maxRetryAttempts ?? DEFAULT_MAX_ATTEMPTS;
 }
 
 /** The metadata column with `patch` merged in: a null value clears its field, an undefined one is ignored. */
@@ -362,39 +496,57 @@ export async function grab(
     );
 }
 
+/** What `countFailedRelease` found: the job as the row now has it, and whether this was the last release it may try. */
+export type ReleaseCount = { attempts: number; metadata: Prisma.JsonValue; exhausted: boolean; counted: boolean };
+
 /**
  * Counts a failed release against a running job: it lets go of the download (`downloadId`, which it keeps on record
- * among its previous ones), uses one of its attempts unless `exhausted` (a job at its limit keeps its count and its
- * start time), and says why in its status text. A report of a release the job already counted, or of a job that is no
- * longer running, changes nothing and answers null. The fields merge into the metadata as the row holds it, so a
- * webhook that wrote in between keeps what it wrote. Pass the transaction's client to count inside one. Answers the
- * attempts and metadata as the row now has them.
+ * among its previous ones), uses one of its attempts and says why in its status text. A job already at the person's
+ * attempt limit (`attemptLimit`) keeps its count and its start time and answers `exhausted`: it has no release left
+ * to try, and the caller fails it. The row is locked and judged in one statement, so two failed releases at once
+ * cannot both take the last attempt. A report of a release the job already counted writes nothing and answers
+ * `counted: false`, and the job goes on being tried; a job that is no longer running answers null. The fields merge
+ * into the metadata as the row holds it, so a webhook that wrote in between keeps what it wrote. Pass the
+ * transaction's client to count inside one.
  */
 export async function countFailedRelease(
-    job: { id: string; exhausted: boolean },
+    job: { id: string; userId: string },
     release: { downloadId: string; reason: string },
     db: Pick<Prisma.TransactionClient, "$queryRaw"> = prisma
-): Promise<{ attempts: number; metadata: Prisma.JsonValue } | null> {
+): Promise<ReleaseCount | null> {
     const { downloadId, reason } = release;
-    const attempts = job.exhausted ? Prisma.sql`attempts` : Prisma.sql`attempts + 1`;
-    const patch = { parked: null, lastError: reason, ...(job.exhausted ? {} : { startedAt: new Date().toISOString() }) };
-    const rows = await db.$queryRaw<{ attempts: number; metadata: Prisma.JsonValue }[]>`
-        UPDATE "DownloadJob"
+    const limit = await attemptLimit(job.userId);
+    const spent = Prisma.sql`cur.before >= ${limit}::int`;
+    const attempts = Prisma.sql`(CASE WHEN ${spent} THEN j.attempts ELSE j.attempts + 1 END)`;
+    const rows = await db.$queryRaw<{ attempts: number; metadata: Prisma.JsonValue; exhausted: boolean }[]>`
+        WITH cur AS (
+            SELECT id, attempts AS before
+            FROM "DownloadJob"
+            WHERE id = ${job.id}
+              AND status = 'processing'
+              AND NOT (coalesce(metadata->'previousDownloadIds', '[]'::jsonb) ? ${downloadId})
+            FOR UPDATE
+        )
+        UPDATE "DownloadJob" j
         SET "lidarrRef" = NULL,
             attempts = ${attempts},
             metadata = ${mergedMetadata(
-                patch,
+                { parked: null, lastError: reason },
                 Prisma.sql` || jsonb_build_object(
-                    'previousDownloadIds', coalesce(metadata->'previousDownloadIds', '[]'::jsonb) || to_jsonb(${downloadId}::text),
+                    'previousDownloadIds', coalesce(j.metadata->'previousDownloadIds', '[]'::jsonb) || to_jsonb(${downloadId}::text),
                     'statusText', 'Lidarr #' || (${attempts})
-                )`
+                ) || (CASE WHEN ${spent} THEN '{}'::jsonb ELSE jsonb_build_object('startedAt', ${new Date().toISOString()}::text) END)`
             )}
-        WHERE id = ${job.id}
-          AND status = 'processing'
-          AND NOT (coalesce(metadata->'previousDownloadIds', '[]'::jsonb) ? ${downloadId})
-        RETURNING attempts, metadata
+        FROM cur
+        WHERE j.id = cur.id
+        RETURNING j.attempts, j.metadata, ${spent} AS exhausted
     `;
-    return rows[0] ?? null;
+    if (rows[0]) return { ...rows[0], counted: true };
+    const already = await db.$queryRaw<{ attempts: number; metadata: Prisma.JsonValue }[]>`
+        SELECT attempts, metadata FROM "DownloadJob"
+        WHERE id = ${job.id} AND status = 'processing' AND coalesce(metadata->'previousDownloadIds', '[]'::jsonb) ? ${downloadId}
+    `;
+    return already[0] ? { ...already[0], exhausted: false, counted: false } : null;
 }
 
 /**

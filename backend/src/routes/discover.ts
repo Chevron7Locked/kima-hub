@@ -71,10 +71,10 @@ router.get("/batch-status", async (req, res) => {
         }
 
         const completedJobs = activeBatch.jobs.filter(
-            (j) => j.status === "completed"
+            (j) => downloadJobs.isCompleted(j.status)
         ).length;
         const failedJobs = activeBatch.jobs.filter(
-            (j) => downloadJobs.FAILED_STATUSES.includes(j.status)
+            (j) => downloadJobs.isFailed(j.status)
         ).length;
         const totalJobs = activeBatch.jobs.length;
         const progress =
@@ -144,7 +144,7 @@ router.delete("/batch", async (req, res) => {
                 },
             });
 
-            const unfinished = batch.jobs.filter((j) => downloadJobs.ACTIVE_STATUSES.includes(j.status));
+            const unfinished = batch.jobs.filter((j) => downloadJobs.isActive(j.status));
             try {
                 await simpleDownloadManager.cancelJobs(unfinished);
             } catch (lidarrError) {

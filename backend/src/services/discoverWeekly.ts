@@ -544,10 +544,10 @@ class DiscoverWeeklyService {
         for (const batch of stuckBatches) {
             const batchAge = Date.now() - batch.createdAt.getTime();
             const completedJobs = batch.jobs.filter(
-                (j) => j.status === "completed"
+                (j) => downloadJobs.isCompleted(j.status)
             );
             const pendingJobs = batch.jobs.filter(
-                (j) => downloadJobs.ACTIVE_STATUSES.includes(j.status)
+                (j) => downloadJobs.isActive(j.status)
             );
 
             if (batchAge > ABSOLUTE_MAX_TIMEOUT) {
@@ -662,17 +662,17 @@ class DiscoverWeeklyService {
         }
 
         const completedJobs = batch.jobs.filter(
-            (j) => j.status === "completed"
+            (j) => downloadJobs.isCompleted(j.status)
         );
         const settledAsFailed = batch.jobs.filter(
-            (j) => downloadJobs.FAILED_STATUSES.includes(j.status)
+            (j) => downloadJobs.isFailed(j.status)
         );
         // A job the user cancelled is not a failed album: it is never recorded as unavailable
         // and does not count toward "All downloads failed".
         const cancelledJobs = settledAsFailed.filter(downloadJobs.isCancelled);
         const failedJobs = settledAsFailed.filter((j) => !downloadJobs.isCancelled(j));
         const pendingJobs = batch.jobs.filter(
-            (j) => downloadJobs.ACTIVE_STATUSES.includes(j.status)
+            (j) => downloadJobs.isActive(j.status)
         );
 
         const completed = completedJobs.length;
@@ -1404,7 +1404,7 @@ class DiscoverWeeklyService {
 
         const successfulArtistMbids = new Set<string>();
         for (const job of batch.jobs) {
-            if (job.status === "completed") {
+            if (downloadJobs.isCompleted(job.status)) {
                 const metadata = job.metadata as any;
                 if (metadata?.artistMbid) {
                     successfulArtistMbids.add(metadata.artistMbid);

@@ -18,7 +18,6 @@ interface NotificationDecision {
     notificationType?: "download_complete" | "download_failed" | "download_waiting";
 }
 
-const DEFAULT_RETRY_WINDOW_MINUTES = 30;
 // How many of the user's recent terminal jobs are checked for an earlier
 // notification of the same album. Retries land close in time, so a bounded
 // recent window suffices; a miss costs one extra notification.
@@ -29,12 +28,12 @@ class NotificationPolicyService {
      * Evaluate whether a notification should be sent for a download job.
      *
      * @param jobId - The download job ID
-     * @param eventType - The type of event (complete, failed, retry, cancel)
+     * @param eventType - The type of event (complete, failed, cancel, parked)
      * @returns Decision on whether to send notification
      */
     async evaluateNotification(
         jobId: string,
-        eventType: "complete" | "failed" | "retry" | "cancel" | "parked"
+        eventType: "complete" | "failed" | "cancel" | "parked"
     ): Promise<NotificationDecision> {
         logger.debug(
             `[NOTIFICATION-POLICY] Evaluating: ${jobId} (${eventType})`
@@ -98,7 +97,11 @@ class NotificationPolicyService {
                 });
 
             case "processing":
-                return await this.evaluateProcessingJob(job, eventType);
+                // A running job is told of when it settles, or when Lidarr parks it, not before.
+                return {
+                    shouldNotify: false,
+                    reason: "Job still processing - waiting for terminal status",
+                };
 
             case "failed":
                 return await this.evaluateTerminalJob(job, eventType, "failed", {
@@ -153,79 +156,6 @@ class NotificationPolicyService {
             shouldNotify: true,
             ...notification,
         };
-    }
-
-    /**
-     * Evaluate notification for processing job
-     */
-    private async evaluateProcessingJob(
-        job: any,
-        eventType: string
-    ): Promise<NotificationDecision> {
-        // Processing jobs should never send notifications
-        // They're still in active retry window
-        if (eventType === "complete") {
-            return {
-                shouldNotify: false,
-                reason: "Job still processing - wait for status update to completed",
-            };
-        }
-
-        if (eventType === "failed" || eventType === "retry") {
-            // Check if in retry window
-            const inRetryWindow = await this.isInRetryWindow(job);
-            if (inRetryWindow) {
-                return {
-                    shouldNotify: false,
-                    reason: "Job in active retry window - suppressing notification",
-                };
-            }
-            // Retry window expired but still processing: stay quiet until the
-            // job reaches a terminal status and reports through it.
-            return {
-                shouldNotify: false,
-                reason: "Retry window expired but job still processing - waiting for terminal status",
-            };
-        }
-
-        return {
-            shouldNotify: false,
-            reason: "Processing job - no notification needed",
-        };
-    }
-
-    /**
-     * True while a processing job is young enough that a retry may still
-     * succeed: it started (or was created) within the retry window.
-     */
-    private async isInRetryWindow(job: any): Promise<boolean> {
-        if (job.status !== "processing") {
-            return false;
-        }
-
-        const metadata = (job.metadata as any) || {};
-        const startedAt = metadata.startedAt
-            ? new Date(metadata.startedAt)
-            : job.createdAt;
-
-        const windowMs = DEFAULT_RETRY_WINDOW_MINUTES * 60 * 1000;
-        const elapsed = Date.now() - startedAt.getTime();
-
-        if (elapsed > windowMs) {
-            logger.debug(
-                `[NOTIFICATION-POLICY]   Retry window expired (${Math.round(
-                    elapsed / 60000
-                )}m > ${DEFAULT_RETRY_WINDOW_MINUTES}m)`
-            );
-            return false;
-        }
-
-        logger.debug(
-            `[NOTIFICATION-POLICY]   In retry window (${Math.round(
-                elapsed / 60000
-            )}m < ${DEFAULT_RETRY_WINDOW_MINUTES}m)`
-        );
-        return true;
     }
 
     /**

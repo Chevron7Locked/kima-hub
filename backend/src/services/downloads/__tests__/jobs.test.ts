@@ -6,6 +6,7 @@
  * Spotify import.
  */
 
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../../utils/db";
 import * as downloadJobs from "../jobs";
 import { notificationPolicyService } from "../../notificationPolicyService";
@@ -48,6 +49,7 @@ afterEach(async () => {
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await prisma.discoveryBatch.deleteMany({ where: { userId: USER } });
     await prisma.notification.deleteMany({ where: { userId: USER } });
+    await prisma.userDiscoverConfig.deleteMany({ where: { userId: USER } });
 });
 
 afterAll(async () => {
@@ -587,13 +589,17 @@ describe("noteArtist", () => {
 
 describe("countFailedRelease", () => {
     const counted = { downloadId: "dl-1", reason: "no tracks in the download" };
+    const of = async (id: string) => {
+        const { userId } = await row(id);
+        return { id, userId };
+    };
 
     it("counts a failed release against a running job, merging what a webhook wrote meanwhile", async () => {
         await job("dl_count_ok", { lidarrRef: "dl-1", attempts: 1, metadata: { searchCommandId: 4, parked: "tracks missing", keep: "me", previousDownloadIds: ["older"] } });
 
-        const result = await downloadJobs.countFailedRelease({ id: "dl_count_ok", exhausted: false }, counted);
+        const result = await downloadJobs.countFailedRelease(await of("dl_count_ok"), counted);
 
-        expect(result).toMatchObject({ attempts: 2 });
+        expect(result).toMatchObject({ attempts: 2, exhausted: false, counted: true });
         expect(await row("dl_count_ok")).toMatchObject({ status: "processing", lidarrRef: null, attempts: 2 });
         const m = await meta("dl_count_ok");
         expect(m).toMatchObject({ keep: "me", searchCommandId: 4, lastError: counted.reason, previousDownloadIds: ["older", "dl-1"], statusText: "Lidarr #2" });
@@ -602,30 +608,55 @@ describe("countFailedRelease", () => {
         expect(result?.metadata).toMatchObject({ statusText: "Lidarr #2" });
     });
 
-    it("keeps the attempt count and the start time of a job that has used its releases", async () => {
+    it("keeps the attempt count and the start time of a job that has used its releases, and says so", async () => {
         await job("dl_count_last", { lidarrRef: "dl-1", attempts: 3, metadata: { startedAt: "2026-11-01T00:00:00.000Z" } });
 
-        const result = await downloadJobs.countFailedRelease({ id: "dl_count_last", exhausted: true }, counted);
+        const result = await downloadJobs.countFailedRelease(await of("dl_count_last"), counted);
 
-        expect(result).toMatchObject({ attempts: 3 });
+        expect(result).toMatchObject({ attempts: 3, exhausted: true, counted: true });
         expect(await row("dl_count_last")).toMatchObject({ attempts: 3, lidarrRef: null });
         expect(await meta("dl_count_last")).toMatchObject({ startedAt: "2026-11-01T00:00:00.000Z", statusText: "Lidarr #3", lastError: counted.reason });
     });
 
-    it("counts a release once, however many times Lidarr reports it", async () => {
-        await job("dl_count_twice", { lidarrRef: "dl-1", attempts: 1, metadata: {} });
+    it("takes the limit from the person's own setting, three when they have none", async () => {
+        await prisma.userDiscoverConfig.create({ data: { userId: USER, maxRetryAttempts: 5 } });
+        await job("dl_count_own_limit", { lidarrRef: "dl-1", attempts: 3, metadata: {} });
+        await job("dl_count_own_limit_last", { lidarrRef: "dl-1", attempts: 5, metadata: {} });
 
-        expect(await downloadJobs.countFailedRelease({ id: "dl_count_twice", exhausted: false }, counted)).not.toBeNull();
-        expect(await downloadJobs.countFailedRelease({ id: "dl_count_twice", exhausted: false }, counted)).toBeNull();
+        expect(await downloadJobs.countFailedRelease(await of("dl_count_own_limit"), counted)).toMatchObject({ attempts: 4, exhausted: false });
+        expect(await downloadJobs.countFailedRelease(await of("dl_count_own_limit_last"), counted)).toMatchObject({ attempts: 5, exhausted: true });
+        await prisma.userDiscoverConfig.deleteMany({ where: { userId: USER } });
+    });
 
-        expect(await row("dl_count_twice")).toMatchObject({ attempts: 2 });
+    it("counts a release once, however many times Lidarr reports it, and the job goes on being tried", async () => {
+        await job("dl_count_twice", { lidarrRef: "dl-1", attempts: 2, metadata: {} });
+
+        expect(await downloadJobs.countFailedRelease(await of("dl_count_twice"), counted)).toMatchObject({ attempts: 3, counted: true });
+        const again = await downloadJobs.countFailedRelease(await of("dl_count_twice"), counted);
+
+        expect(again).toMatchObject({ attempts: 3, exhausted: false, counted: false });
+        expect(await row("dl_count_twice")).toMatchObject({ attempts: 3 });
         expect((await meta("dl_count_twice")).previousDownloadIds).toEqual(["dl-1"]);
+    });
+
+    it("lets only one of two releases failing at once take the last attempt", async () => {
+        await job("dl_count_race", { lidarrRef: "dl-1", attempts: 2, metadata: {} });
+        const target = await of("dl_count_race");
+
+        const results = await Promise.all([
+            downloadJobs.countFailedRelease(target, { downloadId: "dl-a", reason: "a" }),
+            downloadJobs.countFailedRelease(target, { downloadId: "dl-b", reason: "b" }),
+        ]);
+
+        expect(results.map((r) => r?.exhausted).sort()).toEqual([false, true]);
+        expect(await row("dl_count_race")).toMatchObject({ attempts: 3 });
+        expect((await meta("dl_count_race")).previousDownloadIds).toHaveLength(2);
     });
 
     it("leaves a job that is not running alone", async () => {
         await job("dl_count_settled", { status: "failed", attempts: 2, metadata: { keep: "me" } });
 
-        expect(await downloadJobs.countFailedRelease({ id: "dl_count_settled", exhausted: false }, counted)).toBeNull();
+        expect(await downloadJobs.countFailedRelease(await of("dl_count_settled"), counted)).toBeNull();
 
         expect(await row("dl_count_settled")).toMatchObject({ status: "failed", attempts: 2 });
         expect(await meta("dl_count_settled")).toEqual({ keep: "me" });
@@ -633,15 +664,194 @@ describe("countFailedRelease", () => {
 
     it("writes inside the caller's transaction", async () => {
         await job("dl_count_tx", { lidarrRef: "dl-1", attempts: 1, metadata: {} });
+        const asRead = await of("dl_count_tx");
 
         await expect(
             prisma.$transaction(async (tx) => {
-                await downloadJobs.countFailedRelease({ id: "dl_count_tx", exhausted: false }, counted, tx);
+                await downloadJobs.countFailedRelease(asRead, counted, tx);
                 throw new Error("roll back");
             })
         ).rejects.toThrow("roll back");
 
         expect(await row("dl_count_tx")).toMatchObject({ attempts: 1, lidarrRef: "dl-1" });
+    });
+});
+
+describe("job statuses", () => {
+    it("names each status once, in the group or groups the readers ask about", () => {
+        const groups = (status: string) => ({
+            active: downloadJobs.isActive(status),
+            failed: downloadJobs.isFailed(status),
+            settled: downloadJobs.isSettled(status),
+            completed: downloadJobs.isCompleted(status),
+        });
+
+        expect([...downloadJobs.JOB_STATUSES]).toEqual(["pending", "processing", "completed", "failed"]);
+        expect(groups("pending")).toEqual({ active: true, failed: false, settled: false, completed: false });
+        expect(groups("processing")).toEqual({ active: true, failed: false, settled: false, completed: false });
+        expect(groups("completed")).toEqual({ active: false, failed: false, settled: true, completed: true });
+        expect(groups("failed")).toEqual({ active: false, failed: true, settled: true, completed: false });
+        expect(groups("exhausted")).toEqual({ active: false, failed: false, settled: false, completed: false });
+    });
+
+    it("keeps the groups the database filters on in step with the predicates", () => {
+        for (const status of downloadJobs.JOB_STATUSES) {
+            expect(downloadJobs.ACTIVE_STATUSES.includes(status)).toBe(downloadJobs.isActive(status));
+            expect(downloadJobs.FAILED_STATUSES.includes(status)).toBe(downloadJobs.isFailed(status));
+            expect(downloadJobs.SETTLED_STATUSES.includes(status)).toBe(downloadJobs.isSettled(status));
+            expect(downloadJobs.isActive(status) !== downloadJobs.isSettled(status)).toBe(true);
+        }
+    });
+
+    it("tells a status from any other string", () => {
+        expect(downloadJobs.isJobStatus("failed")).toBe(true);
+        expect(downloadJobs.isJobStatus("exhausted")).toBe(false);
+        expect(downloadJobs.isJobStatus("")).toBe(false);
+    });
+});
+
+describe("findRetryable", () => {
+    it("finds the person's own failed job and nothing else", async () => {
+        await job("dl_find_failed", { status: "failed" });
+        await job("dl_find_running", { status: "processing", targetMbid: "rg-other" });
+        await job("dl_find_done", { status: "completed", targetMbid: "rg-done" });
+
+        expect(await downloadJobs.findRetryable(USER, "dl_find_failed")).toMatchObject({ id: "dl_find_failed" });
+        expect(await downloadJobs.findRetryable("someone-else", "dl_find_failed")).toBeNull();
+        expect(await downloadJobs.findRetryable(USER, "dl_find_running")).toBeNull();
+        expect(await downloadJobs.findRetryable(USER, "dl_find_done")).toBeNull();
+        expect(await downloadJobs.findRetryable(USER, "dl_find_nothing")).toBeNull();
+    });
+});
+
+describe("planRetry", () => {
+    const plan = (data: { subject?: string; targetMbid?: string | null; metadata?: Prisma.JsonObject | null }) =>
+        downloadJobs.planRetry({ subject: "Low - Sunflower", targetMbid: "rg-1", metadata: null, ...data });
+
+    it("sends a retry of a playlist's pending song back to that song", () => {
+        expect(plan({ metadata: { downloadType: "pending-track-retry", playlistId: "pl", pendingTrackId: "pt" } })).toEqual({
+            kind: "pending-track", playlistId: "pl", pendingTrackId: "pt",
+        });
+    });
+
+    it("refuses a pending song's retry that does not say which song", () => {
+        expect(plan({ metadata: { downloadType: "pending-track-retry", playlistId: "pl" } })).toEqual({
+            refused: "Cannot retry: missing playlistId or pendingTrackId",
+        });
+    });
+
+    it("reads a Spotify import album's names from its record, and its album id when it has a real one", () => {
+        const metadata = { downloadType: "spotify_import", artistName: "Low", albumTitle: "Secret Name" };
+        expect(plan({ metadata })).toEqual({ kind: "import", artistName: "Low", albumTitle: "Secret Name", targetMbid: "rg-1" });
+        expect(plan({ metadata, targetMbid: `${downloadJobs.NO_ALBUM_ID}123` })).toMatchObject({ kind: "import", targetMbid: null });
+        expect(plan({ metadata, targetMbid: null })).toMatchObject({ kind: "import", targetMbid: null });
+    });
+
+    it("refuses a Spotify import album that lost its names", () => {
+        expect(plan({ metadata: { downloadType: "spotify_import", artistName: "Low" } })).toEqual({
+            refused: "Cannot retry: missing artist/album info",
+        });
+    });
+
+    it("takes a library album's names from its record, then from its subject, splitting at the first ' - '", () => {
+        expect(plan({ metadata: { artistName: "Godspeed You! Black Emperor - Live", albumTitle: "Slow Riot" } })).toEqual({
+            kind: "album", targetMbid: "rg-1", artistName: "Godspeed You! Black Emperor - Live", albumTitle: "Slow Riot",
+        });
+        expect(plan({ subject: "Low - Things We Lost - Remastered" })).toMatchObject({
+            artistName: "Low", albumTitle: "Things We Lost - Remastered",
+        });
+        expect(plan({ subject: "Just A Name" })).toMatchObject({ artistName: "Just A Name", albumTitle: "Just A Name" });
+    });
+
+    it("refuses a library album with no album id", () => {
+        expect(plan({ targetMbid: null })).toEqual({ refused: "Cannot retry: missing album MBID" });
+        expect(plan({ targetMbid: "" })).toEqual({ refused: "Cannot retry: missing album MBID" });
+    });
+});
+
+describe("retryAlbum", () => {
+    const albumPlanOf = (failed: Parameters<typeof downloadJobs.planRetry>[0]) => {
+        const plan = downloadJobs.planRetry(failed);
+        if (!("kind" in plan) || plan.kind === "pending-track") throw new Error("expected an album plan");
+        return plan;
+    };
+
+    it("makes a pending copy of a failed library job, without the marks of its failure", async () => {
+        const failed = await job("dl_ra_lib", {
+            status: "failed", targetMbid: "rg-ra", artistMbid: "ar-1",
+            metadata: { downloadType: "library", artistName: "Low", albumTitle: "Secret Name", notificationSent: true, failedAt: "2026-01-01T00:00:00.000Z", statusText: "old", keep: "me" },
+        });
+
+        const outcome = await downloadJobs.retryAlbum(failed, albumPlanOf(failed));
+
+        expect(outcome).toHaveProperty("replacement");
+        const made = (outcome as { replacement: { id: string } }).replacement;
+        expect(await row(made.id)).toMatchObject({ status: "pending", type: "album", targetMbid: "rg-ra", artistMbid: "ar-1", subject: failed.subject });
+        const m = await meta(made.id);
+        expect(m).toMatchObject({ keep: "me", artistName: "Low" });
+        expect(m.notificationSent).toBeUndefined();
+        expect(m.failedAt).toBeUndefined();
+        expect((await row(failed.id)).cleared).toBe(true);
+    });
+
+    it("makes a running copy of a failed Spotify import album, marked as a retry, under a placeholder id when it had none", async () => {
+        const failed = await job("dl_ra_import", {
+            status: "failed", targetMbid: null,
+            metadata: { downloadType: "spotify_import", artistName: "Low", albumTitle: "Secret Name", spotifyImportJobId: "imp", notificationSent: true },
+        });
+
+        const outcome = await downloadJobs.retryAlbum(failed, albumPlanOf(failed));
+
+        const made = await row((outcome as { replacement: { id: string } }).replacement.id);
+        expect(made).toMatchObject({ status: "processing", subject: "Low - Secret Name", attempts: 1 });
+        expect(made.targetMbid?.startsWith(downloadJobs.NO_ALBUM_ID)).toBe(true);
+        expect(made.metadata).toMatchObject({ retryAttempt: true, spotifyImportJobId: "imp" });
+        expect((made.metadata as any).notificationSent).toBeUndefined();
+    });
+
+    it("answers the job already downloading the album when a failed job is retried twice", async () => {
+        const failed = await job("dl_ra_twice", { status: "failed", targetMbid: "rg-twice", metadata: {} });
+        const plan = albumPlanOf(failed);
+
+        expect(await downloadJobs.retryAlbum(failed, plan)).toHaveProperty("replacement");
+        expect(await downloadJobs.retryAlbum(failed, plan)).toHaveProperty("running");
+        expect(await prisma.downloadJob.count({ where: { userId: USER, status: { in: ["pending", "processing"] } } })).toBe(1);
+    });
+
+    it.each([
+        ["library album", "dl_ra_rollback_lib", {}],
+        ["Spotify import album", "dl_ra_rollback_imp", { downloadType: "spotify_import", artistName: "Low", albumTitle: "Secret Name" }],
+    ])("leaves the failed %s job on the list when its replacement cannot be created", async (_name, id, metadata) => {
+        const failed = await job(id, { status: "failed", targetMbid: `rg-${id}`, metadata });
+        // A batch that does not exist makes the replacement's insert fail.
+        const broken = { ...failed, discoveryBatchId: "no-such-batch" };
+
+        await expect(downloadJobs.retryAlbum(broken, albumPlanOf(failed))).rejects.toThrow();
+
+        expect(await prisma.downloadJob.findMany({ where: { userId: USER } })).toMatchObject([{ id, status: "failed", cleared: false }]);
+    });
+});
+
+describe("recentlyFailed", () => {
+    const key = { userId: USER, type: "album", targetMbid: "rg-recent" };
+
+    it("is true for an album that failed in the last 30 seconds, and false for one that failed earlier", async () => {
+        await job("dl_recent_new", { status: "failed", targetMbid: "rg-recent", completedAt: new Date(Date.now() - 5_000) });
+        expect(await prisma.$transaction((tx) => downloadJobs.recentlyFailed(key, tx))).toBe(true);
+
+        await prisma.downloadJob.update({ where: { id: "dl_recent_new" }, data: { completedAt: new Date(Date.now() - 120_000) } });
+        expect(await prisma.$transaction((tx) => downloadJobs.recentlyFailed(key, tx))).toBe(false);
+    });
+
+    it("looks at the person's own library job of that album only", async () => {
+        const recent = { status: "failed", targetMbid: "rg-recent", completedAt: new Date() };
+        const week = await batchOf(1);
+        await job("dl_recent_batch", { ...recent, discoveryBatchId: week.id });
+        await job("dl_recent_track", { ...recent, type: "track" });
+        await job("dl_recent_running", { status: "processing", targetMbid: "rg-recent", completedAt: new Date() });
+
+        expect(await prisma.$transaction((tx) => downloadJobs.recentlyFailed(key, tx))).toBe(false);
+        expect(await prisma.$transaction((tx) => downloadJobs.recentlyFailed({ ...key, userId: "someone-else" }, tx))).toBe(false);
     });
 });
 

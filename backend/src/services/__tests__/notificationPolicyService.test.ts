@@ -34,7 +34,7 @@ function seedJob(overrides: Record<string, unknown> = {}) {
         } as never,
     });
 }
-const evaluate = (eventType: "complete" | "failed" | "retry" | "cancel" = "complete") =>
+const evaluate = (eventType: "complete" | "failed" | "cancel" = "complete") =>
     notificationPolicyService.evaluateNotification(JOB, eventType);
 
 beforeAll(wipe);

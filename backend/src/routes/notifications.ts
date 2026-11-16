@@ -21,9 +21,6 @@ import {
 
 const router = Router();
 
-/** The start of the stand-in id a retried import job gets when its album has no MusicBrainz id. */
-const NO_ALBUM_ID = "retry_";
-
 const deduplicated = (running: DownloadJob) => ({ success: true, newJobId: running.id, deduplicated: true });
 const ALREADY_RETRIED = "This download was already retried or removed";
 
@@ -290,13 +287,7 @@ router.post(
     requireAcquirePermission,
     async (req: Request, res: Response) => {
         try {
-            const failedJob = await prisma.downloadJob.findFirst({
-                where: {
-                    id: req.params.id,
-                    userId: req.user!.id,
-                    status: { in: downloadJobs.FAILED_STATUSES },
-                },
-            });
+            const failedJob = await downloadJobs.findRetryable(req.user!.id, req.params.id);
 
             if (!failedJob) {
                 return res
@@ -304,22 +295,12 @@ router.post(
                     .json({ error: "Download not found or not failed" });
             }
 
-            // If this was a pending-track retry job, re-run the pending-track retry flow
-            const metadata = failedJob.metadata as Record<
-                string,
-                unknown
-            > | null;
-            if (metadata?.downloadType === "pending-track-retry") {
-                const playlistId = metadata.playlistId as string | undefined;
-                const pendingTrackId = metadata.pendingTrackId as
-                    | string
-                    | undefined;
+            const plan = downloadJobs.planRetry(failedJob);
+            if ("refused" in plan) return res.status(400).json({ error: plan.refused });
 
-                if (!playlistId || !pendingTrackId) {
-                    return res.status(400).json({
-                        error: "Cannot retry: missing playlistId or pendingTrackId",
-                    });
-                }
+            // A pending-track retry job re-runs the pending-track retry flow
+            if (plan.kind === "pending-track") {
+                const { playlistId, pendingTrackId } = plan;
 
                 // Checked before the failed row is cleared, so a song that is gone leaves its row to be dismissed.
                 const pendingTrack = await prisma.playlistPendingTrack.findFirst({
@@ -358,34 +339,10 @@ router.post(
                 return res.json({ success: true, newJobId: job.id });
             }
 
-            // If this was a spotify_import job, retry with Soulseek first
-            if (metadata?.downloadType === "spotify_import") {
-                const artistName = metadata.artistName as string;
-                const albumTitle = metadata.albumTitle as string;
-
-                if (!artistName || !albumTitle) {
-                    return res.status(400).json({
-                        error: "Cannot retry: missing artist/album info",
-                    });
-                }
-
-                // A placeholder id is no album: nothing running can share it.
-                const hasAlbumId = !!failedJob.targetMbid && !failedJob.targetMbid.startsWith(NO_ALBUM_ID);
-                const outcome = await downloadJobs.retryOnce(failedJob, hasAlbumId ? { type: "album", targetMbid: failedJob.targetMbid! } : null, (tx) =>
-                    downloadJobs.create({
-                        userId: req.user!.id,
-                        type: "album",
-                        targetMbid: failedJob.targetMbid || `${NO_ALBUM_ID}${Date.now()}`,
-                        artistMbid: failedJob.artistMbid,
-                        discoveryBatchId: failedJob.discoveryBatchId,
-                        subject: `${artistName} - ${albumTitle}`,
-                        status: "processing",
-                        metadata: {
-                            ...downloadJobs.withoutFailureMarks(metadata),
-                            retryAttempt: true,
-                        } as any,
-                    }, tx)
-                );
+            // A Spotify import album is retried with Soulseek first
+            if (plan.kind === "import") {
+                const { artistName, albumTitle } = plan;
+                const outcome = await downloadJobs.retryAlbum(failedJob, plan);
                 if ("running" in outcome) return res.json(deduplicated(outcome.running));
                 if ("alreadyRetried" in outcome) return res.status(409).json({ error: ALREADY_RETRIED });
                 const newJobRecord = outcome.replacement;
@@ -447,10 +404,7 @@ router.post(
                                     `[Retry] Soulseek failed, trying Lidarr for ${artistName} - ${albumTitle}`
                                 );
 
-                                if (
-                                    failedJob.targetMbid &&
-                                    !failedJob.targetMbid.startsWith(NO_ALBUM_ID)
-                                ) {
+                                if (plan.targetMbid) {
                                     const { simpleDownloadManager } = await import(
                                         "../services/simpleDownloadManager"
                                     );
@@ -459,7 +413,7 @@ router.post(
                                             newJobRecord.id,
                                             artistName,
                                             albumTitle,
-                                            failedJob.targetMbid,
+                                            plan.targetMbid,
                                             false
                                         );
 
@@ -495,31 +449,8 @@ router.post(
                 }
             }
 
-            const targetMbid = failedJob.targetMbid;
-            if (!targetMbid) {
-                return res
-                    .status(400)
-                    .json({ error: "Cannot retry: missing album MBID" });
-            }
-
-            // The job's own record names the artist; a job from before that was recorded has only its "Artist - Album" subject.
-            const split = failedJob.subject.indexOf(" - ");
-            const artistName = (metadata?.artistName as string) || (split > 0 ? failedJob.subject.slice(0, split) : failedJob.subject);
-            const albumTitle =
-                (metadata?.albumTitle as string) ||
-                (split > 0 ? failedJob.subject.slice(split + 3) : failedJob.subject);
-
-            const outcome = await downloadJobs.retryOnce(failedJob, { type: failedJob.type, targetMbid }, (tx) =>
-                downloadJobs.create({
-                    userId: req.user!.id,
-                    type: failedJob.type,
-                    targetMbid,
-                    artistMbid: failedJob.artistMbid,
-                    discoveryBatchId: failedJob.discoveryBatchId,
-                    subject: failedJob.subject,
-                    metadata: downloadJobs.withoutFailureMarks(metadata) as any,
-                }, tx)
-            );
+            const { targetMbid, artistName, albumTitle } = plan;
+            const outcome = await downloadJobs.retryAlbum(failedJob, plan);
             if ("running" in outcome) return res.json(deduplicated(outcome.running));
             if ("alreadyRetried" in outcome) return res.status(409).json({ error: ALREADY_RETRIED });
             const newJobRecord = outcome.replacement;

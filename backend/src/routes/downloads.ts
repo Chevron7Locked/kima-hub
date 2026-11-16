@@ -248,20 +248,8 @@ async function processArtistDownload(
                 return { skipped: true as const, reason: "already_queued" };
             }
 
-            // A job that failed in the last 30 seconds is not retried yet.
-            const recentFailed = await tx.$queryRaw<Array<{ id: string }>>`
-                SELECT id
-                FROM "DownloadJob"
-                WHERE "targetMbid" = ${albumMbid}
-                AND "userId" = ${userId}
-                AND type = 'album'
-                AND "discoveryBatchId" IS NULL
-                AND status = 'failed'
-                AND "completedAt" >= ${new Date(Date.now() - 30000)}
-                FOR UPDATE SKIP LOCKED
-            `;
-
-            if (recentFailed.length > 0) {
+            // An album that failed a moment ago is not started again yet.
+            if (await downloadJobs.recentlyFailed({ userId, type: "album", targetMbid: albumMbid }, tx)) {
                 return { skipped: true as const, reason: "recently_failed" };
             }
 
@@ -351,7 +339,7 @@ router.delete("/clear-all", async (req, res) => {
 
         const where: { userId: string; status?: string } = { userId };
         if (status !== undefined) {
-            if (typeof status !== "string" || !downloadJobs.JOB_STATUSES.includes(status)) {
+            if (typeof status !== "string" || !downloadJobs.isJobStatus(status)) {
                 return refuseRequest(req, res, "status: not a job status");
             }
             where.status = status;

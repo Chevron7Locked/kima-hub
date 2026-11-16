@@ -54,7 +54,6 @@ function generateCorrelationId(): string {
 }
 
 class SimpleDownloadManager {
-    private readonly DEFAULT_MAX_ATTEMPTS = 3;
     private readonly PENDING_TIMEOUT_MS = 10 * 60 * 1000;
     // After Lidarr's last search for an album, how long a job waits for a download to appear.
     private readonly GRAB_WAIT_MS = 15 * 60 * 1000;
@@ -82,14 +81,6 @@ class SimpleDownloadManager {
         } catch (error) {
             logger.error('Failed to update active downloads metric:', error);
         }
-    }
-
-    private async maxAttempts(userId: string): Promise<number> {
-        const config = await prisma.userDiscoverConfig.findUnique({
-            where: { userId },
-            select: { maxRetryAttempts: true },
-        });
-        return config?.maxRetryAttempts ?? this.DEFAULT_MAX_ATTEMPTS;
     }
 
     /**
@@ -598,14 +589,8 @@ class SimpleDownloadManager {
 
                 const results = [];
                 for (const job of jobs) {
-                    const metadata = (job.metadata as any) || {};
-                    if (metadata.previousDownloadIds?.includes(downloadId)) {
-                        results.push({ job, metadata, exhausted: false });
-                        continue;
-                    }
-                    const exhausted = job.attempts >= (await this.maxAttempts(job.userId));
-                    const release = await downloadJobs.countFailedRelease({ id: job.id, exhausted }, { downloadId, reason }, tx);
-                    if (release) results.push({ job, metadata: release.metadata, exhausted });
+                    const release = await downloadJobs.countFailedRelease(job, { downloadId, reason }, tx);
+                    if (release) results.push({ job, metadata: release.metadata, exhausted: release.exhausted });
                 }
                 return results;
             },
@@ -649,7 +634,7 @@ class SimpleDownloadManager {
      * The caller deletes the rows.
      */
     async cancelJobs(jobs: { id: string; status: string; lidarrRef: string | null; lidarrAlbumId: number | null }[]): Promise<void> {
-        const active = jobs.filter((j) => downloadJobs.ACTIVE_STATUSES.includes(j.status));
+        const active = jobs.filter((j) => downloadJobs.isActive(j.status));
         const cancelled = active.map((j) => j.id);
         const stillWanted = (where: Prisma.DownloadJobWhereInput) =>
             prisma.downloadJob.count({

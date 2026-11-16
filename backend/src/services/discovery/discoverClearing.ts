@@ -262,7 +262,7 @@ async function isKnownSoulseekAlbum(ref: AlbumRef, rgMbids: string[]): Promise<b
     );
     const source = (j: (typeof jobs)[number]) => (j.metadata as { currentSource?: string } | null)?.currentSource;
     if (jobs.some((j) => j.lidarrAlbumId !== null || source(j) === "lidarr")) return false;
-    return jobs.some((j) => j.status === "completed" && source(j) === "soulseek");
+    return jobs.some((j) => downloadJobs.isCompleted(j.status) && source(j) === "soulseek");
 }
 
 /**
