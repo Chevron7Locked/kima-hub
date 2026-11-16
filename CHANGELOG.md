@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A shared link never streams a play it didn't count.** A second request from the same listener waits briefly for the first one's play to be counted, and is refused at the play limit or asked to try again if it wasn't.
 - **One genre for an album everywhere:** Subsonic apps and the web show the same genre for an album and its songs, and genre filters and genre lists agree with it. An album's own genres come first, and its artist's only when the album has none.
 - **Songs in playlists and shares show their genre in Subsonic apps.**
 - **Subsonic genre and starred lists keep a stable order** when items tie, so paging never repeats or skips one.
