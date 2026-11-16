@@ -16,7 +16,8 @@
  *
  * A kept play whose recording a library song holds again attaches to that song (`adoptKeptPlays`): the identification
  * stage calls it as it writes a song's recording id, and the scan calls it for every recording left over, so a recording
- * that returns on a re-added or re-filed album has its plays back.
+ * that returns on a re-added or re-filed album has its plays back. A listener whose history is being repaired is skipped
+ * until the next run.
  *
  * Plays move or become kept only while no repair of their listener's history runs (`lockPlayHistory`): a delete that can
  * wait takes the listener's shared lock, which waits for a repair to finish; one that cannot (the library sweep) leaves
@@ -29,7 +30,7 @@ import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { losslessCodecSql } from "../../utils/audioCodec";
 import { playableSongSql } from "../../utils/playableSong";
-import { lockPlayHistory, songsWithBusyPlayHistory } from "../playRecording";
+import { listenersWithBusyPlayHistory, lockPlayHistory, songsWithBusyPlayHistory } from "../playRecording";
 import { keptRecordings, listenersOf } from "../stats/listens";
 
 type Tx = Prisma.TransactionClient;
@@ -226,13 +227,25 @@ export async function settleHistoryOfLeavingSongs(
 /**
  * Attaches kept plays to the library song that now holds their recording: the best copy, as everywhere. `mbids` narrows
  * it to those recordings (the identification stage, naming the one it just wrote); left out, every recording a kept play
- * carries. Answers how many plays attached. A song flagged missing takes none. Runs in `db`'s transaction when given one.
+ * carries. Answers how many plays attached. A song flagged missing takes none.
+ *
+ * A listener whose play history is being repaired is skipped for this run (it never waits, as a scan must not block
+ * behind a per-user maintenance job): their plays stay kept, and the next scan or identification attaches them. The
+ * others' shared history locks are held until the end. Runs in `db`'s transaction when given one, else in its own.
  */
 export async function adoptKeptPlays(db: Tx | typeof prisma = prisma, mbids?: string[]): Promise<number> {
-    const kept = await keptRecordings(db, mbids);
-    if (kept.length === 0) return 0;
-    try {
-        return await db.$executeRaw`
+    const attach = async (tx: Tx): Promise<number> => {
+        const kept = await keptRecordings(tx, mbids);
+        if (kept.length === 0) return 0;
+        const busy = await listenersWithBusyPlayHistory(tx, kept.map((k) => k.userId));
+        if (busy.size > 0) {
+            logger.info(`[HISTORY] kept plays of ${busy.size} listener(s) left for the next run: their play history is being repaired`);
+        }
+        const free = kept.filter((k) => !busy.has(k.userId));
+        if (free.length === 0) return 0;
+        const listeners = [...new Set(free.map((k) => k.userId))];
+        const recordings = [...new Set(free.map((k) => k.recordingMbid))];
+        return tx.$executeRaw`
         UPDATE "Play" p
            SET "trackId" = c.id, "keptTitle" = NULL, "keptArtistName" = NULL, "keptAlbumTitle" = NULL,
                "keptRecordingMbid" = NULL, "keptDuration" = NULL
@@ -240,14 +253,19 @@ export async function adoptKeptPlays(db: Tx | typeof prisma = prisma, mbids?: st
                 SELECT DISTINCT ON (k."recordingMbid") k.id, k."recordingMbid"
                   FROM "Track" k
                   JOIN "Album" ka ON ka.id = k."albumId" AND ka.location = 'LIBRARY'
-                 WHERE k."missingSince" IS NULL AND k."recordingMbid" = ANY(${kept}::text[])
+                 WHERE k."missingSince" IS NULL AND k."recordingMbid" = ANY(${recordings}::text[])
                  ORDER BY k."recordingMbid", ${bestCopyFirst()}
           ) c
-         WHERE p."trackId" IS NULL AND p."keptTitle" IS NOT NULL AND p."keptRecordingMbid" = c."recordingMbid"`;
+         WHERE p."trackId" IS NULL AND p."keptTitle" IS NOT NULL AND p."keptRecordingMbid" = c."recordingMbid"
+           AND p."userId" = ANY(${listeners}::text[])`;
+    };
+    if (db !== prisma) return attach(db as Tx);
+    try {
+        return await prisma.$transaction(attach);
     } catch (error) {
         // The chosen song was deleted between the question and the write (the foreign key says so): the plays stay kept,
-        // and the next scan or identification asks again. Inside a caller's transaction the failure belongs to the caller.
-        if (db === prisma && (error as { meta?: { code?: unknown } }).meta?.code === "23503") return 0;
+        // and the next scan or identification asks again.
+        if ((error as { meta?: { code?: unknown } }).meta?.code === "23503") return 0;
         throw error;
     }
 }

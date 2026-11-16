@@ -146,6 +146,21 @@ export async function lockPlayHistory(
 }
 
 /**
+ * Tries each listener's shared history lock once, never waiting, and answers the listeners whose history is being
+ * repaired right now (their lock was not given). The locks it did get are held to the end of the transaction, so a repair
+ * cannot start on those listeners meanwhile.
+ */
+export async function listenersWithBusyPlayHistory(tx: Prisma.TransactionClient, userIds: Iterable<string>): Promise<Set<string>> {
+    const busy = new Set<string>();
+    for (const userId of new Set(userIds)) {
+        const [{ locked }] = await tx.$queryRaw<Array<{ locked: boolean }>>`
+            SELECT pg_try_advisory_xact_lock_shared(${PLAY_HISTORY_LOCK_NAMESPACE}::int, hashtext(${userId})) AS locked`;
+        if (!locked) busy.add(userId);
+    }
+    return busy;
+}
+
+/**
  * Which of these songs have a listener whose play history is being repaired right now. For a caller about to move or
  * change those songs' plays that cannot wait for a repair (a library scan never blocks behind a per-user maintenance
  * job): it tries each listener's shared lock once, never waiting, and the songs it names are to be left as they are
@@ -158,15 +173,7 @@ export async function lockPlayHistory(
 export async function songsWithBusyPlayHistory(tx: Prisma.TransactionClient, trackIds: string[]): Promise<Set<string>> {
     if (trackIds.length === 0) return new Set();
     const pairs = await listenersOf(tx, trackIds);
-    const busyListeners = new Set<string>();
-    const seen = new Set<string>();
-    for (const { userId } of pairs) {
-        if (seen.has(userId)) continue;
-        seen.add(userId);
-        const [{ locked }] = await tx.$queryRaw<Array<{ locked: boolean }>>`
-            SELECT pg_try_advisory_xact_lock_shared(${PLAY_HISTORY_LOCK_NAMESPACE}::int, hashtext(${userId})) AS locked`;
-        if (!locked) busyListeners.add(userId);
-    }
+    const busyListeners = await listenersWithBusyPlayHistory(tx, pairs.map((p) => p.userId));
     return new Set(pairs.filter((p) => busyListeners.has(p.userId)).map((p) => p.trackId));
 }
 

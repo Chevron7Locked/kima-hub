@@ -228,6 +228,16 @@ describe("a song that leaves with no copy", () => {
         expect(await prisma.shareLink.count({ where: { token: id("tok") } })).toBe(0);
     });
 
+    it("keeps the album's artist for a song on a compilation: Kima stores no artist of a song's own", async () => {
+        const a = await artist("a", "Various Artists");
+        await album("comp", a, "LIBRARY", { gone: { title: "Track By Someone Else" } });
+        await play("gone");
+
+        await deleteSongs([id("gone")]);
+
+        expect((await kept())[0]).toMatchObject({ keptTitle: "Track By Someone Else", keptArtistName: "Various Artists" });
+    });
+
     it("keeps the plays of every listener of a library song, and deletes a Discover song's with it", async () => {
         const a = await artist("a");
         await album("lib", a, "LIBRARY", { l: {} });
@@ -306,6 +316,44 @@ describe("adoptKeptPlays: a returning recording takes back its kept plays", () =
         expect(await playsOf("returned2")).toBe(0);
         expect(await kept()).toHaveLength(1);
         expect(await prisma.play.count({ where: { userId: id("user") } })).toBe(1);
+    });
+
+    it("skips a listener whose history is being repaired, adopts the others, and takes the skipped one on the next run", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {} });
+        await play("gone");
+        await play("gone", { user: id("user2") });
+        await deleteSongs([id("gone")]);
+        await album("back", a, "LIBRARY", { returned: {} });
+        const repair = repairing(id("user"));
+        await repair.started;
+        try {
+            expect(await adoptKeptPlays()).toBe(1);
+            expect(await prisma.play.count({ where: { trackId: id("returned"), userId: id("user2") } })).toBe(1);
+            expect(await kept()).toHaveLength(1);
+        } finally {
+            repair.release();
+            await repair.done;
+        }
+
+        expect(await adoptKeptPlays()).toBe(1);
+        expect(await playsOf("returned")).toBe(2);
+        expect(await kept()).toEqual([]);
+    });
+
+    it("holds the listener's shared history lock until it commits, so a repair cannot start mid-adoption", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {} });
+        await play("gone");
+        await deleteSongs([id("gone")]);
+        await album("back", a, "LIBRARY", { returned: {} });
+
+        await prisma.$transaction(async (tx) => {
+            expect(await adoptKeptPlays(tx)).toBe(1);
+            const [{ locked }] = await prisma.$queryRaw<Array<{ locked: boolean }>>`
+                SELECT pg_try_advisory_xact_lock(7002::int, hashtext(${id("user")})) AS locked`;
+            expect(locked).toBe(false);
+        });
     });
 
     it("runs inside the transaction it is given", async () => {

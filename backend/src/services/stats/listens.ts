@@ -36,7 +36,8 @@
  * - every reader that offers, seeds or ranks songs (`playCounts`, `mostPlayedTrackIds`, `recentPlayArtists`,
  *   `recentListenArtists`, `neverPlayedSql`, `playedMoreThanSql`, `listenedMoreThanSql`, `playRowsSql`, `albumsPlayedAtLeast`,
  *   `listenersOf`) reads plays of songs that are there, and so never sees a kept play;
- * - `keptRecordings` names the recordings kept plays carry, for the delete module's adoption of them by a returning song.
+ * - `keptRecordings` names who has kept plays and of which recordings, for the song-history module's adoption of them by a
+ *   returning song.
  */
 
 import { Prisma, type Artist, type ListenSource } from "@prisma/client";
@@ -453,16 +454,19 @@ export async function listenersOf(
 }
 
 /**
- * The recordings (MusicBrainz recording ids) that kept plays carry: the plays of songs that left the library with no copy
- * and have not attached to a song again. `mbids` narrows it to those recordings; left out, every one. Anyone's plays.
+ * Who has kept plays, and of which recordings (MusicBrainz recording ids): the plays of songs that left the library with
+ * no copy and have not attached to a song again, one entry per listener and recording. `mbids` narrows it to those
+ * recordings; left out, every one.
  */
-export async function keptRecordings(db: Prisma.TransactionClient | typeof prisma, mbids?: string[]): Promise<string[]> {
+export async function keptRecordings(
+    db: Prisma.TransactionClient | typeof prisma,
+    mbids?: string[],
+): Promise<Array<{ userId: string; recordingMbid: string }>> {
     if (mbids && mbids.length === 0) return [];
-    const rows = await db.$queryRaw<Array<{ mbid: string }>>`
-        SELECT DISTINCT "keptRecordingMbid" AS mbid FROM "Play"
+    return db.$queryRaw<Array<{ userId: string; recordingMbid: string }>>`
+        SELECT DISTINCT "userId", "keptRecordingMbid" AS "recordingMbid" FROM "Play"
          WHERE "trackId" IS NULL AND "keptTitle" IS NOT NULL AND "keptRecordingMbid" IS NOT NULL
            ${mbids ? Prisma.sql`AND "keptRecordingMbid" = ANY(${mbids}::text[])` : Prisma.empty}`;
-    return rows.map((r) => r.mbid);
 }
 
 /**
