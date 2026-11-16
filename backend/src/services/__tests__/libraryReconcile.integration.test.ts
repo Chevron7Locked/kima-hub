@@ -215,6 +215,44 @@ describe("reconcileDeletedTracks", () => {
         expect((await prisma.playbackState.findUnique({ where: { userId: `${P}user` } }))!.trackId).toBeNull();
     });
 
+    it("takes the share links of the songs it retires, and the album they leave empty with its links", async () => {
+        await seedTrack(`${P}lonely`, { missingMinutesAgo: 5 });
+        await prisma.artist.create({ data: { id: `${P}art2`, name: "Recon Artist Two", identityKey: `${P}-a2` } });
+        await prisma.album.create({
+            data: { id: `${P}alb2`, artistId: `${P}art2`, rgMbid: `${P}-rg2`, title: "Recon Album Two", primaryType: "Album" },
+        });
+        await prisma.track.create({
+            data: { id: `${P}alive2`, albumId: `${P}alb2`, title: "alive", trackNo: 1, duration: 200, filePath: `/tmp/${P}alive2.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+        // `${P}alb` holds only the retiring song, so it goes; a second album with a living song stays.
+        await prisma.shareLink.createMany({
+            data: [
+                { token: `${P}tok-song`, entityType: "track", entityId: `${P}lonely`, createdBy: `${P}user` },
+                { token: `${P}tok-album`, entityType: "album", entityId: `${P}alb`, createdBy: `${P}user` },
+                { token: `${P}tok-alive`, entityType: "album", entityId: `${P}alb2`, createdBy: `${P}user` },
+            ],
+        });
+
+        const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));
+        await res.settle();
+
+        expect(res.removed).toBe(1);
+        expect(await prisma.album.count({ where: { id: `${P}alb` } })).toBe(0);
+        expect(await prisma.album.count({ where: { id: `${P}alb2` } })).toBe(1);
+        expect((await prisma.shareLink.findMany({ where: { token: { startsWith: `${P}tok` } }, select: { token: true } })).map((l) => l.token)).toEqual([`${P}tok-alive`]);
+    });
+
+    it("leaves an album that still holds a living song", async () => {
+        await seedTrack(`${P}gone2`, { missingMinutesAgo: 5 });
+        await seedTrack(`${P}living`);
+        await prisma.shareLink.create({ data: { token: `${P}tok-keep`, entityType: "album", entityId: `${P}alb`, createdBy: `${P}user` } });
+
+        await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));
+
+        expect(await prisma.album.count({ where: { id: `${P}alb` } })).toBe(1);
+        expect(await prisma.shareLink.count({ where: { token: `${P}tok-keep` } })).toBe(1);
+    });
+
     it("a genre shared with a living track survives", async () => {
         await seedTrack(`${P}d1`, { missingMinutesAgo: 5 });
         await seedTrack(`${P}alive`);
@@ -859,6 +897,8 @@ describe("reconcileDeletedTracks", () => {
     });
 
     it("a playlist that held a retired song: its owner is told once, after the sweep commits", async () => {
+        // A living song keeps the album: the sweep now takes an album it leaves empty, and the second seed below needs it.
+        await seedTrack(`${P}stays`);
         await seedTrack(`${P}held`, { missingMinutesAgo: 5 });
         const list = await prisma.playlist.create({
             data: { userId: `${P}user`, name: `${P}list`, items: { create: [{ trackId: `${P}held`, sort: 0, rank: "a" }] } },

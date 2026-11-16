@@ -161,14 +161,16 @@ export async function deleteAlbums(
  * Deletes songs by id, with what points at them (see the header), and the albums they leave with no song, which go as
  * `deleteAlbums` deletes them. The songs' artists keep their keeps; an artist left with no album is the prune's to
  * remove. `detachDiscovery` is for the library sweep, which keeps a Discover record and only unnames the song in it
- * (the integrity check removes it later); any other delete removes the record.
+ * (the integrity check removes it later); any other delete removes the record. `alsoTell` names playlists the caller
+ * emptied of these songs before the call (the sweep hands their places to other copies), told with the rest, once.
  */
 export async function deleteSongs(
     ids: string[],
-    options: { within?: Tx; detachDiscovery?: boolean } = {},
+    options: { within?: Tx; detachDiscovery?: boolean; alsoTell?: HeldPlaylist[] } = {},
 ): Promise<Deletion> {
     return run(options.within, async (tx) => {
         const owed = emptyOwed("a song deleted");
+        owed.playlists.push(...(options.alsoTell ?? []));
         const albumIds = new Set<string>();
         for (const batch of batches(ids)) {
             const rows = await tx.track.findMany({

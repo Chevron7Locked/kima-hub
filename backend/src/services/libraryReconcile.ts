@@ -26,7 +26,8 @@ import { losslessCodecSql } from "../utils/audioCodec";
 import { retryOnDeadlock } from "../utils/dbConflict";
 import { nodeClock } from "../utils/nodeClock";
 import { playableSongSql } from "../utils/playableSong";
-import { announcePlaylistsChanged, playlistsHoldingTrackIds, type HeldPlaylist } from "./playlistEvents";
+import { playlistsHoldingTrackIds, type HeldPlaylist } from "./playlistEvents";
+import { deleteSongs } from "./library/albumDelete";
 import { songsWithBusyPlayHistory } from "./playRecording";
 import { entriesOf, hydrateQueue, ON_LIBRARY_ALBUM, type QueueEntry } from "./savedQueue";
 
@@ -40,7 +41,11 @@ interface ReconcileResult {
     artifacts: string[];
     /** Playlists that held a retired song (their entries went with it): told after the transaction commits. */
     playlists: HeldPlaylist[];
+    /** What follows the commit of the retirement (the delete module's: the albums it emptied, their artists' counts). */
+    settle: () => Promise<void>;
 }
+
+const NOTHING_RETIRED: ReconcileResult = { removed: 0, artifacts: [], playlists: [], settle: async () => {} };
 
 /** Cache paths are stored relative (audioStreaming's convention); resolve once, here. */
 export function transcodeArtifactPath(cachePath: string): string {
@@ -77,7 +82,7 @@ export async function reconcileDeletedTracks(
         logger.warn(
             `[RECONCILE] ${missingEver}/${totalTracks} tracks missing at once — mass disappearance looks like a dropped mount, not a deletion; nothing retired`
         );
-        return { removed: 0, artifacts: [], playlists: [] };
+        return NOTHING_RETIRED;
     }
 
     // Confirmed gone: flagged by an earlier scan, still absent this one. Files that
@@ -92,7 +97,7 @@ export async function reconcileDeletedTracks(
             album: { select: { title: true, artist: { select: { name: true } } } },
         },
     });
-    if (flagged.length === 0) return { removed: 0, artifacts: [], playlists: [] };
+    if (flagged.length === 0) return NOTHING_RETIRED;
     const flaggedIds = flagged.map((t) => t.id);
 
     // What needs no lock is read before any is taken, so they are held for as short a time as they can be.
@@ -101,7 +106,7 @@ export async function reconcileDeletedTracks(
         SELECT "trackId", "cachePath" FROM "TranscodedFile" WHERE "trackId" = ANY(${flaggedIds}::text[])`;
 
     const missing = await holdSongs(tx, flagged, scanStartedAt);
-    if (missing.length === 0) return { removed: 0, artifacts: [], playlists: [] };
+    if (missing.length === 0) return NOTHING_RETIRED;
 
     // A song whose plays move to another copy waits for no repair of its listeners' history (a scan never blocks behind
     // a per-user maintenance job): it stays exactly as it is for the next sweep, and the rest carry on.
@@ -115,7 +120,7 @@ export async function reconcileDeletedTracks(
     if (busy.size > 0) {
         logger.info(`[RECONCILE] ${busy.size} track(s) left for the next sweep: a listener's play history is being repaired`);
     }
-    if (retiring.length === 0) return { removed: 0, artifacts: [], playlists: [] };
+    if (retiring.length === 0) return NOTHING_RETIRED;
 
     const ids = retiring.map((t) => t.id);
 
@@ -149,19 +154,20 @@ export async function reconcileDeletedTracks(
         })),
     });
 
-    // Soft references first: NULL, never delete — discovery rows keep their user-keep
-    // history this way, and playback state keeps its queue.
-    await tx.$executeRaw`UPDATE "DiscoveryTrack" SET "trackId" = NULL WHERE "trackId" = ANY(${ids}::text[])`;
+    // Soft references first: playback state keeps its queue and the mood lists their songs.
     await updatePlaybackStates(tx, ids, queueCopy);
     await updateMoodMixes(tx, ids, replacedBy);
 
-    await tx.$executeRaw`DELETE FROM "Track" WHERE id = ANY(${ids}::text[])`;
+    // The songs go through the delete module, which takes what names them (their share links) and the albums they
+    // leave empty (an album with no song was never listed, so no marker moves), and unnames them in Discover's records
+    // without deleting those: a Discover row keeps its user-keep history.
+    const deletion = await deleteSongs(ids, { within: tx, detachDiscovery: true, alsoTell: playlists });
 
     // Then every genre left with no songs goes, library-wide (only when songs were retired).
     await tx.genre.deleteMany({ where: { trackGenres: { none: {} } } });
 
     logger.info(`[RECONCILE] retired ${ids.length} track(s) confirmed gone by consecutive scans`);
-    return { removed: ids.length, artifacts, playlists };
+    return { removed: ids.length, artifacts, playlists, settle: deletion.settle };
 }
 
 /**
@@ -435,7 +441,7 @@ async function unlinkArtifacts(artifacts: string[]): Promise<void> {
  * subject to the mass-missing guard. In `flag` mode it issues no query at all and changes
  * nothing — the stage is inert.
  */
-export async function runReconcile(scanStartedAt: Date): Promise<ReconcileResult & { skipped: boolean }> {
+export async function runReconcile(scanStartedAt: Date): Promise<Omit<ReconcileResult, "settle"> & { skipped: boolean }> {
     if (config.music.reconcileMode !== "delete") {
         return { removed: 0, artifacts: [], playlists: [], skipped: true };
     }
@@ -447,6 +453,6 @@ export async function runReconcile(scanStartedAt: Date): Promise<ReconcileResult
         prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt), { timeout: 120_000 }),
     );
     await unlinkArtifacts(res.artifacts);
-    announcePlaylistsChanged(res.playlists);
-    return { ...res, skipped: false };
+    await res.settle();
+    return { removed: res.removed, artifacts: res.artifacts, playlists: res.playlists, skipped: false };
 }
