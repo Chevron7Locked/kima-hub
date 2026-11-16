@@ -363,8 +363,9 @@ export async function downloadAndStoreImage(
         }
 
         // The types a route may proxy and no more: sharp decodes SVG, TIFF and ICO too, and a stored copy is no reason to widen what it reads.
+        const contentType = response.headers.get("content-type") ?? "";
         if (!pictureTypeOf(response)) {
-            logger.debug(`[ImageStorage] Not a picture type taken: ${response.headers.get("content-type") ?? ""}`);
+            logger.debug(`[ImageStorage] Not a picture type taken: ${contentType}`);
             await response.body?.cancel().catch(() => undefined);
             return null;
         }
@@ -381,7 +382,7 @@ export async function downloadAndStoreImage(
 
         const version = await storeAsJpeg(filePath, buffer);
         if (!version) {
-            logger.debug(`[ImageStorage] Not a readable picture despite its content type: ${response.headers.get("content-type") ?? ""}`);
+            logger.debug(`[ImageStorage] Not a readable picture despite its content type: ${contentType}`);
             return null;
         }
         logger.debug(`[ImageStorage] Saved ${type} image: ${filename}`);

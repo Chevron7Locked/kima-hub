@@ -321,6 +321,24 @@ describe("an old artist picture saved as .png or .webp", () => {
         expect(fs.readdirSync(artists)).toEqual([`${P}_v.jpg`]);
     });
 
+    it("leaves an address a person set after the artists were read", async () => {
+        await artist("r", `native:artists/${P}_r.png`);
+        put(path.join(artists, `${P}_r.png`), await picture("png"));
+        const realFind = prisma.artist.findMany.bind(prisma.artist) as (args: unknown) => Promise<unknown>;
+        jest.spyOn(prisma.artist, "findMany").mockImplementation((async (args: unknown) => {
+            const rows = await realFind(args);
+            // Only the read that finds the rows to rewrite: the person edits between that read and the write.
+            if ((args as { where?: { OR?: unknown } }).where?.OR) {
+                await prisma.artist.update({ where: { id: `${P}_r` }, data: { heroUrl: "native:artists/mine.jpg?v=person1" } });
+            }
+            return rows;
+        }) as never);
+
+        await repairCoverFormatsOnce({});
+
+        expect(await hero("r")).toBe("native:artists/mine.jpg?v=person1");
+    });
+
     it("is not removed while only the person's own picture points at it", async () => {
         await prisma.artist.create({
             data: { id: `${P}_own`, name: "Repair own", identityKey: `${P}_own_ik`, userHeroUrl: `native:artists/${P}_own.png?v=oldversion1` },
@@ -631,7 +649,7 @@ describe("a JPEG whose stored version is not the file's", () => {
         put(file, await picture("png"));
         await seed("e", { coverUrl: `native:albums/${P}_e_al.jpg?v=${STALE}` });
         // The conversion lands, the database write after it fails: the file is a JPEG and the value is old.
-        const update = jest.spyOn(prisma.album, "update").mockRejectedValueOnce(new Error("db down"));
+        const update = jest.spyOn(prisma.album, "updateMany").mockRejectedValueOnce(new Error("db down"));
 
         expect(await repairCoverFormatsOnce({})).toMatchObject({ converted: 1, failed: 1 });
         expect(await marker()).toBeNull();

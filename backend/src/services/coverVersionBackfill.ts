@@ -56,7 +56,7 @@ const ADDRESS_COLUMNS = PICTURES.flatMap(({ model, found, own }) => [
 type Row = Record<string, string | null>;
 interface Rows {
     findMany(args: object): Promise<Row[]>;
-    update(args: object): Promise<unknown>;
+    updateMany(args: object): Promise<{ count: number }>;
 }
 /** The rows of one kind. Their columns are named in `PICTURES`, so one body serves albums and artists. */
 const rowsOf = (model: "album" | "artist") => prisma[model] as unknown as Rows;
@@ -96,7 +96,9 @@ export async function rewriteCoverValues(
             if (points(row[own])) data[own] = value;
             const keys = Object.keys(data).length;
             if (keys === 0) continue;
-            await rowsOf(model).update({ where: { id: row.id }, data });
+            // Only where both columns still hold what was read: an address a person set meanwhile stands.
+            const stored = await rowsOf(model).updateMany({ where: { id: row.id, [found]: row[found], [own]: row[own] }, data });
+            if (stored.count === 0) continue;
             notePictureChange(model, row.id as string, {
                 was: shownPicture(row[found], row[own]),
                 now: shownPicture(data[found] ?? row[found], data[own] ?? row[own]),
