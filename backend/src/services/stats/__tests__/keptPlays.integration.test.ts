@@ -275,7 +275,8 @@ describe("the readers that find a kept play's song by its stored names", () => {
         expect(await listensOf(song)).toBeUndefined();
     });
 
-    it("finds a compilation's song by its album and title, whoever the album is filed under now", async () => {
+    /** A compilation's song played once, then gone with its album and artist. */
+    async function goneCompilation(): Promise<void> {
         await prisma.artist.create({ data: { id: id("art_va"), name: "Various Artists", identityKey: id("ak_va") } });
         await prisma.album.create({
             data: { id: id("alb_va"), rgMbid: id("rg_va"), artistId: id("art_va"), identityKey: id("ik_va"), title: `${P}Now 99`, primaryType: "Album", location: "LIBRARY" },
@@ -286,9 +287,57 @@ describe("the readers that find a kept play's song by its stored names", () => {
         await play("va1", new Date(Date.now() - DAY));
         await deleteAlbums([id("alb_va")]);
         await deleteArtists([id("art_va")]);
-        const song = await copy("n3", { artist: `${P}Refiled Artist`, album: `${P}NOW 99`, title: `${P}hit a` });
+    }
+
+    it("finds a compilation's song on the Various Artists album that comes back", async () => {
+        await goneCompilation();
+        const song = await copy("n3", { artist: "VARIOUS ARTISTS", album: `${P}NOW 99`, title: `${P}hit a` });
 
         expect(await listensOf(song)).toBe(1);
+    });
+
+    it("does not give a compilation's kept play to the same album and title under a named artist", async () => {
+        await goneCompilation();
+        const named = await copy("n5", { artist: `${P}Named Artist`, album: `${P}Now 99`, title: `${P}Hit A` });
+        const compilation = await copy("n6", { artist: "Various Artists", album: `${P}Now 99`, title: `${P}Hit A` });
+
+        expect(await listensOf(named)).toBeUndefined();
+        expect(await listensOf(compilation)).toBe(1);
+    });
+
+    it("finds a song given an edited title after its plays were kept under the file's title", async () => {
+        await gone();
+        const song = await copy("n7", { artist: `${P}Artist x`, album: `${P}alb_x`, title: `${P}Song x2` });
+        await prisma.track.update({ where: { id: song }, data: { displayTitle: "A Title Someone Edited" } });
+
+        expect(await listensOf(song)).toBe(1);
+    });
+
+    it("finds a song whose file title changed since its plays were kept under its edited title", async () => {
+        await prisma.track.update({ where: { id: id("x2") }, data: { displayTitle: "A Title Someone Edited" } });
+        await gone();
+        const song = await copy("n8", { artist: `${P}Artist x`, album: `${P}alb_x`, title: "A Different File Title" });
+        await prisma.track.update({ where: { id: song }, data: { displayTitle: "a title someone EDITED" } });
+
+        expect(await listensOf(song)).toBe(1);
+    });
+
+    it("finds a song on an album given an edited title after the plays were kept under the file's title", async () => {
+        await gone();
+        const song = await copy("n9", { artist: `${P}Artist x`, album: `${P}alb_x`, title: `${P}Song x2` });
+        await prisma.album.update({ where: { id: id("alb_n9") }, data: { displayTitle: "An Album Someone Edited" } });
+
+        expect(await listensOf(song)).toBe(1);
+    });
+
+    it("counts a gone song's plays under the album the library lists after that album is given an edited title", async () => {
+        await deleteSongs([id("x2")]);
+        const before = (await withListens(USER, "all", (l) => listeningStats(l, "UTC"))).distinctAlbums;
+        await prisma.album.update({ where: { id: id("alb_x") }, data: { displayTitle: "An Album Someone Edited" } });
+
+        // x1 and the gone x2 are one album's plays, y1 another's: two albums, not three.
+        expect(before).toBe(2);
+        expect((await withListens(USER, "all", (l) => listeningStats(l, "UTC"))).distinctAlbums).toBe(2);
     });
 
     it("does not give a single artist's kept play to the same album and title under another artist", async () => {
