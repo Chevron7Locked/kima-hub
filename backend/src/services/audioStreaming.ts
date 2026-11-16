@@ -554,8 +554,9 @@ export class AudioStreamingService {
             const ifModifiedSince = req.headers["if-modified-since"];
 
             if (ifNoneMatch) {
-                // If-None-Match may be a comma-separated list of entity tags
-                const candidates = ifNoneMatch.split(",").map((t) => t.trim());
+                // If-None-Match may be a comma-separated list of entity tags, compared weakly: a W/ prefix is ignored
+                // (RFC 9110 §13.1.2).
+                const candidates = ifNoneMatch.split(",").map((t) => t.trim().replace(/^W\//, ""));
                 if (candidates.includes(etag) || candidates.includes("*")) {
                     res.status(304).set({
                         "ETag": etag,
@@ -575,7 +576,12 @@ export class AudioStreamingService {
             }
 
             // Parse Range header
-            const range = req.headers.range;
+            // If-Range (RFC 9110 §13.1.5): a range is honoured only while the file is still the one the client
+            // holds a part of. The validator is an entity tag, compared strongly, or the exact Last-Modified date.
+            const ifRange = String(req.headers["if-range"] ?? "");
+            const rangeStillValid =
+                !ifRange || (ifRange.startsWith('"') ? ifRange === etag : ifRange === lastModified);
+            const range = rangeStillValid ? req.headers.range : undefined;
             let start = 0;
             let end = fileSize - 1;
             let isRangeRequest = false;

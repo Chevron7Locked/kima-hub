@@ -24,6 +24,8 @@ export interface RSSEpisode {
     audioUrl: string;
     duration: number; // seconds
     publishedAt: Date;
+    /** Whether the feed gave a readable date; when not, publishedAt is the time of reading and is not the feed's word. */
+    publishedGiven?: boolean;
     episodeNumber?: number;
     season?: number;
     imageUrl?: string;
@@ -148,6 +150,10 @@ class RSSParserService {
                             return null;
                         }
 
+                        // An item with no readable date takes today's, so it can still be listed and stored.
+                        const parsedDate = item.pubDate ? new Date(item.pubDate) : null;
+                        const published = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
+
                         const episode: RSSEpisode = {
                             guid: item.guid || item.link || item.title || "",
                             title: item.title || "Unknown Episode",
@@ -159,9 +165,8 @@ class RSSParserService {
                             duration: this.parseDuration(
                                 (item as any).itunesDuration
                             ),
-                            publishedAt: item.pubDate
-                                ? new Date(item.pubDate)
-                                : new Date(),
+                            publishedAt: published ?? new Date(),
+                            publishedGiven: published !== null,
                             episodeNumber: (item as any).itunesEpisode
                                 ? parseInt((item as any).itunesEpisode)
                                 : undefined,

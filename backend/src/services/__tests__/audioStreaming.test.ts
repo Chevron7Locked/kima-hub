@@ -473,6 +473,91 @@ describe("streamFileWithRangeSupport conditional requests", () => {
         expect(res._status).toBe(200);
     });
 
+    it("If-None-Match compares weakly: a W/ copy of the ETag matches -> 304", async () => {
+        const req = makeReq({ "if-none-match": `W/${computeEtag()}` });
+        const res = makeRes();
+        await svc.streamFileWithRangeSupport(req, res, filePath, "audio/mpeg");
+        expect(res._status).toBe(304);
+    });
+
+    it("If-None-Match list with a weak entry among others -> 304", async () => {
+        const req = makeReq({ "if-none-match": `"other", W/${computeEtag()}` });
+        const res = makeRes();
+        await svc.streamFileWithRangeSupport(req, res, filePath, "audio/mpeg");
+        expect(res._status).toBe(304);
+    });
+
+    it("If-Range with the current ETag keeps the range -> 206", async () => {
+        const req = makeReq({ range: "bytes=0-99", "if-range": computeEtag() });
+        const res = makeRes();
+        await svc.streamFileWithRangeSupport(req, res, filePath, "audio/mpeg");
+        expect(res._status).toBe(206);
+        expect(res._headers["Content-Length"]).toBe("100");
+    });
+
+    it("If-Range with a stale ETag sends the whole file -> 200", async () => {
+        const req = makeReq({ range: "bytes=0-99", "if-range": '"stale-etag"' });
+        const res = makeRes();
+        await svc.streamFileWithRangeSupport(req, res, filePath, "audio/mpeg");
+        expect(res._status).toBe(200);
+        expect(res._headers["Content-Length"]).toBe("500");
+        expect(res._headers["Content-Range"]).toBeUndefined();
+    });
+
+    it("If-Range with a weak ETag never matches (strong comparison) -> 200", async () => {
+        const req = makeReq({ range: "bytes=0-99", "if-range": `W/${computeEtag()}` });
+        const res = makeRes();
+        await svc.streamFileWithRangeSupport(req, res, filePath, "audio/mpeg");
+        expect(res._status).toBe(200);
+    });
+
+    it("If-Range with the exact Last-Modified date keeps the range -> 206", async () => {
+        const req = makeReq({ range: "bytes=0-99", "if-range": fs.statSync(filePath).mtime.toUTCString() });
+        const res = makeRes();
+        await svc.streamFileWithRangeSupport(req, res, filePath, "audio/mpeg");
+        expect(res._status).toBe(206);
+    });
+
+    it("If-Range with another date sends the whole file -> 200", async () => {
+        const other = new Date(fs.statSync(filePath).mtime.getTime() - 60_000).toUTCString();
+        const req = makeReq({ range: "bytes=0-99", "if-range": other });
+        const res = makeRes();
+        await svc.streamFileWithRangeSupport(req, res, filePath, "audio/mpeg");
+        expect(res._status).toBe(200);
+        expect(res._headers["Content-Length"]).toBe("500");
+    });
+
+    it("If-Range with a stale validator and an unsatisfiable range sends the whole file, not 416", async () => {
+        const req = makeReq({ range: "bytes=9999-", "if-range": '"stale-etag"' });
+        const res = makeRes();
+        await svc.streamFileWithRangeSupport(req, res, filePath, "audio/mpeg");
+        expect(res._status).toBe(200);
+    });
+
+    it("If-Range without a Range header changes nothing -> 200", async () => {
+        const req = makeReq({ "if-range": '"stale-etag"' });
+        const res = makeRes();
+        await svc.streamFileWithRangeSupport(req, res, filePath, "audio/mpeg");
+        expect(res._status).toBe(200);
+    });
+
+    it("a file replaced with the same size and mtime gets a new ETag", async () => {
+        const before = fs.statSync(filePath);
+        const first = makeRes();
+        await svc.streamFileWithRangeSupport(makeReq({}), first, filePath, "audio/mpeg");
+        const replacement = `${filePath}.new`;
+        fs.writeFileSync(replacement, "Y".repeat(before.size));
+        fs.utimesSync(replacement, before.atime, before.mtime);
+        fs.renameSync(replacement, filePath);
+        try {
+            const second = makeRes();
+            await svc.streamFileWithRangeSupport(makeReq({}), second, filePath, "audio/mpeg");
+            expect(second._headers["ETag"]).not.toBe(first._headers["ETag"]);
+        } finally {
+            fs.writeFileSync(filePath, "X".repeat(500));
+        }
+    });
+
     it("Cache-Control is private, max-age=3600, must-revalidate on 200 response", async () => {
         const req = makeReq({});
         const res = makeRes();

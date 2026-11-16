@@ -4,8 +4,11 @@ import { enrichmentFailureService } from "./enrichmentFailureService";
 import { assignCategories } from "./podcastCatalog";
 
 /**
- * Fetch a stored show's feed again and store its new episodes; null when the show is not stored. Shared by the
- * refresh route, the Subsonic refresh and the podcast worker.
+ * Fetch a stored show's feed again and store its episodes: new ones are added, and one already stored takes the
+ * feed's current title, description, audio address, length, size and date (keeping its id, so a person's progress
+ * stays). The feed's ETag and Last-Modified are saved only once all of that is stored, so a refresh that fails
+ * partway reads the feed again next time instead of being answered "not modified". Null when the show is not stored.
+ * Shared by the refresh route, the Subsonic refresh and the podcast worker.
  */
 export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisodesCount: number; totalEpisodes: number } | null> {
     const podcast = await prisma.podcast.findUnique({ where: { id: podcastId } });
@@ -26,6 +29,51 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
         return { newEpisodesCount: 0, totalEpisodes: podcast.episodeCount };
     }
 
+    // One read of what is stored, to tell new episodes from changed ones without a query per episode.
+    const feedGuids = result.episodes.map(e => e.guid).filter(Boolean);
+    const stored = new Map(
+        (await prisma.podcastEpisode.findMany({
+            where: { podcastId, guid: { in: feedGuids } },
+            select: {
+                id: true, guid: true, title: true, description: true, audioUrl: true,
+                duration: true, fileSize: true, publishedAt: true,
+                // A cached copy's own length and size are measured, so the feed's figures do not replace them.
+                downloads: { select: { id: true }, take: 1 },
+            },
+        })).map(e => [e.guid, e])
+    );
+
+    let newEpisodesCount = 0;
+    const seen = new Set<string>();
+    for (const ep of result.episodes) {
+        // A guid listed twice is one episode.
+        if (seen.has(ep.guid)) continue;
+        seen.add(ep.guid);
+        const have = stored.get(ep.guid);
+        if (!have) {
+            // upsert, not create: manual and automatic refreshes can race on the (podcastId, guid) unique key.
+            await prisma.podcastEpisode.upsert({
+                where: { podcastId_guid: { podcastId, guid: ep.guid } },
+                create: episodeRow(podcastId, ep),
+                update: {},
+            });
+            newEpisodesCount++;
+            continue;
+        }
+        const measured = have.downloads.length > 0;
+        const changes: Prisma.PodcastEpisodeUpdateManyMutationInput = {};
+        if (have.title !== ep.title) changes.title = ep.title;
+        if ((have.description ?? null) !== (ep.description ?? null)) changes.description = ep.description ?? null;
+        if (have.audioUrl !== ep.audioUrl) changes.audioUrl = ep.audioUrl;
+        // A figure the feed leaves out (no date, no length, no size) is not the feed saying it changed.
+        if (ep.publishedGiven !== false && have.publishedAt.getTime() !== ep.publishedAt.getTime()) changes.publishedAt = ep.publishedAt;
+        if (!measured && ep.duration > 0 && have.duration !== ep.duration) changes.duration = ep.duration;
+        if (!measured && ep.fileSize != null && have.fileSize !== ep.fileSize) changes.fileSize = ep.fileSize;
+        if (Object.keys(changes).length > 0) {
+            await prisma.podcastEpisode.updateMany({ where: { id: have.id }, data: changes });
+        }
+    }
+
     await prisma.podcast.update({
         where: { id: podcastId },
         data: {
@@ -44,29 +92,6 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
     if (podcast.categoryIds.length === 0) {
         // Nobody waits on a refresh's categories, so a person's own requests to Apple go first.
         await assignCategories(podcastId, podcast.itunesId, result.podcast.categoryNames, "background");
-    }
-
-    // Batch fetch all existing GUIDs to avoid N+1 queries
-    const feedGuids = result.episodes.map(e => e.guid).filter(Boolean);
-    const existingGuids = new Set(
-        (await prisma.podcastEpisode.findMany({
-            where: { podcastId, guid: { in: feedGuids } },
-            select: { guid: true },
-        })).map(e => e.guid)
-    );
-
-    let newEpisodesCount = 0;
-    for (const ep of result.episodes) {
-        if (existingGuids.has(ep.guid)) continue;
-
-        // upsert, not find-then-create: manual and automatic refreshes can race on the
-        // (podcastId, guid) unique key. An existing episode is left untouched.
-        await prisma.podcastEpisode.upsert({
-            where: { podcastId_guid: { podcastId, guid: ep.guid } },
-            create: episodeRow(podcastId, ep),
-            update: {},
-        });
-        newEpisodesCount++;
     }
 
     return { newEpisodesCount, totalEpisodes: result.episodes.length };
