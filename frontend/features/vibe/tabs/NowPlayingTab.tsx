@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentMedia, useQueueState } from "@/lib/audio-state-context";
@@ -106,7 +107,7 @@ function ArtistBio({ bio, artistId }: { bio: string; artistId?: string }) {
         <>
             <p className="line-clamp-5 text-xs leading-relaxed text-[var(--text-secondary)]">{bio}</p>
             {artistId && (
-                <Link href={`/artist/${artistId}`} className="mt-1 inline-block text-[11px] text-brand hover:underline">
+                <Link href={pathFor("/artist", artistId)} className="mt-1 inline-block text-[11px] text-brand hover:underline">
                     read more
                 </Link>
             )}

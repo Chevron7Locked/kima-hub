@@ -7,6 +7,7 @@
  * device still asks.
  */
 
+import { pathFor } from "@/lib/paths";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
@@ -122,7 +123,7 @@ export function WhatsNewGate() {
     if (queue.length === 0 || deferred) return null;
     // Done closes what the window showed: the newest release, and the current one if it was reopened.
     const dismissAll = async () => {
-        for (const r of queue) await api.post(`/whats-new/${encodeURIComponent(r.version)}/dismiss`, {});
+        for (const r of queue) await api.post(pathFor("/whats-new", r.version, "dismiss"), {});
     };
 
     const defer = () => {

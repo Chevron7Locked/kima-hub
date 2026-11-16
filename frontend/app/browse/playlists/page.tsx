@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useState, useEffect, useCallback } from "react";
 import {
     Search,
@@ -160,7 +161,7 @@ export default function BrowsePlaylistsPage() {
     ) => (
         <MediaCard
             key={`${item.source}-${item.type}-${item.id}-${context || "main"}-${index}`}
-            href={`/browse/playlists/${item.id}`}
+            href={pathFor("/browse/playlists", item.id)}
             title={item.title}
             subtitle={`${plural(item.trackCount, "song")} · ${item.creator}`}
             imageUrl={item.imageUrl}

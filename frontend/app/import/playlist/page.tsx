@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { usePublicConfig } from "@/hooks/useQueries";
 import { NumberedRow } from "@/components/ui/NumberedRow";
 import { ACQUIRE_LOCKED } from "@/lib/acquire";
@@ -208,7 +209,7 @@ function ImportPlaylistPageContent() {
             const cached = queryClient.getQueryData<PreviewStatus>(["preview-status", previewJobId]);
             if (cached && cached.status !== "running") return cached;
             // Otherwise poll the backend (handles SSE reconnect gap)
-            return api.get<PreviewStatus>(`/spotify/preview/${encodeURIComponent(String(previewJobId))}`);
+            return api.get<PreviewStatus>(pathFor("/spotify/preview", String(previewJobId)));
         },
         enabled: !!previewJobId && step === "previewing",
         // Poll every 3s while pending/running; stop once terminal
@@ -255,7 +256,7 @@ function ImportPlaylistPageContent() {
             const cached = queryClient.getQueryData<ImportJob & { jobId?: string }>(["import-status", importJob?.id]);
             if (cached && TERMINAL_IMPORT_STATUSES.includes(cached.status)) return cached;
             if (!importJob?.id) return null;
-            return api.get<ImportJob & { jobId?: string }>(`/spotify/import/${encodeURIComponent(importJob.id)}/status`);
+            return api.get<ImportJob & { jobId?: string }>(pathFor("/spotify/import", importJob.id, "status"));
         },
         enabled: !!importJob && !TERMINAL_IMPORT_STATUSES.includes(importJob.status),
         refetchInterval: (query) => {
@@ -410,7 +411,7 @@ function ImportPlaylistPageContent() {
                 message: string;
                 playlistId: string | null;
                 tracksMatched: number;
-            }>(`/spotify/import/${encodeURIComponent(importJob.id)}/cancel`, {});
+            }>(pathFor("/spotify/import", importJob.id, "cancel"), {});
 
             setImportJob((prev) =>
                 prev
@@ -971,7 +972,7 @@ function ImportPlaylistPageContent() {
                                                     added: number;
                                                     total: number;
                                                 }>(
-                                                    `/spotify/import/${encodeURIComponent(importJob.id)}/refresh`,
+                                                    pathFor("/spotify/import", importJob.id, "refresh"),
                                                     {}
                                                 );
                                                 if (result.added > 0) {
@@ -1017,7 +1018,7 @@ function ImportPlaylistPageContent() {
                                     variant="primary"
                                     onClick={() =>
                                         router.push(
-                                            `/playlist/${encodeURIComponent(String(importJob.createdPlaylistId))}`
+                                            pathFor("/playlist", String(importJob.createdPlaylistId))
                                         )
                                     }
                                     className="bg-success hover:bg-success hover:brightness-110"

@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { api } from "@/lib/api";
 import { createTrackLookup } from "./trackLookup";
 
@@ -9,5 +10,5 @@ import { createTrackLookup } from "./trackLookup";
  * records, so it never renumbers mid-song.
  */
 export const useTrackPlays = createTrackLookup(
-    async (trackId) => (await api.get<{ plays: number }>(`/stats/track/${encodeURIComponent(trackId)}/plays`)).plays,
+    async (trackId) => (await api.get<{ plays: number }>(pathFor("/stats/track", trackId, "plays"))).plays,
 );

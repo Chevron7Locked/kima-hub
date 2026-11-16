@@ -7,6 +7,7 @@
  * recorded answer first, so another device's answer shows here.
  */
 
+import { pathFor } from "@/lib/paths";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { ChoiceButton } from "./ChoiceButton";
@@ -84,7 +85,7 @@ export function MoodMixChoice({ onNavigate }: { onNavigate?: () => void }) {
         <p className="text-sm text-success flex items-center gap-2" data-testid="moodmix-saved">
             <Check className="w-4 h-4" />
             Saved as the playlist&nbsp;
-            <Link href={`/playlist/${encodeURIComponent(playlist.id)}`} onClick={(e) => { if (opensHere(e)) onNavigate?.(); }} className="underline hover:text-white">
+            <Link href={pathFor("/playlist", playlist.id)} onClick={(e) => { if (opensHere(e)) onNavigate?.(); }} className="underline hover:text-white">
                 {playlist.name}
             </Link>
         </p>

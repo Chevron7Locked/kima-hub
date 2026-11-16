@@ -1,3 +1,4 @@
+import { pathFor } from "@/lib/paths";
 import Link from "next/link";
 import { Music, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
@@ -18,14 +19,14 @@ export function TopResult({ libraryArtist, discoveryArtist }: TopResultProps) {
     const name = libraryArtist?.name || discoveryArtist?.name || "";
     const artistId = isLibrary
         ? libraryArtist!.id
-        : discoveryArtist?.mbid || encodeURIComponent(name);
+        : discoveryArtist?.mbid || name;
     const imageUrl = isLibrary
         ? libraryArtist?.heroUrl
         : discoveryArtist?.image;
 
     return (
         <Link
-            href={`/artist/${artistId}`}
+            href={pathFor("/artist", artistId)}
             className="group relative block overflow-hidden rounded-2xl bg-gradient-to-br from-[#1a1a1a] to-[#0f0f0f] border border-white/5 hover:border-brand/30 transition-colors duration-200"
             data-tv-card
             data-tv-card-index={0}

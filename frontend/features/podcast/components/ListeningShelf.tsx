@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { Mic2, Pause, Play } from "lucide-react";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
 import { MediaCard } from "@/components/cards/MediaCard";
@@ -18,7 +19,7 @@ export function ListeningShelf({ rows }: { rows: ListeningRow[] }) {
                 return (
                     <CarouselItem key={row.episode.id}>
                         <MediaCard
-                            href={`/podcasts/${row.podcast.id}`}
+                            href={pathFor("/podcasts", row.podcast.id)}
                             title={row.episode.title}
                             subtitle={row.podcast.title}
                             imageUrl={coverArtUrl(row.episode.coverUrl || row.podcast.coverUrl)}

@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { playablePlaylist } from "@/lib/playlist-track";
 import { useRouter } from "next/navigation";
@@ -93,7 +94,7 @@ function PlaylistCard({
 
     return (
         <MediaCard
-            href={`/playlist/${playlist.id}`}
+            href={pathFor("/playlist", playlist.id)}
             title={playlist.name}
             subtitle={`${isShared && playlist.user?.username ? `${playlist.user.username} · ` : ""}${plural(playlist.trackCount || 0, "song")}`}
             imageUrl={imageUrl}
@@ -168,7 +169,7 @@ function CreatePanel({ onClose }: { onClose: () => void }) {
             queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
             onClose();
             if (result?.id) {
-                router.push(`/playlist/${result.id}`);
+                router.push(pathFor("/playlist", result.id));
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : "failed to create playlist");
@@ -330,7 +331,7 @@ function ImportM3UPanel({ onClose }: { onClose: () => void }) {
                     </span>
                 </div>
                 <Link
-                    href={`/playlist/${result.playlistId}`}
+                    href={pathFor("/playlist", result.playlistId)}
                     className="px-4 py-2 rounded-lg text-xs font-semibold bg-brand text-black hover:bg-brand-hover transition-colors"
                 >
                     view playlist

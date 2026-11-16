@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { SimilarArtist } from "../types";
 import { Music, Library } from "lucide-react";
 import { plural } from "@/lib/format";
@@ -44,7 +45,7 @@ export function SimilarArtists({ similarArtists }: SimilarArtistsProps) {
                     return (
                         <MediaCard
                             key={artist.id || artist.name}
-                            href={`/artist/${navigationId}`}
+                            href={pathFor("/artist", navigationId)}
                             title={artist.name}
                             subtitle={matchPercentage !== null ? `${libraryLine} · ${matchPercentage}% match` : libraryLine}
                             imageUrl={imageUrl}

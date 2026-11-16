@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -79,7 +80,7 @@ export default function PodcastsPage() {
             const result = await api.subscribePodcast(url);
             if (result.success && result.podcast?.id) {
                 refreshFollowedShows(queryClient);
-                router.push(`/podcasts/${result.podcast.id}`);
+                router.push(pathFor("/podcasts", result.podcast.id));
             }
             setRssUrl("");
             setShowRssInput(false);
@@ -233,7 +234,7 @@ export default function PodcastsPage() {
                             {pagedPodcasts.map((p, index) => (
                                 <MediaCard
                                     key={p.id}
-                                    href={`/podcasts/${p.id}`}
+                                    href={pathFor("/podcasts", p.id)}
                                     title={p.title}
                                     subtitle={p.author}
                                     imageUrl={coverArtUrl(p.coverUrl)}
@@ -249,7 +250,7 @@ export default function PodcastsPage() {
 
                 {forYou.map((row) => (
                     <section key={row.category.id} data-tv-section={`for-you-${row.category.id}`}>
-                        <SectionHeader type="podcast" title={`for you · ${row.category.name}`} showAllHref={`/podcasts/category/${row.category.id}`} />
+                        <SectionHeader type="podcast" title={`for you · ${row.category.name}`} showAllHref={pathFor("/podcasts/category", row.category.id)} />
                         <p className="-mt-2 mb-3 text-xs text-[var(--text-muted)]">because you follow {row.because.join(" and ")}</p>
                         <PodcastShelf podcasts={row.podcasts} />
                     </section>

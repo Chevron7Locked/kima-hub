@@ -7,6 +7,7 @@
  * raised. Remove deletes them; Ignore stops raising the track. Runs on demand.
  */
 
+import { pathFor } from "@/lib/paths";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -91,7 +92,7 @@ export function FalseStarts() {
         setBusy(true);
         setError(null);
         try {
-            const result = await api.post<Record<string, number>>(`/stats/false-starts/${path}`, {
+            const result = await api.post<Record<string, number>>(pathFor("/stats/false-starts", path), {
                 trackIds: ids,
             });
             setNote(said(result ?? {}));

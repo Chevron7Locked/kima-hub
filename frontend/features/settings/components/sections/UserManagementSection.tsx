@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useState, useEffect } from "react";
 import { Trash2 } from "lucide-react";
 import { SettingsSection, SettingsInput, SettingsSelect, SettingsRow, SettingsToggle } from "../ui";
@@ -132,7 +133,7 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
     const handleDelete = async (userId: string) => {
         setDeleteStatus("loading");
         try {
-            await api.delete(`/auth/users/${encodeURIComponent(userId)}`);
+            await api.delete(pathFor("/auth/users", userId));
             closeDelete();
             loadUsers();
         } catch (error: unknown) {

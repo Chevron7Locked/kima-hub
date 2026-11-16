@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { BookOpen } from "lucide-react";
 import { api } from "@/lib/api";
 import { Audiobook } from "../types";
@@ -18,7 +19,7 @@ const AudiobooksGrid = memo(function AudiobooksGrid({ audiobooks }: AudiobooksGr
             {audiobooks.map((audiobook, index) => (
                 <CarouselItem key={audiobook.id}>
                     <MediaCard
-                        href={`/audiobooks/${audiobook.id}`}
+                        href={pathFor("/audiobooks", audiobook.id)}
                         title={audiobook.title}
                         subtitle={audiobook.author || "Audiobook"}
                         imageUrl={audiobook.coverUrl ? api.getCoverArtUrl(audiobook.coverUrl, 300) : null}

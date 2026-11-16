@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useState, useEffect } from "react";
 import { formatHoursMinutes, formatTime, plural } from "@/lib/format";
 import { useParams, useRouter } from "next/navigation";
@@ -72,7 +73,7 @@ export default function DeezerPlaylistDetailPage() {
             setError(null);
             try {
                 const data = await api.get<DeezerPlaylistFull>(
-                    `/browse/playlists/${playlistId}`
+                    pathFor("/browse/playlists", playlistId)
                 );
                 setPlaylist(data);
             } catch (err) {

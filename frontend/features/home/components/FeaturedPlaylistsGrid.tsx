@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { Music2 } from "lucide-react";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
 import { cascadeStyle } from "@/lib/motion";
@@ -43,7 +44,7 @@ export const FeaturedPlaylistsGrid = memo(function FeaturedPlaylistsGrid({
             {playlists.slice(0, 20).map((playlist, index) => (
                 <CarouselItem key={`home-playlist-${playlist.id}-${index}`}>
                     <MediaCard
-                        href={`/browse/playlists/${playlist.id}`}
+                        href={pathFor("/browse/playlists", playlist.id)}
                         title={playlist.title}
                         subtitle={plural(playlist.trackCount, "track")}
                         imageUrl={playlist.imageUrl || null}

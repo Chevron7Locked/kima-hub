@@ -5,6 +5,7 @@
  * ever data, a figure is stated once, and music time is an estimate that says "about".
  */
 
+import { pathFor } from "@/lib/paths";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
@@ -589,7 +590,7 @@ function Ranked({
                     return (
                         <li key={item.key}>
                             {kind === "artist" && item.id ? (
-                                <Link href={`/artist/${item.id}`} className={shared}>
+                                <Link href={pathFor("/artist", item.id)} className={shared}>
                                     {inner}
                                 </Link>
                             ) : kind === "track" ? (

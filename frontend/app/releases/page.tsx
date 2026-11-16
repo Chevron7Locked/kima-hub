@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { usePublicConfig } from "@/hooks/useQueries";
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -50,7 +51,7 @@ export default function ReleasesPage() {
     const handleDownload = async (albumMbid: string, releaseId: string | number) => {
         try {
             setDownloadingId(releaseId);
-            await api.post(`/releases/download/${encodeURIComponent(albumMbid)}`);
+            await api.post(pathFor("/releases/download", albumMbid));
             await refetch();
         } catch (err) {
             notify.error("Couldn't start the download", { message: err instanceof Error ? err.message : undefined });

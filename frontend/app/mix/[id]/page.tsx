@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useState, useMemo } from "react";
 import { TrackRow } from "@/components/ui/TrackRow";
 import { MediaActionButton, PlayDisc } from "@/components/ui/MediaActionBar";
@@ -120,16 +121,17 @@ export default function MixPage() {
             const result = await api.saveMixAsPlaylist(mixId);
             announcePlaylistEvent("playlist-created");
             setTimeout(() => {
-                router.push(`/playlist/${result.id}`);
+                router.push(pathFor("/playlist", result.id));
             }, 1000);
         } catch (error: unknown) {
             console.error("Failed to save mix as playlist:", error);
             const err = error as { status?: number; data?: { playlistId?: string } };
             if (err?.status === 409) {
                 notify.info("You've already saved this mix as a playlist.");
-                if (err?.data?.playlistId) {
+                const existingId = err?.data?.playlistId;
+                if (existingId) {
                     setTimeout(() => {
-                        router.push(`/playlist/${err.data!.playlistId}`);
+                        router.push(pathFor("/playlist", existingId));
                     }, 1000);
                 }
             } else {

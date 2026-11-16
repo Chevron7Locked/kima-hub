@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -228,7 +229,7 @@ export function Sidebar() {
             });
             setShowCreatePlaylist(false);
             setNewPlaylistName("");
-            router.push(`/playlist/${result.id}`);
+            router.push(pathFor("/playlist", result.id));
         } catch {
             notify.error("couldn't create the playlist");
         } finally {
@@ -247,13 +248,13 @@ export function Sidebar() {
         )[0];
 
     const playlistRow = (playlist: Playlist) => {
-        const isActive = pathname === `/playlist/${playlist.id}`;
+        const isActive = pathname === pathFor("/playlist", playlist.id);
         const cover = coverFor(playlist);
         const shared = playlist.isOwner === false;
         return (
             <Link
                 key={playlist.id}
-                href={`/playlist/${playlist.id}`}
+                href={pathFor("/playlist", playlist.id)}
                 prefetch={false}
                 aria-current={isActive ? "page" : undefined}
                 aria-label={`${playlist.name}, ${playlist.trackCount} ${
@@ -348,11 +349,11 @@ export function Sidebar() {
     const mixTiles = (items: Mix[]) => (
         <div className="grid grid-cols-2 gap-x-2 gap-y-2.5 pb-1 pt-0.5">
             {items.map((mix) => {
-                const isActive = pathname === `/mix/${mix.id}`;
+                const isActive = pathname === pathFor("/mix", mix.id);
                 return (
                     <Link
                         key={mix.id}
-                        href={`/mix/${mix.id}`}
+                        href={pathFor("/mix", mix.id)}
                         prefetch={false}
                         aria-current={isActive ? "page" : undefined}
                         title={(mix.description || mix.name).toLowerCase()}

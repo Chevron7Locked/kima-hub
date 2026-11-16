@@ -1,3 +1,4 @@
+import { pathFor } from "@/lib/paths";
 import { Music } from "lucide-react";
 import { MediaCard } from "@/components/cards/MediaCard";
 import { cascadeStyle } from "@/lib/motion";
@@ -23,7 +24,7 @@ export function SimilarArtistsGrid({
             style={cascadeStyle(Math.min(similarArtists.length, 6))}
         >
             {similarArtists.map((result, index) => {
-                const artistId = result.mbid || encodeURIComponent(result.name);
+                const artistId = result.mbid || result.name;
                 const imageUrl = result.image
                     ? api.getCoverArtUrl(result.image, 200)
                     : null;
@@ -31,7 +32,7 @@ export function SimilarArtistsGrid({
                 return (
                     <MediaCard
                         key={`artist-${artistId}-${index}`}
-                        href={`/artist/${artistId}`}
+                        href={pathFor("/artist", artistId)}
                         title={result.name}
                         subtitle={formatListeners(result.listeners)}
                         imageUrl={imageUrl}

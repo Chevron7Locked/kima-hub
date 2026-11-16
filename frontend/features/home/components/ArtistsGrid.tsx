@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { Music } from "lucide-react";
 import { api } from "@/lib/api";
 import { memo } from "react";
@@ -43,7 +44,7 @@ export const ArtistsGrid = memo(function ArtistsGrid({ artists }: { artists: Art
             tiles={artists.map((a) => ({
                 key: a.id,
                 name: a.name,
-                href: `/artist/${a.id}`,
+                href: pathFor("/artist", a.id),
                 coverArt: a.coverArt,
                 subtitle: "Artist",
             }))}

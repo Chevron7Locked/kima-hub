@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Disc3, Music } from "lucide-react";
@@ -36,7 +37,7 @@ function useAlbumCover(mbid: string | null | undefined, enabled: boolean) {
     const { data } = useQuery({
         queryKey: ["album-cover", mbid],
         queryFn: async () => {
-            const res = await api.request<{ coverUrl?: string }>(`/library/album-cover/${encodeURIComponent(String(mbid))}`, { expectedStatuses: [404] });
+            const res = await api.request<{ coverUrl?: string }>(pathFor("/library/album-cover", String(mbid)), { expectedStatuses: [404] });
             return res.coverUrl ? api.getCoverArtUrl(res.coverUrl, 112) : null;
         },
         enabled: enabled && isMbid(mbid),

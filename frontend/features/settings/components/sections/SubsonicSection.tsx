@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { SettingsSection, SettingsRow, SettingsInput, CopyButton } from "../ui";
@@ -70,7 +71,7 @@ export function SubsonicSection() {
     const handleRevoke = async (id: string) => {
         setRevoking(id);
         try {
-            await api.delete(`/api-keys/${encodeURIComponent(id)}`);
+            await api.delete(pathFor("/api-keys", id));
             setApiKeys((prev) => prev.filter((k) => k.id !== id));
         } catch {
             setStatus("error");

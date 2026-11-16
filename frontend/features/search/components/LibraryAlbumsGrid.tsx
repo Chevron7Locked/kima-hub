@@ -1,3 +1,4 @@
+import { pathFor } from "@/lib/paths";
 import { Disc3 } from "lucide-react";
 import { api } from "@/lib/api";
 import { MediaCard } from "@/components/cards/MediaCard";
@@ -14,7 +15,7 @@ export function LibraryAlbumsGrid({ albums }: LibraryAlbumsGridProps) {
             {albums.slice(0, 6).map((album, index) => (
                 <MediaCard
                     key={album.id}
-                    href={`/album/${album.id}`}
+                    href={pathFor("/album", album.id)}
                     title={album.title}
                     subtitle={album.artist?.name || ""}
                     imageUrl={

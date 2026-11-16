@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { Music } from "lucide-react";
 import { MediaCard } from "@/components/cards/MediaCard";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
@@ -19,7 +20,7 @@ const MixesGrid = memo(function MixesGrid({ mixes }: MixesGridProps) {
             {mixes.map((mix, index) => (
                 <CarouselItem key={mix.id}>
                     <MediaCard
-                        href={`/mix/${mix.id}`}
+                        href={pathFor("/mix", mix.id)}
                         title={mix.name}
                         subtitle={plural(mix.trackCount, "track")}
                         imageUrl={mix.coverUrls.slice(0, 4).map((url) => api.getCoverArtUrl(url, 300))}

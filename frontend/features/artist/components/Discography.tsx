@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { MediaCard } from "@/components/cards/MediaCard";
 import { Disc3, Play } from "lucide-react";
 import { api } from "@/lib/api";
@@ -57,7 +58,7 @@ export function Discography({
                     return (
                         <MediaCard
                             key={album.id}
-                            href={`/album/${album.id}`}
+                            href={pathFor("/album", album.id)}
                             imageUrl={album.coverArt ? api.getCoverArtUrl(album.coverArt, 300) : null}
                             title={album.title}
                             subtitle={subtitle}

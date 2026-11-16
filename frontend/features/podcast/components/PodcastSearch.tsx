@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useEffect, useRef, useState } from "react";
 import type { EpisodeSearchResult, PodcastShowResult } from "@/lib/api";
 import { useClickOutside } from "@/hooks/useClickOutside";
@@ -84,7 +85,7 @@ export function PodcastSearch() {
                             <button
                                 key={`show-${s.id}`}
                                 type="button"
-                                onClick={() => go(`/podcasts/${s.id}`)}
+                                onClick={() => go(pathFor("/podcasts", s.id))}
                                 className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-white/5 focus-visible:bg-white/5 focus-visible:outline-none"
                             >
                                 <span className="relative size-10 shrink-0 overflow-hidden rounded-md bg-[var(--bg-primary)]">
@@ -108,7 +109,7 @@ export function PodcastSearch() {
                         <button
                             key={`ep-${ep.id}`}
                             type="button"
-                            onClick={() => go(`/podcasts/${ep.podcastId}`)}
+                            onClick={() => go(pathFor("/podcasts", ep.podcastId))}
                             className="block w-full px-3 py-2 text-left transition-colors hover:bg-white/5 focus-visible:bg-white/5 focus-visible:outline-none"
                         >
                             <span className="block truncate text-sm text-white">{ep.title}</span>

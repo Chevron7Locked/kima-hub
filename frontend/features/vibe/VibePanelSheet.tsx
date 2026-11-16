@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
 import type { LibraryMatches } from "./librarySearch";
@@ -443,7 +444,7 @@ export function VibePanelSheet({
                                         <span className="text-[var(--text-secondary)]">{selectedTrackTitle}</span>
                                         {selectedTrackArtist && (
                                             <> &middot; {selectedArtistId
-                                                ? <Link href={`/artist/${selectedArtistId}`} className="underline-offset-2 hover:underline">{selectedTrackArtist}</Link>
+                                                ? <Link href={pathFor("/artist", selectedArtistId)} className="underline-offset-2 hover:underline">{selectedTrackArtist}</Link>
                                                 : selectedTrackArtist}</>
                                         )}
                                     </p>

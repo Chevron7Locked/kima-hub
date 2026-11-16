@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useInView } from "@/hooks/useInView";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { usePodcastChartQuery } from "@/hooks/useQueries";
@@ -26,7 +27,7 @@ export function CategoryShelf({ category, enabled }: { category: CategoryRef; en
             aria-busy={!shows && !isError ? true : undefined}
             data-tv-section={shows ? `category-${category.id}` : undefined}
         >
-            <SectionHeader type="podcast" title={category.name} showAllHref={`/podcasts/category/${category.id}`} />
+            <SectionHeader type="podcast" title={category.name} showAllHref={pathFor("/podcasts/category", category.id)} />
             {isError && !shows ? (
                 <p className="text-sm text-[var(--text-muted)]">
                     couldn&apos;t reach apple podcasts.{" "}

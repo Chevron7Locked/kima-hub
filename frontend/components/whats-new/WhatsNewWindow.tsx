@@ -6,6 +6,7 @@
  * closing answers no to every untouched one, and anything still owed stays on /changelog until the server sees it done.
  */
 
+import { pathFor } from "@/lib/paths";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { refreshOpenCount } from "./useVersionChip";
 import { useQueryClient } from "@tanstack/react-query";
@@ -136,7 +137,7 @@ export function WhatsNewWindow({
     const answer = async (key: string, enabled: boolean) => {
         setChoices((c) => ({ ...c, [key]: enabled }));
         try {
-            await api.post(`/whats-new/${encodeURIComponent(versionOf(key))}/choice`, { key, enabled });
+            await api.post(pathFor("/whats-new", versionOf(key), "choice"), { key, enabled });
             refreshOpenCount(queryClient);
         } catch {
             setChoices((c) => {

@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import Link from "next/link";
 import { AudioWaveform, Play, Sparkles, Waypoints, X } from "lucide-react";
 import { CachedImage } from "@/components/ui/CachedImage";
@@ -48,14 +49,14 @@ export function TrackPanel({ track, songPathActive, onClose, onPlay, onVibe, onS
                         {normalizeNFC(track.title)}
                     </p>
                     {track.artistId ? (
-                        <Link href={`/artist/${track.artistId}`} className="block truncate text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline-offset-2 hover:underline">
+                        <Link href={pathFor("/artist", track.artistId)} className="block truncate text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline-offset-2 hover:underline">
                             {normalizeNFC(track.artist)}
                         </Link>
                     ) : (
                         <p className="truncate text-xs text-[var(--text-secondary)]">{normalizeNFC(track.artist)}</p>
                     )}
                     {track.albumId && (
-                        <Link href={`/album/${track.albumId}`} className="mt-0.5 inline-block text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] underline-offset-2 hover:underline">
+                        <Link href={pathFor("/album", track.albumId)} className="mt-0.5 inline-block text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] underline-offset-2 hover:underline">
                             Open album
                         </Link>
                     )}

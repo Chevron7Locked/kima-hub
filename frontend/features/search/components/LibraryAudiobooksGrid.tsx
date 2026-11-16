@@ -1,3 +1,4 @@
+import { pathFor } from "@/lib/paths";
 import { Book } from "lucide-react";
 import { MediaCard } from "@/components/cards/MediaCard";
 import { cascadeStyle } from "@/lib/motion";
@@ -20,7 +21,7 @@ export function LibraryAudiobooksGrid({
             {audiobooks.slice(0, 6).map((audiobook, index) => (
                 <MediaCard
                     key={audiobook.id}
-                    href={`/audiobooks/${audiobook.id}`}
+                    href={pathFor("/audiobooks", audiobook.id)}
                     title={audiobook.title}
                     subtitle={audiobook.author || "Unknown author"}
                     imageUrl={

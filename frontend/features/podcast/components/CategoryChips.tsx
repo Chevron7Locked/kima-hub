@@ -1,3 +1,4 @@
+import { pathFor } from "@/lib/paths";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import type { CategoryRef } from "../types";
@@ -9,7 +10,7 @@ export function CategoryChips({ categories, active, className }: { categories: C
             {categories.map((c) => (
                 <Link
                     key={c.id}
-                    href={`/podcasts/category/${c.id}`}
+                    href={pathFor("/podcasts/category", c.id)}
                     aria-current={c.id === active ? "page" : undefined}
                     className={cn(
                         "rounded-full border px-3 py-1.5 text-xs transition-colors",

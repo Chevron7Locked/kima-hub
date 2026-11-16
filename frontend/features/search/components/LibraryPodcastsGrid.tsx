@@ -1,3 +1,4 @@
+import { pathFor } from "@/lib/paths";
 import { Mic2 } from "lucide-react";
 import { MediaCard } from "@/components/cards/MediaCard";
 import { cascadeStyle } from "@/lib/motion";
@@ -20,7 +21,7 @@ export function LibraryPodcastsGrid({ podcasts }: LibraryPodcastsGridProps) {
                 return (
                     <MediaCard
                         key={podcast.id}
-                        href={`/podcasts/${podcast.id}`}
+                        href={pathFor("/podcasts", podcast.id)}
                         title={podcast.title}
                         subtitle={subtitle}
                         imageUrl={

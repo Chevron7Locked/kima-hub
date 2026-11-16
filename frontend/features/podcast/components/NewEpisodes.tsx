@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import Link from "next/link";
 import { Mic2, Pause, Play } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -27,7 +28,7 @@ export function NewEpisodes({ rows }: { rows: ListeningRow[] }) {
                         )}
                     >
                         <Link
-                            href={`/podcasts/${row.podcast.id}`}
+                            href={pathFor("/podcasts", row.podcast.id)}
                             className="relative size-12 shrink-0 overflow-hidden rounded-md bg-[var(--bg-secondary)]"
                             aria-label={`open ${row.podcast.title}`}
                         >

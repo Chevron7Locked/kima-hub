@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { Music, Disc, BookOpen } from "lucide-react";
 import { api } from "@/lib/api";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
@@ -15,7 +16,7 @@ interface ContinueListeningProps {
 function imageFor(item: ListenedItem) {
     if (item.type === "audiobook") {
         // The versioned address the server sent, so a changed cover is a new address; the plain one for an older reply.
-        const address = item.coverArt?.startsWith("/audiobooks/") ? item.coverArt : `/audiobooks/${item.id}/cover`;
+        const address = item.coverArt?.startsWith("/audiobooks/") ? item.coverArt : pathFor("/audiobooks", item.id, "cover");
         return api.getCoverArtUrl(address, 300);
     }
     return item.coverArt ? api.getCoverArtUrl(item.coverArt, 300) : null;

@@ -1,3 +1,4 @@
+import { pathFor } from "@/lib/paths";
 import { useMemo } from "react";
 import { useCurrentMedia } from "@/lib/audio-context";
 import { api } from "@/lib/api";
@@ -26,10 +27,10 @@ export function useMediaInfo(coverSize: number = 100): MediaInfo {
 
         if (playbackType === "track" && currentTrack) {
             const albumLink = currentTrack.album?.id
-                ? `/album/${currentTrack.album.id}`
+                ? pathFor("/album", currentTrack.album.id)
                 : null;
             const artistLink = currentTrack.artist?.id
-                ? `/artist/${currentTrack.artist.id}`
+                ? pathFor("/artist", currentTrack.artist.id)
                 : null;
             return {
                 title: shownTitle(currentTrack),
@@ -53,7 +54,7 @@ export function useMediaInfo(coverSize: number = 100): MediaInfo {
                     : null,
                 albumLink: null,
                 artistLink: null,
-                mediaLink: `/audiobooks/${currentAudiobook.id}`,
+                mediaLink: pathFor("/audiobooks", currentAudiobook.id),
                 hasMedia,
             };
         }
@@ -68,7 +69,7 @@ export function useMediaInfo(coverSize: number = 100): MediaInfo {
                     : null,
                 albumLink: null,
                 artistLink: null,
-                mediaLink: `/podcasts/${podcastId}`,
+                mediaLink: pathFor("/podcasts", podcastId),
                 hasMedia,
             };
         }

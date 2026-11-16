@@ -1,3 +1,4 @@
+import { pathFor } from "@/lib/paths";
 import { memo, type ReactNode } from "react";
 import { Disc3, Music, Play, type LucideIcon } from "lucide-react";
 import type { Album, Artist } from "../types";
@@ -19,7 +20,7 @@ export interface LibraryCard {
 
 export const albumCard = (album: Album): LibraryCard => ({
     id: album.id,
-    href: `/album/${album.id}`,
+    href: pathFor("/album", album.id),
     title: album.title,
     subtitle: album.artist?.name,
     coverArt: album.coverArt,
@@ -27,7 +28,7 @@ export const albumCard = (album: Album): LibraryCard => ({
 
 export const artistCard = (artist: Artist): LibraryCard => ({
     id: artist.id,
-    href: `/artist/${artist.id}`,
+    href: pathFor("/artist", artist.id),
     title: artist.name,
     subtitle: plural(artist.albumCount || 0, "album"),
     coverArt: artist.coverArt,

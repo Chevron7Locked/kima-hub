@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import type { ReactNode } from "react";
 import type { ColorPalette } from "@/hooks/useImageColor";
 import { SpokenHero, type SpokenHeroDetail } from "@/features/spoken/SpokenHero";
@@ -46,7 +47,7 @@ export function PodcastHero({
             details={details}
             tags={
                 categories && categories.length > 0
-                    ? categories.slice(0, 4).map((c) => ({ label: c.name, href: `/podcasts/category/${c.id}` }))
+                    ? categories.slice(0, 4).map((c) => ({ label: c.name, href: pathFor("/podcasts/category", c.id) }))
                     : (genres ?? []).slice(0, 4).map((label) => ({ label }))
             }
             heroImage={heroImage}

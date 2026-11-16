@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { Mic2 } from "lucide-react";
 import { HorizontalCarousel, CarouselItem } from "@/components/ui/HorizontalCarousel";
 import { MediaCard } from "@/components/cards/MediaCard";
@@ -63,7 +64,7 @@ export function PodcastCard({
 }) {
     return (
         <MediaCard
-            href={`/podcasts/${podcast.itunesId}`}
+            href={pathFor("/podcasts", podcast.itunesId)}
             title={podcast.title}
             subtitle={podcast.author}
             imageUrl={coverArtUrl(podcast.coverUrl)}

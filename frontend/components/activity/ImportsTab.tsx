@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -81,7 +82,7 @@ export function ImportsTab() {
     const handleCancel = async (jobId: string) => {
         setCancelling((prev) => new Set(prev).add(jobId));
         try {
-            await api.post(`/spotify/import/${encodeURIComponent(jobId)}/cancel`);
+            await api.post(pathFor("/spotify/import", jobId, "cancel"));
             queryClient.invalidateQueries({ queryKey: ["user-imports"] });
         } catch (error) {
             console.error("Failed to cancel import:", error);
@@ -203,7 +204,7 @@ function ImportJobCard({
 
                 {job.status === "completed" && job.createdPlaylistId && (
                     <Link
-                        href={`/playlist/${encodeURIComponent(job.createdPlaylistId)}`}
+                        href={pathFor("/playlist", job.createdPlaylistId)}
                         className="mt-1 inline-flex items-center gap-1 rounded-sm text-[11px] text-brand outline-none hover:underline focus-visible:ring-2 focus-visible:ring-brand/60"
                     >
                         open the playlist

@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { Disc3 } from "lucide-react";
 import Link from "next/link";
 import { Album, AlbumSource } from "../types";
@@ -71,7 +72,7 @@ export function AlbumHero({
                 <>
                     {album.artist && (
                         <Link
-                            href={`/artist/${album.artist.id}`}
+                            href={pathFor("/artist", album.artist.id)}
                             className="font-medium text-white hover:underline"
                         >
                             {album.artist.name}

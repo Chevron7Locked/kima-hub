@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
@@ -126,7 +127,7 @@ export function usePodcastData() {
         setPreviewLoadState('done');
 
         if (preview.isSubscribed && preview.subscribedPodcastId) {
-          router.replace(`/podcasts/${preview.subscribedPodcastId}`);
+          router.replace(pathFor("/podcasts", preview.subscribedPodcastId));
         }
       } catch (err) {
         if (!cancelled) {

@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useEffect, useState, useMemo } from "react";
 import { STORAGE_KEYS } from "@/lib/storage-keys";
 import { useRouter } from "next/navigation";
@@ -34,7 +35,7 @@ type SortType = "title" | "author" | "recent" | "series";
 function BookCard({ book, index }: { book: Audiobook; index: number }) {
     return (
         <MediaCard
-            href={`/audiobooks/${book.id}`}
+            href={pathFor("/audiobooks", book.id)}
             title={book.title}
             subtitle={book.author}
             imageUrl={coverArtUrl(book.coverUrl)}
@@ -251,7 +252,7 @@ export default function AudiobooksPage() {
         }
         const shuffled = shuffleArray(audiobooks);
         if (shuffled[0]) {
-            router.push(`/audiobooks/${shuffled[0].id}`);
+            router.push(pathFor("/audiobooks", shuffled[0].id));
         }
     };
 
@@ -506,7 +507,7 @@ export default function AudiobooksPage() {
                                                 return (
                                                     <MediaCard
                                                         key={seriesName}
-                                                        href={`/audiobooks/series/${encodeURIComponent(seriesName)}`}
+                                                        href={pathFor("/audiobooks/series", seriesName)}
                                                         title={seriesName}
                                                         subtitle={firstBook.author}
                                                         imageUrl={coverArtUrl(firstBook.coverUrl)}

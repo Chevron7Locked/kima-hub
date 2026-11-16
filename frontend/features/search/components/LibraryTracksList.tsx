@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { Play, Pause, Music } from "lucide-react";
 import Link from "next/link";
 import { useCurrentMedia } from "@/lib/audio-state-context";
@@ -111,7 +112,7 @@ export function LibraryTracksList({ tracks, limit }: LibraryTracksListProps) {
                             </p>
                             <p className="text-xs text-[var(--text-secondary)] truncate">
                                 <Link
-                                    href={`/artist/${track.album.artist.id}`}
+                                    href={pathFor("/artist", track.album.artist.id)}
                                     className="hover:underline hover:text-white"
                                     onClick={(e) => e.stopPropagation()}
                                 >
@@ -119,7 +120,7 @@ export function LibraryTracksList({ tracks, limit }: LibraryTracksListProps) {
                                 </Link>
                                 <span className="mx-1">•</span>
                                 <Link
-                                    href={`/album/${track.album.id}`}
+                                    href={pathFor("/album", track.album.id)}
                                     className="hover:underline hover:text-white"
                                     onClick={(e) => e.stopPropagation()}
                                 >

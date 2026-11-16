@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import {
     Bell,
     Check,
@@ -50,13 +51,13 @@ export function NotificationsTab() {
             return notification.metadata.href;
         }
         if (notification.metadata?.playlistId) {
-            return `/playlist/${notification.metadata.playlistId}`;
+            return pathFor("/playlist", notification.metadata.playlistId);
         }
         if (notification.metadata?.albumId) {
-            return `/album/${notification.metadata.albumId}`;
+            return pathFor("/album", notification.metadata.albumId);
         }
         if (notification.metadata?.artistId) {
-            return `/artist/${notification.metadata.artistId}`;
+            return pathFor("/artist", notification.metadata.artistId);
         }
         return null;
     };

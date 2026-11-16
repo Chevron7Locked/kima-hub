@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -158,7 +159,7 @@ export default function SeriesDetailPage() {
                                                 )}
                                             </div>
 
-                                            <Link href={`/audiobooks/${book.id}`}>
+                                            <Link href={pathFor("/audiobooks", book.id)}>
                                                 <div className="relative w-10 h-10 rounded overflow-hidden bg-[var(--bg-primary)] border border-white/10 shrink-0 cursor-pointer">
                                                     {bookCover ? (
                                                         <CachedImage
@@ -177,7 +178,7 @@ export default function SeriesDetailPage() {
                                             </Link>
 
                                             <Link
-                                                href={`/audiobooks/${book.id}`}
+                                                href={pathFor("/audiobooks", book.id)}
                                                 className="flex-1 min-w-0"
                                             >
                                                 <h3 className={`font-bold truncate text-sm tracking-tight ${

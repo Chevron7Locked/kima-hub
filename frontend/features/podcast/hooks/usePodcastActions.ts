@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
@@ -35,7 +36,7 @@ export function usePodcastActions(podcastId: string) {
 
                 if (response.success && response.podcast?.id) {
                     refreshFollowedShows(queryClient);
-                    router.push(`/podcasts/${response.podcast.id}`);
+                    router.push(pathFor("/podcasts", response.podcast.id));
                 }
             } catch (error: unknown) {
                 notify.error("Couldn't subscribe to this podcast", { message: error instanceof Error ? error.message : undefined });

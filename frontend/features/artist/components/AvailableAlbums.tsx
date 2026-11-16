@@ -1,5 +1,6 @@
 "use client";
 
+import { pathFor } from "@/lib/paths";
 import { useState, useEffect } from "react";
 import { Album, ArtistSource } from "../types";
 import { MediaCard } from "@/components/cards/MediaCard";
@@ -51,7 +52,7 @@ function LazyAlbumCard({
         const fetchCover = async () => {
             try {
                 const response = await api.request<{ coverUrl: string }>(
-                    `/library/album-cover/${mbid}`
+                    pathFor("/library/album-cover", mbid)
                 );
                 if (response.coverUrl) {
                     setCoverArt(api.getCoverArtUrl(response.coverUrl, 300));
@@ -77,7 +78,7 @@ function LazyAlbumCard({
 
     return (
         <MediaCard
-            href={`/album/${album.id}`}
+            href={pathFor("/album", album.id)}
             imageUrl={coverArt}
             title={album.title}
             subtitle={subtitle}
