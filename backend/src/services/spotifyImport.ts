@@ -30,7 +30,7 @@ import * as jobMoves from "./downloads/jobs";
 import { sourcePauseController } from "./sourcePauseController";
 import { artistIdentityKey, artistNamed, isArtistNamed, normalizeArtistName, parseCredit } from "./artistIdentity";
 import { sameName } from "./discovery/discoverEvidence";
-import { containsSql, containsText, hasNonAscii } from "./textMatch";
+import { containsSql, hasNonAscii } from "./textMatch";
 import { rankForPosition } from "../utils/lexoRank";
 import { placeFoundSongs, type FoundSong } from "./playlistService";
 import { trackIdentityService } from "./trackIdentity";
@@ -222,12 +222,13 @@ async function updateImportJobFields(
   data: Prisma.SpotifyImportJobUncheckedUpdateManyInput,
   /** Rows in these states are left as they are. */
   exceptStatuses: string[] = [],
-): Promise<void> {
-  await prisma.spotifyImportJob.updateMany({
+): Promise<boolean> {
+  const { count } = await prisma.spotifyImportJob.updateMany({
     where: { id: importJobId, status: { notIn: exceptStatuses } },
     data: { ...data, updatedAt: new Date() },
   });
   await publishImportJob(importJobId);
+  return count > 0;
 }
 
 const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed", "cancelled"];
@@ -416,6 +417,26 @@ async function tracksOfArtistsStartingWith(words: string[], shownArtists: ShownA
       },
     ],
   };
+}
+
+/** The first word of an artist name as the import normalizes it: the key its candidate pools are indexed by. */
+const firstArtistWord = (name: string): string => normalizeArtistName(name).split(" ")[0];
+
+/**
+ * Match candidates indexed by the first word of the artist name each carries (the one in the file or the one shown),
+ * for fast lookup of the pool an entry's artist selects.
+ */
+function candidatesByArtistFirstWord(tracks: Parameters<typeof toMatchCandidates>[0][]): Map<string, MatchCandidate[]> {
+  const byWord = new Map<string, MatchCandidate[]>();
+  for (const track of tracks) {
+    for (const candidate of toMatchCandidates(track)) {
+      const word = firstArtistWord(candidate.artistName);
+      const existing = byWord.get(word) || [];
+      existing.push(candidate);
+      byWord.set(word, existing);
+    }
+  }
+  return byWord;
 }
 
 /**
@@ -810,6 +831,22 @@ const MIN_TITLE_ONLY_LENGTH = 10;
 
 /** An import past its downloads: finished, given up, or scanning and building its playlist. */
 const HANDED_OFF_STATES: ImportJob["status"][] = ["completed", "failed", "cancelled", "scanning", "creating_playlist"];
+
+/** The states the downloads check does not act in: a quick import still fetching, and one already past its downloads. */
+const NOT_WAITING_FOR_DOWNLOADS: ImportJob["status"][] = ["fetching", ...HANDED_OFF_STATES];
+
+/**
+ * Records what the downloads check found: only its own fields, and only on an import still waiting for its downloads.
+ * The check read the import some time ago, so a person's cancel (the row is gone) or a path that closed or handed the
+ * import on in the meantime is not written over. False when nothing was written.
+ */
+function recordDownloadsCheck(job: ImportJob, fields: { status?: ImportJob["status"]; error?: string }): Promise<boolean> {
+  return updateImportJobFields(
+    job.id,
+    { progress: job.progress, ...fields },
+    NOT_WAITING_FOR_DOWNLOADS,
+  );
+}
 
 /** A new import job's id. */
 const newImportJobId = () => `import_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -1916,7 +1953,7 @@ class SpotifyImportService {
     }
 
     // Past the download phase, or a quick import still fetching: nothing to check yet.
-    if (job.status === "fetching" || HANDED_OFF_STATES.includes(job.status)) {
+    if (NOT_WAITING_FOR_DOWNLOADS.includes(job.status)) {
       logger.debug(`   Job already in ${job.status} state, skipping`);
       return;
     }
@@ -1937,7 +1974,7 @@ class SpotifyImportService {
     const completed = downloadJobs.filter(
       (j) => j.status === "completed",
     ).length;
-    const failed = downloadJobs.filter((j) => j.status === "failed" || j.status === "exhausted").length;
+    const failed = downloadJobs.filter((j) => jobMoves.FAILED_STATUSES.includes(j.status)).length;
     const pending = total - completed - failed;
 
     if (total === 0 && job.albumsTotal > 0) {
@@ -1949,8 +1986,8 @@ class SpotifyImportService {
       job.status = "failed";
       job.error = message;
       job.updatedAt = new Date();
-      await saveImportJob(job);
-      notifyImportFailed(job);
+      // Only the person whose import it still is hears of its failure.
+      if (await recordDownloadsCheck(job, { status: "failed", error: message })) notifyImportFailed(job);
       // Clean up job logger to prevent memory leak
       jobLoggers.delete(job.id);
       return;
@@ -1969,7 +2006,7 @@ class SpotifyImportService {
 
     if (pending > 0) {
       const oldestPending = downloadJobs
-        .filter((j) => j.status === "pending" || j.status === "processing")
+        .filter((j) => jobMoves.ACTIVE_STATUSES.includes(j.status))
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
 
       const waitTimeMs = oldestPending
@@ -1984,7 +2021,7 @@ class SpotifyImportService {
           `   Still waiting for ${pending} downloads... (${waitTimeMins} min elapsed)`,
         );
         jobLogger?.info(`Waiting for Soulseek downloads to complete...`);
-        await saveImportJob(job);
+        await recordDownloadsCheck(job, {});
         return;
       }
 
@@ -1996,7 +2033,7 @@ class SpotifyImportService {
       );
 
       await jobMoves.fail(
-        downloadJobs.filter((j) => j.status === "pending" || j.status === "processing"),
+        downloadJobs.filter((j) => jobMoves.ACTIVE_STATUSES.includes(j.status)),
         "Timed out waiting for download",
       );
     }
@@ -2008,7 +2045,7 @@ class SpotifyImportService {
       select: { status: true },
     });
     const finalCompleted = finalStatuses.filter((j) => j.status === "completed").length;
-    const finalFailed = finalStatuses.filter((j) => j.status === "failed" || j.status === "exhausted").length;
+    const finalFailed = finalStatuses.filter((j) => jobMoves.FAILED_STATUSES.includes(j.status)).length;
     logger.debug(`   All downloads finished! Triggering library scan...`);
     jobLogger?.info(
       `All ${finalStatuses.length} download jobs finished (${finalCompleted} completed, ${finalFailed} failed)`,
@@ -2030,7 +2067,7 @@ class SpotifyImportService {
     job.status = "scanning";
     job.progress = 75;
     job.updatedAt = new Date();
-    await saveImportJob(job);
+    await recordDownloadsCheck(job, { status: "scanning" });
   }
 
   /** Builds the import's playlist once the scan that followed its downloads is done (the scan processor asks). */
@@ -2141,17 +2178,7 @@ class SpotifyImportService {
         }) as TrackWithRelations[]
       : [];
 
-    // Index by the first word of the artist name each candidate carries (the one in the file or the one shown),
-    // for fast lookup
-    const tracksByArtistWord = new Map<string, MatchCandidate[]>();
-    for (const track of allLibraryTracks) {
-      for (const candidate of toMatchCandidates(track)) {
-        const firstWord = normalizeArtistName(candidate.artistName).split(" ")[0];
-        const existing = tracksByArtistWord.get(firstWord) || [];
-        existing.push(candidate);
-        tracksByArtistWord.set(firstWord, existing);
-      }
-    }
+    const tracksByArtistWord = candidatesByArtistFirstWord(allLibraryTracks);
 
     // Matches by ISRC
     const pendingIsrcs = job.pendingTracks
@@ -2273,7 +2300,6 @@ class SpotifyImportService {
 
     // The playlist's order is the source's order, whichever step matched the listing.
     matchedEntries.sort((x, y) => x.position - y.position);
-    const uniqueTrackIds = Array.from(new Set(matchedEntries.map((e) => e.trackId)));
     jobLogger?.debug(
       `   Matched ${matchedEntries.length}/${job.tracksTotal} tracks`,
     );
@@ -2281,38 +2307,11 @@ class SpotifyImportService {
       `Matched tracks after scan: ${matchedEntries.length}/${job.tracksTotal}`,
     );
 
-    // Recalculate unmatched - tracks that weren't added to playlist
-    const matchedTitlesNormalized = new Set<string>();
-    const matchedTracks = await prisma.track.findMany({
-      where: { id: { in: uniqueTrackIds } },
-      select: { title: true, album: { select: { artist: { select: { normalizedName: true } } } } },
-    });
-    for (const pendingTrack of job.pendingTracks) {
-      const dbArtist = normalizeArtistName(pendingTrack.artist);
-      const strippedTitle = stripTrackSuffix(pendingTrack.title);
-
-      const found = matchedTracks.some(
-        (t) =>
-          containsText(t.title, strippedTitle.split(" ")[0]) &&
-          t.album.artist.normalizedName.includes(dbArtist.split(" ")[0]),
-      );
-
-      if (found) {
-        matchedTitlesNormalized.add(
-          `${dbArtist}|${strippedTitle.toLowerCase()}`,
-        );
-      }
-    }
-
+    // What did not match waits: the listings the matcher recorded no position for, one for one.
+    const matchedPositions = new Set(matchedEntries.map((e) => e.position));
     const pendingTracksToSave = job.pendingTracks
       .map((track, index) => ({ ...track, originalIndex: index }))
-      .filter((track) => {
-        const dbArtist = normalizeArtistName(track.artist);
-        const strippedTitle = stripTrackSuffix(track.title).toLowerCase();
-        return !matchedTitlesNormalized.has(
-          `${dbArtist}|${strippedTitle}`,
-        );
-      });
+      .filter((track) => !matchedPositions.has(track.originalIndex + 1));
 
     // The preview lookups below are the long step: not started for a build that lost its lock.
     lock?.throwIfAborted();
@@ -2587,16 +2586,20 @@ class SpotifyImportService {
     shownArtists: Awaited<ReturnType<typeof ShownArtists.load>>,
   ): Promise<FoundSong[]> {
     const found: FoundSong[] = [];
-    for (const pendingTrack of waiting) {
-      const dbArtist = normalizeArtistName(pendingTrack.spotifyArtist);
-      const artistFirstWord = dbArtist.split(" ")[0];
+    if (waiting.length === 0) return found;
 
-      // Same pool and ladder as the import itself (services/trackMatching).
-      const artistCandidateRows = await prisma.track.findMany({
-        where: await tracksOfArtistsStartingWith([artistFirstWord], shownArtists),
+    // Same pool and ladder as the import itself (services/trackMatching): one read of the library for every entry's
+    // artist, not one per entry. The title-only read below stays one per entry, because its candidate cap is per read.
+    const artistWords = [...new Set(waiting.map((w) => firstArtistWord(w.spotifyArtist)))];
+    const candidatesByWord = candidatesByArtistFirstWord(
+      await prisma.track.findMany({
+        where: await tracksOfArtistsStartingWith(artistWords, shownArtists),
         include: { album: { include: { artist: true } } },
-      });
-      const artistCandidates: MatchCandidate[] = artistCandidateRows.flatMap(toMatchCandidates);
+      }),
+    );
+
+    for (const pendingTrack of waiting) {
+      const artistCandidates = candidatesByWord.get(firstArtistWord(pendingTrack.spotifyArtist)) ?? [];
 
       let match = matchTrackToLibrary(
         { title: pendingTrack.spotifyTitle, artist: pendingTrack.spotifyArtist },
