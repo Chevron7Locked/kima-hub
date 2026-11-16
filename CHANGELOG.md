@@ -92,6 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A song removed while it is being added to a playlist is reported as not added,** instead of an error.
 - **A cancelled playlist import stays cancelled** when its downloads finish later, and songs an import matched by title or ISRC no longer show as both found and still waiting.
 - **Retrying a waiting playlist song says why it failed:** Soulseek has no files for it, or Soulseek is not answering. Retry all says when Soulseek is not answering.
+- **A playlist import that hits an error after it was cancelled, finished or already reported failed** keeps that state and sends no second notice, and an import finished elsewhere no longer starts a library scan.
 
 #### Subsonic apps
 
@@ -133,6 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Downloads Lidarr is working on are tracked properly.** A Discover download is matched as soon as Lidarr grabs and imports it. A download Lidarr parks tells you once, and Discover and playlist-import downloads post no "waiting in Lidarr" notice. A download held while Lidarr is down resumes once when it comes back, removing an album stops its waiting downloads too, and an album already downloading for someone else no longer stops your own Discover week fetching it.
 - **Soulseek reconnects cleanly.** Searches and downloads made while it reconnects say "soulseek is reconnecting, try again in Ns" at once, a dropped connection closing late no longer cuts off the new one, a connection that fails says why, and while Redis is down the connection fails at once with the reason instead of after 30 seconds.
 - **Clearing downloads while Discover or an import is still checking them** no longer makes the check miss them or finish early.
+- **Downloads left from older versions with the old "exhausted" status show as failed** in download history.
 
 #### Sign-in and accounts
 
