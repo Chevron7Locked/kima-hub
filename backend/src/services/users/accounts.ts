@@ -264,23 +264,25 @@ export class LastAdminError extends Error {
  * Deletes an account; every row that belongs to it goes with it. An admin is refused (`LastAdminError`) when it is the
  * only one: the count and the delete run in one Serializable transaction, so two admins deleting themselves together
  * cannot both see another admin and leave none (the loser throws a transaction conflict, which is safe to retry). The
- * cached user is dropped after the commit, so the account's tokens stop working now. An account already gone is
- * nothing to delete.
+ * cached user is dropped after the commit, so the account's tokens stop working now. Answers false for an account
+ * that is already gone, so a caller can tell it from one it deleted.
  */
-export async function deleteAccount(userId: string): Promise<void> {
-    await prisma.$transaction(
+export async function deleteAccount(userId: string): Promise<boolean> {
+    const deleted = await prisma.$transaction(
         async (tx) => {
             const account = await tx.user.findUnique({ where: { id: userId }, select: { role: true } });
-            if (!account) return;
+            if (!account) return false;
             if (account.role === "admin" && (await tx.user.count({ where: { role: "admin" } })) <= 1) {
                 throw new LastAdminError();
             }
             // Every User relation cascades on delete.
             await tx.user.delete({ where: { id: userId } });
+            return true;
         },
         { isolationLevel: "Serializable" },
     );
     invalidateUserCache(userId);
+    return deleted;
 }
 
 /**

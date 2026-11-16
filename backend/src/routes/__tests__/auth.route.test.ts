@@ -422,3 +422,89 @@ describe('DELETE /auth/account', () => {
         expect(after.status).toBe(401);
     });
 });
+
+// ── DELETE /auth/users/:id ────────────────────────────────────────────────────
+
+describe('DELETE /auth/users/:id', () => {
+    const adminToken = () => tokenFor(ADMIN, 'admin');
+
+    it('answers 404 for an account that does not exist', async () => {
+        const res = await request(app).delete('/auth/users/zz-auth-nobody').set('Authorization', `Bearer ${adminToken()}`);
+        expect(res.status).toBe(404);
+        expect(res.body.error).toBe('User not found');
+    });
+
+    it('refuses to delete your own account here, and keeps it', async () => {
+        const res = await request(app).delete(`/auth/users/${ADMIN}`).set('Authorization', `Bearer ${adminToken()}`);
+        expect(res.status).toBe(400);
+        expect(await prisma.user.findUnique({ where: { id: ADMIN } })).not.toBeNull();
+    });
+
+    it('deletes a plain user, and the deleted account stops authenticating at once', async () => {
+        const id = 'zz-auth-doomed';
+        await prisma.user.create({ data: { id, username: id, passwordHash: 'x', tokenVersion: 1, onboardingComplete: true } });
+        expect((await request(app).get('/auth/me').set('Authorization', `Bearer ${tokenFor(id)}`)).status).toBe(200);
+
+        const res = await request(app).delete(`/auth/users/${id}`).set('Authorization', `Bearer ${adminToken()}`);
+
+        expect(res.status).toBe(200);
+        expect(await prisma.user.findUnique({ where: { id } })).toBeNull();
+        expect((await request(app).get('/auth/me').set('Authorization', `Bearer ${tokenFor(id)}`)).status).toBe(401);
+    });
+
+    it('answers 409 when the account module refuses with a LastAdminError', async () => {
+        const spy = jest.spyOn(accounts, 'deleteAccount').mockRejectedValueOnce(new accounts.LastAdminError());
+        try {
+            const res = await request(app).delete(`/auth/users/${VICTIM}`).set('Authorization', `Bearer ${adminToken()}`);
+            expect(res.status).toBe(409);
+            expect(res.body.error).toMatch(/only administrator/i);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('leaves an administrator when two admins delete each other at the same moment', async () => {
+        const [a, b] = ['zz-auth-boss-a', 'zz-auth-boss-b'];
+        const passwordHash = await bcrypt.hash(PASSWORD, 4);
+        // The fixture admin and any other admin sit this one out, so these two are the only admins.
+        const others = await prisma.user.findMany({ where: { role: 'admin', id: { notIn: [a, b] } }, select: { id: true } });
+        await prisma.user.updateMany({ where: { id: { in: others.map((o) => o.id) } }, data: { role: 'user' } });
+        try {
+            for (const id of [a, b]) {
+                await prisma.user.create({ data: { id, username: id, passwordHash, role: 'admin', tokenVersion: 1, onboardingComplete: true } });
+                // Cached, so both requests get past sign-in whichever delete lands first.
+                await request(app).get('/auth/me').set('Authorization', `Bearer ${tokenFor(id, 'admin')}`);
+            }
+
+            const answers = await Promise.all([
+                request(app).delete(`/auth/users/${b}`).set('Authorization', `Bearer ${tokenFor(a, 'admin')}`),
+                request(app).delete(`/auth/users/${a}`).set('Authorization', `Bearer ${tokenFor(b, 'admin')}`),
+            ]);
+
+            expect(await prisma.user.count({ where: { role: 'admin' } })).toBeGreaterThanOrEqual(1);
+            expect(answers.filter((answer) => answer.status === 200)).toHaveLength(1);
+        } finally {
+            await prisma.user.deleteMany({ where: { id: { in: [a, b] } } });
+            await prisma.user.updateMany({ where: { id: { in: others.map((o) => o.id) } }, data: { role: 'admin' } });
+        }
+    });
+});
+
+// ── POST /auth/refresh, the body ──────────────────────────────────────────────
+
+describe('POST /auth/refresh, what is sent', () => {
+    it.each([
+        ['a missing token', {}],
+        ['a number', { refreshToken: 42 }],
+        ['an object', { refreshToken: { a: 1 } }],
+        ['an empty string', { refreshToken: '' }],
+    ])('answers 400 for %s', async (_label, body) => {
+        const res = await request(app).post('/auth/refresh').send(body);
+        expect(res.status).toBe(400);
+    });
+
+    it('answers 401 for a string that is no token', async () => {
+        const res = await request(app).post('/auth/refresh').send({ refreshToken: 'not-a-jwt' });
+        expect(res.status).toBe(401);
+    });
+});

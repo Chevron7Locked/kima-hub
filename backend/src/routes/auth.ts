@@ -37,6 +37,8 @@ const secondFactor = z.string().transform(normalizeSecondFactor).pipe(z.string()
 /** The bodies of the 2FA routes: strings only. Anything else is a 400. A `secret` the client still sends is ignored. */
 const setupBody = z.object({}).optional();
 const enableBody = z.object({ token: secondFactor });
+/** The refresh route's body: one non-empty string. */
+const refreshBody = z.object({ refreshToken: z.string().min(1) });
 const proveBody = z.object({ password: z.string().min(1), token: secondFactor });
 
 /** A zod refusal as the 400 the routes answer; null when the error is something else. The caller learns nothing of the schema; the log gets the issues. */
@@ -163,16 +165,13 @@ router.post("/logout", (_req, res) => {
 
 // POST /auth/refresh - Refresh access token using refresh token
 router.post("/refresh", authLimiter, async (req, res) => {
-    const { refreshToken } = req.body;
-
-    if (!refreshToken) {
-        return refuseRequest(req, res, "refreshToken required");
-    }
+    const parsed = refreshBody.safeParse(req.body);
+    if (!parsed.success) return invalidRequest(req, res, parsed.error);
 
     try {
-        const decoded = jwt.verify(refreshToken, JWT_SECRET_VALIDATED) as any;
+        const decoded = jwt.verify(parsed.data.refreshToken, JWT_SECRET_VALIDATED);
 
-        if (decoded.type !== "refresh") {
+        if (typeof decoded === "string" || decoded.type !== "refresh" || typeof decoded.userId !== "string") {
             return res.status(401).json({ error: "Invalid refresh token" });
         }
 
@@ -327,6 +326,19 @@ router.post("/create-user", async (req, res) => {
     }
 });
 
+/** Answers 409 when an account deletion was refused (the only admin) or lost a Serializable conflict, which is safe to retry. */
+function refusedDeletion(error: unknown, res: Response): boolean {
+    if (error instanceof LastAdminError) {
+        res.status(409).json({ error: error.message });
+        return true;
+    }
+    if (isTransactionConflict(error)) {
+        res.status(409).json({ error: "Concurrent account change, please retry" });
+        return true;
+    }
+    return false;
+}
+
 // DELETE /auth/users/:id (Admin only)
 router.delete("/users/:id", async (req, res) => {
     try {
@@ -339,21 +351,15 @@ router.delete("/users/:id", async (req, res) => {
                 .json({ error: "Cannot delete your own account" });
         }
 
-        // Every User relation cascades on delete.
-        await prisma.user.delete({
-            where: { id },
-        });
-
-        // The auth layer caches user rows for 30 s, so drop this one now or the
-        // deleted user's tokens keep working until it expires.
-        invalidateUserCache(id);
-
-        res.json({ message: "User deleted successfully" });
-    } catch (error: any) {
-        logger.error("Delete user error:", error);
-        if (error.code === "P2025") {
+        // The account module owns the last-admin guard and the cache drop.
+        if (!(await deleteAccount(id))) {
             return res.status(404).json({ error: "User not found" });
         }
+
+        res.json({ message: "User deleted successfully" });
+    } catch (error) {
+        if (refusedDeletion(error, res)) return;
+        logger.error("Delete user error:", error);
         res.status(500).json({ error: "Failed to delete user" });
     }
 });
@@ -388,7 +394,7 @@ router.post("/2fa/setup", async (req, res) => {
         // secret the client names never counts. Written only while it is off, so a setup cannot slip in behind an enable.
         const kept = await prisma.user.updateMany({
             where: { id: req.user!.id, twoFactorEnabled: false },
-            data: { twoFactorPendingSecret: encrypt(secret.base32), twoFactorPendingAt: new Date(Date.now()) },
+            data: { twoFactorPendingSecret: encrypt(secret.base32), twoFactorPendingAt: new Date() },
         });
         if (kept.count !== 1) {
             return res.status(400).json({ error: ALREADY_ENABLED });
@@ -642,17 +648,7 @@ router.delete("/account", async (req, res) => {
         await deleteAccount(req.user!.id);
         return res.json({ deleted: true });
     } catch (error) {
-        if (error instanceof LastAdminError) {
-            return res.status(409).json({
-                error: error.message,
-            });
-        }
-        // Serializable conflict from a concurrent admin change — safe to retry.
-        if (isTransactionConflict(error)) {
-            return res.status(409).json({
-                error: "Concurrent account change, please retry",
-            });
-        }
+        if (refusedDeletion(error, res)) return;
         logger.error("Account deletion error:", error);
         return res.status(500).json({ error: "Failed to delete account" });
     }

@@ -499,7 +499,7 @@ describe("deleteAccount", () => {
             (await signedInUser({ headers: { authorization: `Bearer ${token}` }, query: {}, path: "/x" } as any)) !== null;
         expect(await passesAuth()).toBe(true); // and now cached
 
-        await deleteAccount(made.user.id);
+        expect(await deleteAccount(made.user.id)).toBe(true);
 
         expect(await prisma.user.findUnique({ where: { id: made.user.id } })).toBeNull();
         expect(await prisma.userSettings.findUnique({ where: { userId: made.user.id } })).toBeNull();
@@ -549,7 +549,7 @@ describe("deleteAccount", () => {
         }
     });
 
-    it("answers nothing for an account that is already gone", async () => {
-        await expect(deleteAccount("nobody")).resolves.toBeUndefined();
+    it("answers false for an account that is already gone", async () => {
+        await expect(deleteAccount("nobody")).resolves.toBe(false);
     });
 });
