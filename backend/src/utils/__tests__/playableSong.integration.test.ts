@@ -950,6 +950,10 @@ it("refuses an enrichment offer name that is not a plain identifier", () => {
     expect(() => ownedSongSql(`t"; DROP TABLE "Track"; --`)).toThrow(/not a table name or alias/);
 });
 
+it("refuses the alias the enrichment offer uses inside, which an outer song name would shadow", () => {
+    expect(() => ownedSongSql("owned_album")).toThrow(/clashes with an alias/);
+});
+
 it("refuses an album or artist name that is not an identifier, or that the pieces use inside", () => {
     for (const piece of [albumHasPlayableSongSql, artistHasPlayableSongSql]) {
         expect(() => piece(`a"; --`)).toThrow();

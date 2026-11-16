@@ -5,10 +5,9 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
-import { PLAYABLE_SONG, assertSqlName, playableSongSql } from "../utils/playableSong";
+import { LIBRARY_LOCATION, PLAYABLE_SONG, assertSqlName, playableSongSql } from "../utils/playableSong";
 
-/** `Album.location` for owned albums. */
-export const LIBRARY_LOCATION = "LIBRARY";
+export { LIBRARY_LOCATION };
 
 /**
  * A library album with at least one playable song. Lists of albums and artists show only these: an album whose every

@@ -42,16 +42,20 @@
  *   PLAYABLE_ALBUM_WHERE (a library album with a playable song, as a Prisma `where` piece), albumHasPlayableSongSql
  *   and artistHasPlayableSongSql (the album and artist versions as SQL fragments), collectionAlbumWhere with
  *   collectionFilter and yourDiscoverRgMbids (the collection's "show" choice: library albums, this listener's own
- *   current Discover albums, or both), and LIBRARY_LOCATION (the `Album.location` value of an owned album, for
- *   location checks that are not the rule).
+ *   current Discover albums, or both).
+ * - LIBRARY_LOCATION: the `Album.location` value of an owned album, for the rule and for location checks that are
+ *   not the rule. Defined here, where libraryFilters (which builds on the rule) re-exports it.
  * - bestCopyFirst: the order that chooses among copies of one recording, playable first, so the library sweep, the
  *   song-history module and the listens module pick the same copy.
  */
 import { Prisma } from "@prisma/client";
 import { losslessCodecSql } from "./audioCodec";
 
+/** `Album.location` for owned albums. */
+export const LIBRARY_LOCATION = "LIBRARY";
+
 /** The rule for a Prisma `where` on Track. */
-export const PLAYABLE_SONG = { missingSince: null, corrupt: false, album: { location: "LIBRARY" } } as const;
+export const PLAYABLE_SONG = { missingSince: null, corrupt: false, album: { location: LIBRARY_LOCATION } } as const;
 
 /** Discover's own song lookup (the Discover Weekly playlist builder): the rule's file test, on a Discover album. */
 export const PLAYABLE_DISCOVER_SONG = { ...PLAYABLE_SONG, album: { location: "DISCOVER" } } as const;
@@ -73,8 +77,10 @@ export function assertSqlName(name: string, what: string): void {
 export function playableSongSql(song: string, album: string): Prisma.Sql {
     assertSqlName(song, "playableSongSql");
     assertSqlName(album, "playableSongSql");
-    return Prisma.raw(`"${album}".location = 'LIBRARY' AND "${song}".corrupt = false AND "${song}"."missingSince" IS NULL`);
+    return Prisma.raw(`"${album}".location = '${LIBRARY_LOCATION}' AND "${song}".corrupt = false AND "${song}"."missingSince" IS NULL`);
 }
+
+const OWNED_ALBUM_ALIAS = "owned_album";
 
 /**
  * The enrichment offer's song rule (exception 4 above): the playable-song rule without the corruption test, so a
@@ -86,8 +92,10 @@ export function playableSongSql(song: string, album: string): Prisma.Sql {
  */
 export function ownedSongSql(song: string): Prisma.Sql {
     assertSqlName(song, "ownedSongSql");
+    // The lookup names its subquery `owned_album`; a song of that name would be shadowed by it.
+    if (song === OWNED_ALBUM_ALIAS) throw new Error(`"${song}" clashes with an alias ownedSongSql uses inside`);
     return Prisma.raw(
-        `"${song}"."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" owned_album WHERE owned_album.id = "${song}"."albumId" AND owned_album.location = 'LIBRARY')`,
+        `"${song}"."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" ${OWNED_ALBUM_ALIAS} WHERE ${OWNED_ALBUM_ALIAS}.id = "${song}"."albumId" AND ${OWNED_ALBUM_ALIAS}.location = '${LIBRARY_LOCATION}')`,
     );
 }
 
