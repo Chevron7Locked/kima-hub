@@ -566,7 +566,9 @@ export class AudioStreamingService {
                 }
             } else if (ifModifiedSince) {
                 const ifModifiedSinceMs = new Date(ifModifiedSince).getTime();
-                if (!Number.isNaN(ifModifiedSinceMs) && stats.mtime.getTime() <= ifModifiedSinceMs) {
+                // HTTP dates have whole seconds, so the mtime is compared at that precision (RFC 9110 §13.1.3).
+                const modifiedSeconds = Math.floor(stats.mtime.getTime() / 1000) * 1000;
+                if (!Number.isNaN(ifModifiedSinceMs) && modifiedSeconds <= ifModifiedSinceMs) {
                     res.status(304).set({
                         "ETag": etag,
                         "Cache-Control": cacheControl,

@@ -464,6 +464,20 @@ describe("streamFileWithRangeSupport conditional requests", () => {
         expect(res._ended).toBe(true);
     });
 
+    it("a browser echoing back the Last-Modified it was given gets a 304, though the mtime has milliseconds", async () => {
+        const modified = path.join(tmpDir, "fractional.mp3");
+        fs.writeFileSync(modified, "X".repeat(500));
+        fs.utimesSync(modified, new Date(), new Date(1_700_000_000_123));
+        const first = makeRes();
+        await svc.streamFileWithRangeSupport(makeReq({}), first, modified, "audio/mpeg");
+        const lastModified = first._headers["Last-Modified"];
+        expect(lastModified).toBeDefined();
+
+        const res = makeRes();
+        await svc.streamFileWithRangeSupport(makeReq({ "if-modified-since": lastModified }), res, modified, "audio/mpeg");
+        expect(res._status).toBe(304);
+    });
+
     it("If-Modified-Since < mtime -> 200", async () => {
         const s = fs.statSync(filePath);
         const past = new Date(s.mtime.getTime() - 5000).toUTCString();
