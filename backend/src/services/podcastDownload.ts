@@ -215,6 +215,15 @@ async function performDownload(
             }
         }
 
+        // A feed refresh may have given the episode a new address while this one downloaded: audio from the old address
+        // is not the episode's, and a refresh found no record to drop because none is written until now.
+        const current = await prisma.podcastEpisode.findUnique({ where: { id: episodeId }, select: { audioUrl: true } });
+        if (current?.audioUrl !== audioUrl) {
+            await fs.unlink(tempPath).catch(() => {});
+            logger.debug(`[PODCAST-DL] Episode ${episodeId} changed address while downloading, discarding the old audio`);
+            return;
+        }
+
         // Move temp file to final location; the episode's size is now the size of the copy held.
         await fs.rename(tempPath, finalPath);
         await prisma.podcastEpisode.updateMany({ where: { id: episodeId }, data: { fileSize: stats.size } });

@@ -18,6 +18,14 @@ const P = "pod_dl_size";
 const USER = "u_pod_dl_size";
 const DECLARED = 106_668_461;
 const BODY = Buffer.from(Array.from({ length: 6000 }, (_, i) => i & 0xff));
+const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((ok) => { resolve = ok; });
+    return { promise, resolve };
+};
+// The "slow" episode's host answers its headers, then holds the body until the test lets it go.
+let slowArrived = deferred();
+let slowGate = deferred();
 let host: http.Server;
 let base = "";
 let cacheRoot = "";
@@ -30,6 +38,11 @@ beforeAll(async () => {
             res.writeHead(200, { "Content-Type": "audio/mpeg" });
             res.write(BODY.subarray(0, 2000));
             res.end(BODY.subarray(2000));
+        } else if (req.url === "/slow.mp3") {
+            res.writeHead(200, { "Content-Type": "audio/mpeg", "Content-Length": BODY.length });
+            res.flushHeaders();
+            slowArrived.resolve();
+            void slowGate.promise.then(() => res.end(BODY));
         } else if (req.url === "/cut.mp3") {
             // States 6000 bytes, sends 3000, then drops the connection.
             res.writeHead(200, { "Content-Type": "audio/mpeg", "Content-Length": BODY.length });
@@ -56,7 +69,7 @@ beforeEach(async () => {
             feedUrl: "https://feeds.example.invalid/dl-size",
             title: "Size Show",
             episodes: {
-                create: ["no-length", "cut", "full"].map((name) => ({
+                create: ["no-length", "cut", "full", "slow"].map((name) => ({
                     id: `${P}-${name}`, guid: name, title: name, audioUrl: `${base}/${name}.mp3`,
                     duration: 100, fileSize: DECLARED, publishedAt: new Date(),
                 })),
@@ -115,4 +128,22 @@ it("keeps a complete cached file whatever the feed now declares, and drops one i
     await fs.promises.appendFile(path.join(cacheRoot, "podcast-audio", `${id}.mp3`), Buffer.alloc(500));
     expect(await getCachedFilePath(id)).toBeNull();
     expect(await prisma.podcastDownload.count({ where: { episodeId: id } })).toBe(0);
+}, 30_000);
+
+it("keeps nothing from a download of an address the episode lost while it ran", async () => {
+    const id = `${P}-slow`;
+    slowArrived = deferred();
+    slowGate = deferred();
+    downloadInBackground(id, `${base}/slow.mp3`, USER);
+    await slowArrived.promise;
+
+    // A feed refresh gives the episode a new address while the old one is still arriving.
+    await prisma.podcastEpisode.update({ where: { id }, data: { audioUrl: `${base}/full.mp3` } });
+    slowGate.resolve();
+    while (isDownloading(id)) await new Promise((ok) => setTimeout(ok, 50));
+
+    expect(await getCachedFilePath(id)).toBeNull();
+    expect(await prisma.podcastDownload.count({ where: { episodeId: id } })).toBe(0);
+    expect(fs.existsSync(path.join(cacheRoot, "podcast-audio", `${id}.mp3`))).toBe(false);
+    expect(fs.existsSync(path.join(cacheRoot, "podcast-audio", `${id}.tmp`))).toBe(false);
 }, 30_000);

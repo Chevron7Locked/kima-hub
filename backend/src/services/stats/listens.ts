@@ -149,6 +149,7 @@ function keptCtes(userId: string): Prisma.Sql {
             JOIN "Album" ka ON ka.location = 'LIBRARY' AND ${nameKeySql('coalesce(ka."displayTitle", ka.title)')} = kp.album_key
             JOIN "Track" k ON k."albumId" = ka.id AND ${nameKeySql('coalesce(k."displayTitle", k.title)')} = kp.title_key
             WHERE k."missingSince" IS NULL
+              AND NOT EXISTS (SELECT 1 FROM kept_by_recording br WHERE br."recordingMbid" = kp."keptRecordingMbid")
               AND (kp.various OR EXISTS (SELECT 1 FROM "Artist" a WHERE a.id = ka."artistId" AND ${nameKeySql("a.name")} = kp.artist_key))
             ORDER BY kp.id, ${bestCopyFirst()}
         ),

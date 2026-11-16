@@ -146,6 +146,25 @@ describe("the stats page's totals", () => {
         expect(stats.topArtists.find((a) => a.name === `${P}Artist x`)?.id).toBe(id("art_x2"));
     });
 
+    it("give a gone artist the id of the library artist whose name folds to its own, the lowest id when several do", async () => {
+        await deleteArtists([id("art_x")]);
+        for (const [key, name] of [["x3", `${P}ARTIST X`], ["x2", `${P}artist  x`]] as const) {
+            await prisma.artist.create({ data: { id: id(`art_${key}`), name, identityKey: id(`ak_${key}`) } });
+            await prisma.album.create({
+                data: { id: id(`alb_${key}`), rgMbid: id(`rg_${key}`), artistId: id(`art_${key}`), identityKey: id(`ik_${key}`), title: `${P}alb_${key}`, primaryType: "Album", location: "LIBRARY" },
+            });
+            await prisma.track.create({
+                data: { id: id(`s_${key}`), albumId: id(`alb_${key}`), title: `${P}Song ${key}`, trackNo: 1, duration: 200, filePath: `/${P}outside/${key}.flac`, fileModified: new Date(), fileSize: 1 },
+            });
+        }
+
+        const stats = await withListens(USER, "all", (l) => listeningStats(l, "UTC"));
+
+        // The gone artist's three listens count with the lowest-id library artist that its name folds to, under that name.
+        expect(stats.topArtists.find((a) => a.id === id("art_x2"))?.plays).toBe(3);
+        expect(stats.topArtists.some((a) => a.id === id("art_x3"))).toBe(false);
+    });
+
     it("count a Discover play nowhere, kept or not", async () => {
         const before = await totals();
         await deleteAlbums([id("alb_z")]);

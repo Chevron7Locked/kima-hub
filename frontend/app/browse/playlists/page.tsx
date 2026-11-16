@@ -138,7 +138,7 @@ export default function BrowsePlaylistsPage() {
 
         try {
             const response = await api.get<{ playlists: PlaylistPreview[] }>(
-                `/browse/genres/${genre.id}/playlists?limit=50`,
+                `${pathFor("/browse/genres", genre.id, "playlists")}?limit=50`,
             );
             setGenrePlaylists(response.playlists);
         } catch (error) {
