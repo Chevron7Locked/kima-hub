@@ -365,9 +365,7 @@ router.delete("/:id/hide", async (req, res) => {
 // DELETE /playlists/:id
 router.delete("/:id", requirePlaylistOwner, async (req, res) => {
     try {
-        await prisma.playlist.delete({
-            where: { id: req.params.id },
-        });
+        await playlistService.deletePlaylist(req.params.id);
 
         announcePlaylistChange(req.user!.id, req.params.id, true);
         res.json({ message: "Playlist deleted" });

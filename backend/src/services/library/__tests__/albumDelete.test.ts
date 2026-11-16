@@ -321,6 +321,115 @@ describe("a song or album added after the list was made", () => {
     });
 });
 
+describe("a delete locks what it removes, for every caller", () => {
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    it("an album delete waits for a scan filing a song into the album, then takes that song and its share link too", async () => {
+        const a = await artist("a");
+        await album("racing", a, { songs: 1 });
+        let filing!: () => void;
+        const filed = new Promise<void>((resolve) => (filing = resolve));
+        // The scan: files a song under the album (taking its row's share lock through the foreign key), names it in a
+        // share link, then commits late.
+        const scan = prisma.$transaction(async (tx) => {
+            await tx.track.create({
+                data: { id: id("scanned"), albumId: id("racing"), title: "s", trackNo: 9, duration: 1, filePath: `/${P}outside/s.flac`, fileModified: new Date(), fileSize: 1 },
+            });
+            await tx.shareLink.create({ data: { token: id("tok-scanned"), entityType: "track", entityId: id("scanned"), createdBy: id("user") } });
+            filing();
+            await wait(300);
+        });
+        await filed;
+
+        const deleting = deleteAlbums([id("racing")]);
+        await scan;
+        const result = await deleting;
+
+        expect(result.albums).toBe(1);
+        expect(await prisma.album.count({ where: { id: id("racing") } })).toBe(0);
+        expect(await prisma.track.count({ where: { id: { startsWith: id("racing") } } })).toBe(0);
+        expect(await prisma.track.count({ where: { id: id("scanned") } })).toBe(0);
+        expect(await prisma.shareLink.count({ where: { token: id("tok-scanned") } })).toBe(0);
+    });
+
+    it("a scan filing a song into an album that is being deleted waits, then finds the album gone", async () => {
+        const a = await artist("a");
+        await album("going", a, { songs: 1 });
+        let deleted!: () => void;
+        const done = new Promise<void>((resolve) => (deleted = resolve));
+        // The delete, in the caller's transaction, committing late.
+        const deleting = prisma.$transaction(async (tx) => {
+            const deletion = await deleteAlbums([id("going")], { within: tx });
+            deleted();
+            await wait(300);
+            return deletion;
+        });
+        await done;
+
+        const filing = prisma.track
+            .create({
+                data: { id: id("late"), albumId: id("going"), title: "late", trackNo: 9, duration: 1, filePath: `/${P}outside/late.flac`, fileModified: new Date(), fileSize: 1 },
+            })
+            .then(() => "filed", () => "refused");
+        await deleting;
+
+        expect(await filing).toBe("refused");
+        expect(await prisma.album.count({ where: { id: id("going") } })).toBe(0);
+        expect(await prisma.track.count({ where: { id: id("late") } })).toBe(0);
+    });
+
+    it("an artist delete waits for a scan filing an album under the artist, then takes that album and its songs too", async () => {
+        const a = await artist("a");
+        let filing!: () => void;
+        const filed = new Promise<void>((resolve) => (filing = resolve));
+        const scan = prisma.$transaction(async (tx) => {
+            await tx.album.create({
+                data: { id: id("fresh"), rgMbid: id("fresh-rg"), artistId: a, identityKey: id("fresh-key"), title: `${P}fresh`, primaryType: "Album", location: "LIBRARY" },
+            });
+            await tx.track.create({
+                data: { id: id("fresh-t"), albumId: id("fresh"), title: "f", trackNo: 1, duration: 1, filePath: `/${P}outside/f.flac`, fileModified: new Date(), fileSize: 1 },
+            });
+            filing();
+            await wait(300);
+        });
+        await filed;
+
+        const deleting = deleteArtists([a]);
+        await scan;
+        const result = await deleting;
+
+        expect(result.artists).toBe(1);
+        expect(result.albums).toBe(1);
+        expect(await prisma.artist.count({ where: { id: a } })).toBe(0);
+        expect(await prisma.album.count({ where: { id: id("fresh") } })).toBe(0);
+        expect(await prisma.track.count({ where: { id: id("fresh-t") } })).toBe(0);
+    });
+
+    it("a scan filing an album under an artist that is being deleted waits, then finds the artist gone", async () => {
+        const a = await artist("a");
+        let deleted!: () => void;
+        const done = new Promise<void>((resolve) => (deleted = resolve));
+        const deleting = prisma.$transaction(async (tx) => {
+            const deletion = await deleteArtists([a], { within: tx });
+            deleted();
+            await wait(300);
+            return deletion;
+        });
+        await done;
+
+        const filing = prisma.album
+            .create({
+                data: { id: id("late"), rgMbid: id("late-rg"), artistId: a, identityKey: id("late-key"), title: `${P}late`, primaryType: "Album", location: "LIBRARY" },
+            })
+            .then(() => "filed", () => "refused");
+        await deleting;
+
+        expect(await filing).toBe("refused");
+        expect(await prisma.artist.count({ where: { id: a } })).toBe(0);
+        expect(await prisma.album.count({ where: { id: id("late") } })).toBe(0);
+    });
+});
+
 describe("share links", () => {
     it("an album delete takes the links to the album and to its songs, and no others", async () => {
         const a = await artist("a");

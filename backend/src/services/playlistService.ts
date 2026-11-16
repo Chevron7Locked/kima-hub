@@ -412,6 +412,18 @@ export async function replaceItems(
 }
 
 /**
+ * Deletes a playlist with its entries (the database does that) and the share links naming it, in one transaction: a
+ * share link has no foreign key, so one left behind would dangle. An id no playlist has deletes nothing and is not
+ * an error.
+ */
+export async function deletePlaylist(playlistId: string): Promise<void> {
+    await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`DELETE FROM share_links WHERE "entityType" = 'playlist' AND "entityId" = ${playlistId}`;
+        await tx.playlist.deleteMany({ where: { id: playlistId } });
+    });
+}
+
+/**
  * Remove one entry of a playlist, or every entry of a song. `ref` is an item id (one copy of a repeated song goes) or,
  * for a client that names the song, a song id (all its copies go). An item id wins: ids of the two kinds never
  * collide. Returns how many entries were removed, so removing something already gone is not an error.

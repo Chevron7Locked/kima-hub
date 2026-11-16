@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { rankForPosition } from "../../utils/lexoRank";
-import { allocateAppendRanks, lockPlaylist, replaceItems } from "../../services/playlistService";
+import { allocateAppendRanks, deletePlaylist, lockPlaylist, replaceItems } from "../../services/playlistService";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { shownGenresOfSongs } from "../../utils/genreSql";
@@ -290,7 +290,7 @@ playlistRouter.all("/deletePlaylist.view", wrap(async (req, res) => {
         return subsonicError(req, res, SubsonicError.NOT_AUTHORIZED, "Access denied");
     }
 
-    await prisma.playlist.delete({ where: { id } });
+    await deletePlaylist(id);
     announcePlaylistChange(req.user!.id, id, true);
 
     return subsonicOk(req, res);

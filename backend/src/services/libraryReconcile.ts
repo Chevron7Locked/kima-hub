@@ -4,7 +4,7 @@
  * artifacts) before the delete, and a mass disappearance stands the sweep down. A song whose plays would move while a
  * listener's play history is being repaired is left for the next sweep, never waited for; so is a song whose stage
  * records or row another job holds at that moment. A retired song hands its history (plays, likes, playlist places,
- * bookmarks) to the best copy of the same song on a library album, a corrupt one included and a Discover one never; it
+ * share links, bookmarks) to the best copy of the same song on a library album, a corrupt one included and a Discover one never; it
  * leaves every saved queue, or is replaced there by the best copy a person can play (a queue is never pointed at a file
  * that cannot play). A saved mood mix (and the songs it was last served) follows the history copy the same way, and
  * loses a song that has none.
@@ -411,6 +411,10 @@ async function carryHistoryToReplacements(tx: Prisma.TransactionClient, pairs: R
                AND NOT EXISTS (SELECT 1 FROM "LikedTrack" o WHERE o."userId" = l."userId" AND o."trackId" = ${kept})`;
         await tx.$executeRaw`
             UPDATE "PlaylistItem" SET "trackId" = ${kept} WHERE "trackId" = ${gone}`;
+        // A share link names its song with no foreign key, so it follows the song to the copy; only a song nothing
+        // takes over loses its links (the delete module removes them).
+        await tx.$executeRaw`
+            UPDATE share_links SET "entityId" = ${kept} WHERE "entityType" = 'track' AND "entityId" = ${gone}`;
         await tx.$executeRaw`
             UPDATE subsonic_bookmarks b SET "trackId" = ${kept}
              WHERE b."trackId" = ${gone}

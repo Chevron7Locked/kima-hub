@@ -121,6 +121,34 @@ describe("reconcileDeletedTracks", () => {
         expect(log.map((l) => l.reason)).toEqual(["replaced-by-another-file", "file-missing-confirmed"]);
     });
 
+    it("moves the share link of a replaced file to the copy of the same song, and deletes the link of one nothing takes over", async () => {
+        await prisma.track.create({
+            data: { id: `${P}mp3`, albumId: `${P}alb`, title: "Schema", trackNo: 1, duration: 200, filePath: `/tmp/${P}mp3.mp3`,
+                fileModified: new Date(), fileSize: 1, missingSince: new Date(Date.now() - 5 * MIN) },
+        });
+        await prisma.track.create({
+            data: { id: `${P}flac`, albumId: `${P}alb`, title: "Schema", trackNo: 1, duration: 200, filePath: `/tmp/${P}flac.flac`,
+                fileModified: new Date(), fileSize: 1 },
+        });
+        await prisma.track.create({
+            data: { id: `${P}solo`, albumId: `${P}alb`, title: "Other", trackNo: 2, duration: 200, filePath: `/tmp/${P}solo.mp3`,
+                fileModified: new Date(), fileSize: 1, missingSince: new Date(Date.now() - 5 * MIN) },
+        });
+        await prisma.shareLink.createMany({
+            data: [
+                { token: `${P}tok-copy`, entityType: "track", entityId: `${P}mp3`, createdBy: `${P}user` },
+                { token: `${P}tok-solo`, entityType: "track", entityId: `${P}solo`, createdBy: `${P}user` },
+            ],
+        });
+
+        const res = await prisma.$transaction((tx) => reconcileDeletedTracks(tx, scanStartedAt()));
+        await res.settle();
+
+        expect(res.removed).toBe(2);
+        const links = await prisma.shareLink.findMany({ where: { token: { startsWith: `${P}tok` } }, select: { token: true, entityId: true } });
+        expect(links).toEqual([{ token: `${P}tok-copy`, entityId: `${P}flac` }]);
+    });
+
     it("moves every playlist entry of a replaced file to the copy, repeats and entries beside the copy's own included", async () => {
         await prisma.track.create({
             data: { id: `${P}mp3`, albumId: `${P}alb`, title: "Schema", trackNo: 1, duration: 200, filePath: `/tmp/${P}mp3.mp3`,

@@ -25,9 +25,11 @@
  *   releases its keeps too.
  *
  * Out of this module: the song files and folders (their callers know the music root and what they may touch), and
- * what a deleted album's plays and likes become (the plays go with the songs, as the database does it). Where a caller
- * lists the albums or artists to delete earlier than it deletes them (the prune), `onlyEmpty` asks again under a lock
- * at the delete, so a song or album a scan added in between is never deleted.
+ * what a deleted album's plays and likes become (the plays go with the songs, as the database does it). Every delete
+ * locks the album and artist rows it removes before it reads them (artists first, then albums, each in id order), so
+ * a scan filing a song into an album or an album under an artist waits for the commit and then files fresh. Where a
+ * caller lists the albums or artists to delete earlier than it deletes them (the prune), `onlyEmpty` also asks again
+ * under the lock at the delete, so a song or album a scan added in between is never deleted.
  *
  * `within` runs the delete inside the caller's transaction, which then owns the commit; the answer's `settle()` does
  * what follows a commit and must be called after it. Without `within` the module opens its own transaction and settles
@@ -99,9 +101,10 @@ function* batches<T>(items: T[]): Generator<T[]> {
 
 /**
  * The albums among `ids` (at `only`, when given; with no song left when `onlyEmpty`) with their songs, Discover records,
- * share links and album rows removed. `onlyEmpty` takes the album rows' locks first and asks again under them: a scan
- * adding a song to an album takes a share lock on the album row, so it either landed before the question (the album
- * stays) or waits until this delete has committed (and then fails on the album's foreign key, which a scan retries).
+ * share links and album rows removed. The album rows are locked first, in id order, and everything is asked under the
+ * lock: a scan adding a song to an album takes a share lock on the album row, so it either landed before the question
+ * (the song goes with the album, or, for `onlyEmpty`, the album stays) or waits until this delete has committed (and
+ * then fails on the album's foreign key, which a scan retries and files fresh).
  */
 async function removeAlbums(
     tx: Tx,
@@ -110,7 +113,7 @@ async function removeAlbums(
     owed: Owed,
 ): Promise<void> {
     for (const batch of batches(ids)) {
-        if (scope.onlyEmpty) await tx.$queryRaw`SELECT id FROM "Album" WHERE id = ANY(${batch}::text[]) ORDER BY id FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM "Album" WHERE id = ANY(${batch}::text[]) ORDER BY id FOR UPDATE`;
         const rows = await tx.album.findMany({
             where: {
                 id: { in: batch },
@@ -216,7 +219,7 @@ export async function deleteArtists(
     return run(options.within, async (tx) => {
         const owed = emptyOwed("an artist deleted");
         for (const batch of batches(ids.filter((id) => id !== keepsTo))) {
-            if (onlyEmpty) await tx.$queryRaw`SELECT id FROM "Artist" WHERE id = ANY(${batch}::text[]) ORDER BY id FOR UPDATE`;
+            await tx.$queryRaw`SELECT id FROM "Artist" WHERE id = ANY(${batch}::text[]) ORDER BY id FOR UPDATE`;
             const artistIds = (
                 await tx.artist.findMany({ where: { id: { in: batch }, ...(onlyEmpty ? { albums: { none: {} } } : {}) }, select: { id: true } })
             ).map((a) => a.id);
