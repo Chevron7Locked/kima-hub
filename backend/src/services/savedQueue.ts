@@ -31,6 +31,12 @@
  *   (`namesEpisode`), so a song or episode that is gone is stored as none.
  * - A save reads the queue limit (`queueLimit`) before it opens its transaction, never inside it: the read may take its
  *   own connection from the pool, and a save must not hold one connection while it waits for a second.
+ *
+ * The interface is what a caller does with a person's playback state: read a web request into a save (`readWebSave`),
+ * save it (`saveWebState`), read the state a client is shown (`readPlaybackState`), clear it (`clearPlaybackState`),
+ * save a Subsonic app's queue (`saveQueueOfIds`) and read it for one (`playableQueue`). The locks, the plan and the
+ * write are inside, in one order, so no caller knows it. `entriesOf`, `hydrateQueue` and `ON_LIBRARY_ALBUM` are what the
+ * library sweep reads a queue it rewrites with.
  */
 import { prisma, Prisma } from "../utils/db";
 import { PLAYABLE_SONG } from "../utils/playableSong";
@@ -123,7 +129,7 @@ export async function queueLimit(): Promise<number> {
  * index (counted over the entries as sent, a whole number of 0 or more the caller has checked with `isQueueIndex`)
  * moves back by the ones dropped before it, so an index whose own entry was dropped points at the next entry kept.
  */
-export function queueIdsOf(raw: readonly unknown[], index: number): { ids: string[]; clientIndex: number } {
+function queueIdsOf(raw: readonly unknown[], index: number): { ids: string[]; clientIndex: number } {
     const idOf = (item: unknown): string | null => {
         const id = item && typeof item === "object" ? (item as { id?: unknown }).id : undefined;
         return id ? String(id) : null;
@@ -139,7 +145,7 @@ export function queueIdsOf(raw: readonly unknown[], index: number): { ids: strin
  * where the song is, else the nearest place it sits). A song the stored queue does not hold, or none named, leaves the
  * mapped index.
  */
-export function pointIntoStored(stored: readonly QueueEntry[], clientIndex: number, trackId: unknown, playable: ReadonlySet<string>): number {
+function pointIntoStored(stored: readonly QueueEntry[], clientIndex: number, trackId: unknown, playable: ReadonlySet<string>): number {
     if (stored.length === 0) return 0;
     const shownAt = stored.flatMap((item, i) => (playable.has(item.id) ? [i] : []));
     const counted = Math.min(clientIndex, stored.length - 1);
@@ -157,13 +163,13 @@ function placeNearest(stored: readonly QueueEntry[], id: unknown, to: number): n
 }
 
 /** Whether a save names a song: an id that is text and not empty. */
-export const namesSong = (trackId: unknown): trackId is string => typeof trackId === "string" && trackId !== "";
+const namesSong = (trackId: unknown): trackId is string => typeof trackId === "string" && trackId !== "";
 
 /** Whether a value is a place in a queue: a whole number of 0 or more. */
-export const isQueueIndex = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
+const isQueueIndex = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
 
 /** Whether a save that sends no queue says where the player is: an index, or the song it is on. */
-export function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolean {
+function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolean {
     return typeof clientIndex === "number" || namesSong(trackId);
 }
 
@@ -172,7 +178,7 @@ export function namesCurrentSong(clientIndex: unknown, trackId: unknown): boolea
  * (a first save has no row yet, and two saves of one person never meet); the row is what the library sweep rewriting a
  * queue waits on. The one lock every save takes, web or Subsonic.
  */
-export async function lockPlaybackState(tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">, userId: string): Promise<void> {
+async function lockPlaybackState(tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw">, userId: string): Promise<void> {
     await takeTurn(tx, userId);
     await lockStateRow(tx, userId);
 }
@@ -196,7 +202,7 @@ async function lockStateRow(tx: Pick<Prisma.TransactionClient, "$queryRaw">, use
  * gets 0; a save that names the song but sends no index finds it in the stored queue (the place nearest the stored
  * index, when it sits twice).
  */
-export async function indexIntoStoredQueue(
+async function indexIntoStoredQueue(
     tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "playbackState" | "track">,
     userId: string,
     clientIndex: number | null | undefined,
@@ -215,7 +221,7 @@ export async function indexIntoStoredQueue(
 }
 
 /** A playback state row as stored. */
-export type PlaybackStateRow = Prisma.PlaybackStateGetPayload<object>;
+type PlaybackStateRow = Prisma.PlaybackStateGetPayload<object>;
 
 /**
  * Where the client's current place sits in the queue as stored, which leaves out the ids Kima did not know. The places
@@ -266,7 +272,7 @@ export const ON_LIBRARY_ALBUM = { album: { location: "LIBRARY" } } satisfies Pri
  * A save that stores no queue but names a song (the one the player is on) takes it with a `limit` of 1: the song is
  * held the same way, and is stored as named only when it is among the songs returned.
  */
-export async function lockForQueueSave(
+async function lockForQueueSave(
     tx: Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "track">,
     userId: string,
     ids: readonly string[],
@@ -295,7 +301,7 @@ export async function lockForQueueSave(
  * the episode belonging to that podcast. Anything else (another shape, an episode of another show, one that was
  * removed) names nothing. Read under the person's turn, so it agrees with the state it is stored in.
  */
-export async function namesEpisode(tx: Pick<Prisma.TransactionClient, "podcastEpisode">, podcastId: unknown): Promise<boolean> {
+async function namesEpisode(tx: Pick<Prisma.TransactionClient, "podcastEpisode">, podcastId: unknown): Promise<boolean> {
     if (typeof podcastId !== "string") return false;
     const parts = podcastId.split(":");
     if (parts.length !== 2 || parts[0] === "" || parts[1] === "") return false;
@@ -320,7 +326,7 @@ export async function namesEpisode(tx: Pick<Prisma.TransactionClient, "podcastEp
  * state shows it, with the stored current song itself shown (a position belongs to its song, so a stand-in is never
  * "the same"), so a save that only sends back what it was shown changes nothing it can see.
  */
-export async function planQueue(
+async function planQueue(
     tx: Pick<Prisma.TransactionClient, "track" | "playbackState">,
     userId: string,
     ids: string[],
@@ -419,7 +425,7 @@ function shownPlace(
 
 const INT32_MAX = 2_147_483_647;
 /** The wait for the row lock counts toward a transaction's time limit (5 s by default), and a long queue takes a while to read. */
-export const SAVE_TIMEOUT_MS = 30_000;
+const SAVE_TIMEOUT_MS = 30_000;
 
 /**
  * A queue a Subsonic app saves, as song ids and the place it is on (`clientIndex` counts `ids`). The songs and the
@@ -514,7 +520,7 @@ export async function playableQueue(
  * songs, the index into those, and, for a track state that names a track, the shown queue's current song as the track. What
  * is stored stays as it is. No row stays no row.
  */
-export async function shownState(state: PlaybackStateRow | null) {
+async function shownState(state: PlaybackStateRow | null) {
     if (!state) return state;
     const shown = await playableQueue(state);
     if (!Array.isArray(state.queue)) return { ...state, trackId: shown.trackId };
@@ -536,7 +542,7 @@ const SEEN_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:
  * not text, or not an ISO 8601 date and time with its zone. `new Date` alone would take "1" as a year and "2026-01-01"
  * as midnight, times the server never answered, and a check against one of those can only fail.
  */
-export function seenTime(raw: unknown): Date | null {
+function seenTime(raw: unknown): Date | null {
     if (typeof raw !== "string" || !SEEN_TIME.test(raw)) return null;
     const at = new Date(raw);
     return Number.isNaN(at.getTime()) ? null : at;
@@ -546,6 +552,254 @@ export function seenTime(raw: unknown): Date | null {
  * The answer to a save or a clear that named a time other than the stored one (409): the state as stored now, shown as
  * a read shows it, so the client can take it up without asking again. The one body both answer with.
  */
-export async function changedSinceRead(current: PlaybackStateRow | null) {
+async function changedSinceRead(current: PlaybackStateRow | null) {
     return { error: "Playback state changed since it was read", state: await shownState(current) };
+}
+
+/** What a refused request is logged as (`reason`, which never carries a value the client sent) and, when it has one, what the client is told. */
+export type Refusal = { reason: string; answer?: string };
+
+/** A web save, read from a request body: every field is the shape the save needs, or left out. */
+export type WebSave = {
+    playbackType: "track" | "audiobook" | "podcast";
+    trackId?: string | null;
+    audiobookId?: string | null;
+    podcastId?: string | null;
+    /** The entries the client sent, of which only the ids are read. Left out unless the client sent an array. */
+    queue?: readonly unknown[];
+    currentIndex?: number;
+    isShuffle?: boolean;
+    /** Where the queue came from (a short page address such as `album:<id>`); null when none was sent or it is not one. */
+    queueSource: string | null;
+    /** The time of the state the client saw (`updatedAt`): the save writes only while that is still the stored time. */
+    seenAt: Date | null;
+};
+
+const PLAYBACK_TYPES = ["track", "audiobook", "podcast"] as const;
+const SEEN_TIME_REQUIRED = "expectedUpdatedAt: an ISO date and time required";
+const INDEX_REQUIRED = "currentIndex: a whole number of 0 or more required";
+// A queue source is a short page address such as `album:<id>`; anything longer is not one and is dropped.
+const MAX_QUEUE_SOURCE_LENGTH = 200;
+/** Who saved the queue, as a Subsonic app reads it (`changedBy`): a save from the web is Kima's. */
+const CHANGED_BY = "Kima";
+
+/**
+ * A web save as its request body sends it, or why it is refused. A refusal is for a person's mistake and is answered
+ * before the database is touched: a type that is none of the three, a time that is not an ISO date and time (a save
+ * naming one is the client saying which state it decided on), an index that is no place in a queue (not clamped to
+ * one), or an id that is not text or null (a number or object would be stored as the id of a song that cannot exist).
+ * A client that predates the time sends none, and its save then writes whatever is stored.
+ */
+export function readWebSave(body: unknown): { save: WebSave } | { refused: Refusal } {
+    const sent = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+    const { playbackType, trackId, audiobookId, podcastId, queue, currentIndex, isShuffle, queueSource, expectedUpdatedAt } = sent;
+
+    if (!PLAYBACK_TYPES.some((type) => type === playbackType)) {
+        return { refused: { reason: "playbackType: track, audiobook or podcast required", answer: "playbackType must be track, audiobook or podcast" } };
+    }
+    let seenAt: Date | null = null;
+    if (expectedUpdatedAt !== undefined) {
+        seenAt = seenTime(expectedUpdatedAt);
+        if (!seenAt) return { refused: { reason: SEEN_TIME_REQUIRED } };
+    }
+    // Null is left out.
+    if (currentIndex !== undefined && currentIndex !== null && !isQueueIndex(currentIndex)) {
+        return { refused: { reason: INDEX_REQUIRED } };
+    }
+    for (const [name, value] of [["trackId", trackId], ["audiobookId", audiobookId], ["podcastId", podcastId]] as const) {
+        if (value !== undefined && value !== null && typeof value !== "string") {
+            return { refused: { reason: `${name}: text or null required` } };
+        }
+    }
+    return {
+        save: {
+            playbackType: playbackType as WebSave["playbackType"],
+            trackId: trackId as string | null | undefined,
+            audiobookId: audiobookId as string | null | undefined,
+            podcastId: podcastId as string | null | undefined,
+            queue: Array.isArray(queue) ? queue : undefined,
+            currentIndex: typeof currentIndex === "number" ? currentIndex : undefined,
+            isShuffle: typeof isShuffle === "boolean" ? isShuffle : undefined,
+            queueSource: typeof queueSource === "string" && queueSource.length > 0 && queueSource.length <= MAX_QUEUE_SOURCE_LENGTH ? queueSource : null,
+            seenAt,
+        },
+    };
+}
+
+/** A person's playback state as a client is shown it; none when they have none. */
+export async function readPlaybackState(userId: string) {
+    return shownState(await prisma.playbackState.findUnique({ where: { userId } }));
+}
+
+/**
+ * A web save: the state a player left (what it is playing, its queue and place, shuffle), written under the person's
+ * turn. Answers the state as a read of it would show it, so a client holds one shape whichever way it learned it, or,
+ * when the save named a time and the stored state is no longer the one saved at it (or is gone), nothing is written and
+ * the answer is the state as stored now (`changed`), so the client can take it up without asking again.
+ *
+ * A save without a `queue` is a partial update (a shuffle toggle, a track change within the queue the client already
+ * has): it never clears the stored queue, only an explicit array replaces it, and an omitted field is left alone rather
+ * than reset to its default. Only a track save has a queue: the player keeps none for a book or an episode, and sends the
+ * same fields (an empty queue, index 0) on those saves all the same. Such a save leaves the stored queue, its index and
+ * its source alone, so the music queue is there when the person goes back to it.
+ */
+export async function saveWebState(
+    userId: string,
+    save: WebSave,
+): Promise<{ saved: Awaited<ReturnType<typeof shownState>> } | { changed: Awaited<ReturnType<typeof changedSinceRead>> }> {
+    const { playbackType, trackId, audiobookId, podcastId, queue, currentIndex, isShuffle, queueSource, seenAt: expectedAt } = save;
+    const isTrack = playbackType === "track";
+    const queueProvided = isTrack && queue !== undefined;
+    const indexOnly = isTrack && !queueProvided && namesCurrentSong(currentIndex, trackId);
+    const sent = queueProvided ? queueIdsOf(queue, currentIndex ?? 0) : null;
+    // The limit is read here, before the transaction opens: the read may take a connection of its own, and a save
+    // holding one must not wait for a second. A save that sends no queue holds at most the one song it names.
+    const limit = sent ? await queueLimit() : 1;
+
+    // The queue as it will be stored: the songs of the ids sent, as Kima describes them, cut to the limit.
+    const replacementFor = async (tx: Prisma.TransactionClient, ids: string[], clientIndex: number, held: ReadonlySet<string>) => {
+        const planned = await planQueue(tx, userId, ids, clientIndex, limit, held);
+        return {
+            currentIndex: planned.currentIndex,
+            // Whether the client is shown the queue and place it already was, which is when its position stays.
+            sameAsShown: planned.sameAsShown,
+            // The current song is the stored queue's current entry, whatever `trackId` the save sent or left out: a
+            // named song the plan left out (unknown, on a Discover album) or cut at the limit never stays beside
+            // a queue that does not hold it, so the two never disagree.
+            trackId: planned.queue?.[planned.currentIndex]?.id ?? null,
+            storedQueue: planned.queue === null ? Prisma.DbNull : (planned.queue as unknown as Prisma.InputJsonValue),
+            // Where the queue came from belongs to the queue it was saved with: a save that replaces the queue and
+            // sends no source (an older client, the iOS app) clears it, and a save without a queue leaves it.
+            safeQueueSource: planned.queue !== null ? queueSource : null,
+        };
+    };
+    type Replacement = Awaited<ReturnType<typeof replacementFor>>;
+
+    // `index` null: the save names a song the stored queue does not hold, so the stored index stays.
+    // Returns null when the save named a time and the stored state is no longer the one saved at it (or is gone):
+    // nothing was written.
+    // `named`: the song and the episode the save names, as they are stored, which is null for an id that names
+    // nothing Kima holds; undefined where the stored one is left alone (the save names none and sends no queue, or
+    // names a song the stored queue does not hold). A save that replaces the queue always names its current entry
+    // as the song.
+    // `startsOver`: the save changes the queue or the entry the state is on, so the position goes back to 0. A
+    // save that leaves the place alone, a queue re-saved as it stands included, leaves the position alone.
+    const write = async (
+        db: Pick<Prisma.TransactionClient, "playbackState">,
+        { replacement, index, named, startsOver }: {
+            replacement: Replacement | null;
+            index: number | null;
+            named: { trackId: string | null | undefined; podcastId: string | null | undefined };
+            startsOver: boolean;
+        },
+    ): Promise<PlaybackStateRow | null> => {
+        // The position is the place in the current song, which only a Subsonic client sends: it never stays beside a
+        // song or a queue it was not reached in.
+        const queueUpdate = replacement
+            ? {
+                  queue: replacement.storedQueue,
+                  queueSource: replacement.safeQueueSource,
+                  currentIndex: index ?? 0,
+                  ...(startsOver ? { position: 0 } : {}),
+              }
+            : indexOnly && index !== null
+              ? { currentIndex: index, ...(startsOver ? { position: 0 } : {}) }
+              : {};
+        const update = {
+            playbackType,
+            // Omitted fields are left alone: native clients send partial updates (a queue save names its own song).
+            ...(named.trackId !== undefined ? { trackId: named.trackId } : {}),
+            // A book is Audiobookshelf's, which Kima does not hold: its id is stored as sent.
+            ...(audiobookId !== undefined ? { audiobookId: audiobookId || null } : {}),
+            ...(named.podcastId !== undefined ? { podcastId: named.podcastId } : {}),
+            ...queueUpdate,
+            ...(typeof isShuffle === "boolean" ? { isShuffle } : {}),
+            changedBy: CHANGED_BY,
+        };
+        // One statement matches the time and writes, so two saves naming the same time cannot both write; a
+        // state that is gone is never brought back by it.
+        if (expectedAt) {
+            const { count } = await db.playbackState.updateMany({ where: { userId, updatedAt: expectedAt }, data: update });
+            return count === 0 ? null : db.playbackState.findUnique({ where: { userId } });
+        }
+        return db.playbackState.upsert({
+            where: { userId },
+            update,
+            create: {
+                userId,
+                playbackType,
+                trackId: named.trackId ?? null,
+                audiobookId: audiobookId || null,
+                podcastId: named.podcastId ?? null,
+                queue: replacement?.storedQueue ?? Prisma.DbNull,
+                queueSource: replacement?.safeQueueSource ?? null,
+                currentIndex: index ?? 0,
+                position: 0,
+                isShuffle: isShuffle || false,
+                changedBy: CHANGED_BY,
+            },
+        });
+    };
+
+    // The index points into a queue: the one sent, or for a save without one the queue as it stands, which stays
+    // locked until this save is written (see `indexIntoStoredQueue`). Every other save takes the same lock, a first
+    // save included: a time the save names is checked by the write inside it, and the row a save answers with is
+    // the one it wrote and not one a later save made. A save holds the songs it stores or names first and reads
+    // them under that lock, so a song the library sweep retires cannot be stored after it; the episode it names is
+    // read under the same turn.
+    const written = await prisma.$transaction(async (tx) => {
+        const held = await lockForQueueSave(tx, userId, sent ? sent.ids : namesSong(trackId) ? [trackId] : [], limit);
+        const replacement = sent ? await replacementFor(tx, sent.ids, sent.clientIndex, held) : null;
+        const named = {
+            trackId: replacement ? replacement.trackId : trackId === undefined ? undefined : namesSong(trackId) && held.has(trackId) ? trackId : null,
+            podcastId: podcastId === undefined ? undefined : (await namesEpisode(tx, podcastId)) ? (podcastId as string) : null,
+        };
+        if (replacement) {
+            return write(tx, { replacement, index: replacement.currentIndex, named, startsOver: !replacement.sameAsShown });
+        }
+        if (!indexOnly) return write(tx, { replacement: null, index: 0, named, startsOver: false });
+        const index = await indexIntoStoredQueue(tx, userId, currentIndex, trackId);
+        // A song the stored queue does not hold changes nothing, the stored song included.
+        if (index === null) return write(tx, { replacement: null, index, named: { ...named, trackId: undefined }, startsOver: false });
+        const stored = await tx.playbackState.findUnique({ where: { userId }, select: { queue: true, currentIndex: true } });
+        // The stored song is the stored queue's current entry, whatever song the save named beside the index.
+        const entry = entriesOf(stored?.queue)[index];
+        return write(tx, {
+            replacement: null,
+            index,
+            named: entry ? { ...named, trackId: entry.id } : named,
+            startsOver: stored !== null && stored.currentIndex !== index,
+        });
+    }, { timeout: SAVE_TIMEOUT_MS });
+
+    if (!written) return { changed: await changedSinceRead(await prisma.playbackState.findUnique({ where: { userId } })) };
+    return { saved: await shownState(written) };
+}
+
+/**
+ * Clears a person's playback state (when they stop playback completely). `seen` is what the client sent as the time of
+ * the state it saw (`?expectedUpdatedAt=`, as a read answered it): the clear then happens only while that is still the
+ * stored time, so a state another device saved since is not wiped by a decision made on the older one (`changed`, the
+ * state as stored now, as a save refuses with it). Left out (`undefined`), it clears whatever is stored, because a
+ * client that predates the time (the iOS app) sends none. A DELETE carries no body that every proxy forwards, so the
+ * time travels in the address, and anything there that is not one time (twice, empty, not an ISO date) is refused.
+ *
+ * The check and the delete run under the turn every save takes, so a save in flight is either before both or after
+ * both; a clear naming no time takes the same turn, so it never lands between a save's reads and its write. Clearing
+ * state that is already gone succeeds: clients call this to recover from state pointing at something deleted.
+ */
+export async function clearPlaybackState(
+    userId: string,
+    seen: unknown,
+): Promise<{ refused: Refusal } | { changed: Awaited<ReturnType<typeof changedSinceRead>> } | { cleared: number }> {
+    const at = seen === undefined ? null : seenTime(seen);
+    if (seen !== undefined && !at) return { refused: { reason: SEEN_TIME_REQUIRED } };
+    const { count, current } = await prisma.$transaction(async (tx) => {
+        await lockPlaybackState(tx, userId);
+        const { count } = await tx.playbackState.deleteMany({ where: at ? { userId, updatedAt: at } : { userId } });
+        return { count, current: at && count === 0 ? await tx.playbackState.findUnique({ where: { userId } }) : null };
+    }, { timeout: SAVE_TIMEOUT_MS });
+    // A state that is there and is not the one seen: shown as a save shows it, so the client takes it up.
+    if (current) return { changed: await changedSinceRead(current) };
+    return { cleared: count };
 }
