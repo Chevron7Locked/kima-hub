@@ -12,7 +12,7 @@ import playlistsRoutes from "../playlists";
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { lockPlaylist, placeFoundSongs } from "../../services/playlistService";
-import { getImportJob } from "../../services/spotifyImport";
+import { getImportJob } from "../../services/playlistImport";
 import { eventBus } from "../../services/eventBus";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { mountAsServer } from "./helpers/serverMount";

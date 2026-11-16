@@ -19,12 +19,14 @@ import { searchRouter } from "../search";
 import { libraryRouter } from "../library";
 import { playbackRouter } from "../playback";
 import enrichmentRouter from "../../enrichment";
-import { spotifyImportService, mergeEditionTracks } from "../../../services/spotifyImport";
+import { playlistImportService, mergeEditionTracks } from "../../../services/playlistImport";
 import { getSystemSettings } from "../../../utils/systemSettings";
 import { markedTime } from "../../../__tests__/helpers/libraryMarker";
 import { generateToken } from "../../../middleware/auth";
 import { mountAsServer } from "../../__tests__/helpers/serverMount";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import { listedSong, tracklistOf } from "../../../__tests__/helpers/tracklist";
+import { previewOfTracklist, pendingTracksOf } from "../../../services/playlistImport/matching";
 
 jest.setTimeout(120_000);
 
@@ -207,11 +209,8 @@ describe("getLyrics picks the best match", () => {
 
 describe("a playlist import finds an artist by the name shown", () => {
     it("the matcher finds the song of the shown artist name, not a namesake title of another artist", async () => {
-        const match = await (spotifyImportService as any).matchTrack({
-            spotifyId: "x", title: `${P} import song`, artist: `Quillon Vesper Choir`, artistId: "", album: "Unknown Album", albumId: "",
-            isrc: null, durationMs: 0, trackNumber: 1, previewUrl: null, coverUrl: null,
-        });
-        expect(match.localTrack?.id).toBe(`${P}-imp-1s`);
+        const preview = await previewOfTracklist(tracklistOf([{ title: `${P} import song`, artist: `Quillon Vesper Choir`, album: "x" }]));
+        expect(preview.matchedTracks[0].localTrack?.id).toBe(`${P}-imp-1s`);
     });
 
     it("a later reconcile of a waiting song finds it by the shown artist name (a title too short to match without its artist)", async () => {
@@ -220,22 +219,18 @@ describe("a playlist import finds an artist by the name shown", () => {
         await prisma.playlistPendingTrack.create({
             data: { playlistId, spotifyArtist: `Quillon Vesper Choir`, spotifyTitle: "Hymn", spotifyAlbum: "x", sort: 0, rank: "a0" },
         });
-        await spotifyImportService.reconcilePendingTracks(playlistId);
+        await playlistImportService.reconcilePendingTracks(playlistId);
         expect((await prisma.playlistItem.findMany({ where: { playlistId } })).map((i) => i.trackId)).toEqual([`${P}-imp-1h`]);
     });
 
     it("still finds it by the file's artist name", async () => {
-        const match = await (spotifyImportService as any).matchTrack({
-            spotifyId: "x", title: `${P} import song`, artist: `${P}rawfile band`, artistId: "", album: "Unknown Album", albumId: "",
-            isrc: null, durationMs: 0, trackNumber: 1, previewUrl: null, coverUrl: null,
-        });
-        expect(match.localTrack?.id).toBe(`${P}-imp-1s`);
+        const preview = await previewOfTracklist(tracklistOf([{ title: `${P} import song`, artist: `${P}rawfile band`, album: "x" }]));
+        expect(preview.matchedTracks[0].localTrack?.id).toBe(`${P}-imp-1s`);
     });
 });
 
 describe("a playlist import's title checks fold like the rest of the import", () => {
-    const song = (title: string, artist: string, spotifyId: string) =>
-        ({ spotifyId, title, artist, artistId: "", album: "Unknown Album", albumId: "", isrc: null, durationMs: 0, trackNumber: 1, previewUrl: null, coverUrl: null });
+    const song = (title: string, artist: string, spotifyId: string) => listedSong({ spotifyId, title, artist });
 
     it("finds the album that needs a song when the title and artist differ by accents, case or an apostrophe", () => {
         const preview = {
@@ -245,7 +240,7 @@ describe("a playlist import's title checks fold like the rest of the import", ()
                 trackCount: 1, tracksNeeded: [song("DON'T STOP", "Beyoncé", "needed-id")],
             }],
         };
-        const [pending] = (spotifyImportService as any).buildPendingTracks(preview);
+        const [pending] = pendingTracksOf(preview as never);
         expect(pending).toMatchObject({ albumMbid: "rg1", artistMbid: "ar1" });
     });
 
@@ -257,7 +252,7 @@ describe("a playlist import's title checks fold like the rest of the import", ()
                 trackCount: 1, tracksNeeded: [song("Don't Stop", "Beyoncé", "needed-id")],
             }],
         };
-        const [pending] = (spotifyImportService as any).buildPendingTracks(preview);
+        const [pending] = pendingTracksOf(preview as never);
         expect(pending.albumMbid).toBeNull();
     });
 
@@ -269,7 +264,7 @@ describe("a playlist import's title checks fold like the rest of the import", ()
                 trackCount: 1, tracksNeeded: [song("Something Else", "Beyoncé", "needed-id")],
             }],
         };
-        const [pending] = (spotifyImportService as any).buildPendingTracks(preview);
+        const [pending] = pendingTracksOf(preview as never);
         expect(pending).toMatchObject({ albumMbid: "rg1", artistMbid: "ar1" });
     });
 
@@ -281,7 +276,7 @@ describe("a playlist import's title checks fold like the rest of the import", ()
                 trackCount: 1, tracksNeeded: [song("Something Else", "Beyoncé", "needed-id")],
             }],
         };
-        const [pending] = (spotifyImportService as any).buildPendingTracks(preview);
+        const [pending] = pendingTracksOf(preview as never);
         expect(pending.albumMbid).toBeNull();
     });
 
@@ -305,7 +300,7 @@ describe("a playlist import reads the shown artist names once", () => {
         }
         const lookup = jest.spyOn(prisma.artist, "findMany");
         try {
-            await spotifyImportService.reconcilePendingTracks(playlistId);
+            await playlistImportService.reconcilePendingTracks(playlistId);
             const ofShownNames = lookup.mock.calls.filter(([args]) => JSON.stringify(args?.where ?? {}).includes('"displayName"'));
             expect(ofShownNames).toHaveLength(1);
         } finally {

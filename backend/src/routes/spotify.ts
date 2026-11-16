@@ -6,8 +6,15 @@ import { logger } from "../utils/logger";
 import { ACQUIRE_REFUSED, mayAcquire } from "../utils/acquirePermission";
 import { invalidRequest, refuseRequest, safeError } from "../utils/errors";
 import { z } from "zod";
-import { spotifyImportService, getImportJob } from "../services/spotifyImport";
-import { M3UContainsNullBytes, M3UNothingMatched, M3UTooManyEntries, decodeM3U, parseM3U } from "../services/m3uParser";
+import {
+  playlistImportService,
+  getImportJob,
+  M3UContainsNullBytes,
+  M3UNothingMatched,
+  M3UTooManyEntries,
+  decodeM3U,
+  parseM3U,
+} from "../services/playlistImport";
 import { recogniseMusicLink, lacksLinkScheme, FULL_LINK_MESSAGE, MusicLink, MusicPlatform } from "../services/musicLink";
 
 const router = Router();
@@ -142,7 +149,7 @@ router.post("/preview/start", async (req, res) => {
         }
 
         logger.debug(`[Playlist Import] Starting preview job for: ${link.url}`);
-        const { jobId } = await spotifyImportService.startPreviewJob(link.url, req.user!.id);
+        const { jobId } = await playlistImportService.startPreviewJob(link.url, req.user!.id);
         res.json({ jobId });
     } catch (error) {
         answerFailure(req, res, "Playlist preview start", error);
@@ -157,7 +164,7 @@ router.post("/preview/start", async (req, res) => {
 router.get("/preview/:jobId", async (req, res) => {
     try {
         const { jobId } = req.params;
-        const result = await spotifyImportService.getPreviewResult(jobId);
+        const result = await playlistImportService.getPreviewResult(jobId);
         if (!result) {
             return res.json({ status: "pending" });
         }
@@ -183,7 +190,7 @@ router.post("/import/quick", async (req, res) => {
             return refuseLink(req, res, url);
         }
 
-        const { jobId } = await spotifyImportService.quickImport(link.url, req.user!.id, playlistName);
+        const { jobId } = await playlistImportService.quickImport(link.url, req.user!.id, playlistName);
 
         res.json({ jobId });
     } catch (error) {
@@ -205,7 +212,7 @@ router.post("/import", async (req, res) => {
             return res.status(403).json({ error: ACQUIRE_REFUSED });
         }
 
-        const stored = await spotifyImportService.getPreviewResult(previewJobId);
+        const stored = await playlistImportService.getPreviewResult(previewJobId);
         if (!stored || stored.status !== "completed" || !stored.preview) {
             return res.status(400).json({
                 error: "Preview not ready or expired. Please generate a new preview.",
@@ -222,7 +229,7 @@ router.post("/import", async (req, res) => {
             `[Spotify Import] Downloading ${albumMbidsToDownload.length} albums`
         );
 
-        const job = await spotifyImportService.startImport(
+        const job = await playlistImportService.startImport(
             userId,
             spotifyPlaylistId,
             playlistName,
@@ -262,7 +269,7 @@ router.get("/import/:jobId/status", async (req, res) => {
 router.get("/imports", async (req, res) => {
     try {
         const userId = req.user!.id;
-        const jobs = await spotifyImportService.getUserJobs(userId);
+        const jobs = await playlistImportService.getUserJobs(userId);
         res.json(jobs);
     } catch (error) {
         safeError(res, "Spotify imports", error);
@@ -278,7 +285,7 @@ router.post("/import/:jobId/refresh", async (req, res) => {
         const job = await ownImportJob(req, res, "refresh");
         if (!job) return;
 
-        const result = await spotifyImportService.refreshJobMatches(job.id);
+        const result = await playlistImportService.refreshJobMatches(job.id);
 
         res.json({
             message:
@@ -302,7 +309,7 @@ router.post("/import/:jobId/cancel", async (req, res) => {
         const job = await ownImportJob(req, res, "cancel");
         if (!job) return;
 
-        const result = await spotifyImportService.cancelJob(job.id);
+        const result = await playlistImportService.cancelJob(job.id);
 
         res.json({
             message: result.playlistCreated
@@ -349,7 +356,7 @@ router.post("/import/m3u", m3uImportLimiter, (req, res, next) => {
             return refuseRequest(req, res, "file: no entries", "M3U file contains no entries");
         }
 
-        const result = await spotifyImportService.importFromM3U(
+        const result = await playlistImportService.importFromM3U(
             req.user!.id,
             playlistName,
             entries,

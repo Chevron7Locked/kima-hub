@@ -1,104 +1,14 @@
+
+
 import { posix } from "path";
 
-export interface M3UEntry {
-    filePath: string;
-    artist: string | null;
-    title: string | null;
-    durationSeconds: number | null;
-}
-
-/** An M3U import in which no entry matched a playable song in the library: it makes no playlist. */
-export class M3UNothingMatched extends Error {
-    constructor(readonly total: number) {
-        super(`none of the ${total} ${total === 1 ? "entry" : "entries"} in this file matched a song in your library`);
-        this.name = "M3UNothingMatched";
-    }
-}
-
-/** An M3U file with a null byte in it: not a text playlist. */
-export class M3UContainsNullBytes extends Error {
-    constructor() {
-        super("M3U content contains null bytes");
-        this.name = "M3UContainsNullBytes";
-    }
-}
-
-/** An M3U file with more entries than a playlist may hold. */
-export class M3UTooManyEntries extends Error {
-    constructor(readonly maxEntries: number) {
-        super(`M3U file exceeds maximum of ${maxEntries} entries`);
-        this.name = "M3UTooManyEntries";
-    }
-}
-
-interface ParseOptions {
-    maxEntries?: number;
-}
-
-export function parseM3U(content: string, options: ParseOptions = {}): M3UEntry[] {
-    const { maxEntries = 10000 } = options;
-
-    if (content.includes("\0")) {
-        throw new M3UContainsNullBytes();
-    }
-
-    const lines = content.replace(/\r\n/g, "\n").split("\n");
-    const entries: M3UEntry[] = [];
-    let pendingMeta: { artist: string | null; title: string | null; duration: number | null } | null = null;
-
-    for (const raw of lines) {
-        const line = raw.trim();
-        if (!line) continue;
-
-        if (line === "#EXTM3U") continue;
-
-        if (line.startsWith("#EXTINF:")) {
-            const afterHash = line.slice(8);
-            const commaIdx = afterHash.indexOf(",");
-            if (commaIdx === -1) continue;
-
-            const duration = parseInt(afterHash.slice(0, commaIdx), 10);
-            const display = afterHash.slice(commaIdx + 1).trim();
-
-            const sepIdx = display.indexOf(" - ");
-            if (sepIdx > 0) {
-                pendingMeta = {
-                    artist: display.slice(0, sepIdx).trim(),
-                    title: display.slice(sepIdx + 3).trim(),
-                    duration: isNaN(duration) ? null : duration,
-                };
-            } else {
-                pendingMeta = { artist: null, title: display || null, duration: isNaN(duration) ? null : duration };
-            }
-            continue;
-        }
-
-        if (line.startsWith("#")) continue;
-
-        const filePath = line.replace(/\\/g, "/");
-
-        entries.push({
-            filePath,
-            artist: pendingMeta?.artist ?? null,
-            title: pendingMeta?.title ?? null,
-            durationSeconds: pendingMeta?.duration ?? null,
-        });
-        pendingMeta = null;
-
-        if (entries.length > maxEntries) {
-            throw new M3UTooManyEntries(maxEntries);
-        }
-    }
-
-    return entries;
-}
 
 /**
  * `value` with percent-escapes decoded, or `value` itself when it holds a malformed escape (a name with a stray "%").
  * An encoded slash (%2F) stays as written: a file name cannot hold a "/", so it is never a folder either, and decoding
  * it would turn one name into two path segments.
  */
-function decoded(value: string): string {
+export function decoded(value: string): string {
     return value
         .split(/(%2f)/i)
         .map((part, at) => {
@@ -119,7 +29,7 @@ function decoded(value: string): string {
  * lived), so leading `./` and `../` climb back toward the music folder and no further: playlists live at or under it,
  * and the library match settles whether the clamped path is real.
  */
-function underMusicFolder(path: string, root: string): string | null {
+export function underMusicFolder(path: string, root: string): string | null {
     const prefix = (root.endsWith("/") ? root : `${root}/`).toLowerCase();
     let rest: string;
     if (path.toLowerCase().startsWith(prefix)) rest = path.slice(prefix.length);
@@ -162,26 +72,6 @@ export function libraryPathReadings(filePath: string, root: string): string[] {
     return [...new Set(candidates)];
 }
 
-const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
-const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
-const windows1252 = new TextDecoder("windows-1252");
-
-/**
- * An uploaded playlist file's text, read the way `.m3u` and `.m3u8` files are read: as UTF-16 when it opens with a UTF-16
- * byte order mark (what Windows Notepad's "Unicode" saves), as UTF-8 when it opens with a UTF-8 byte order mark (dropped)
- * or is valid UTF-8, otherwise as Windows-1252, the "Latin-1" every player takes it for.
- */
-export function decodeM3U(bytes: Buffer): string {
-    if (bytes[0] === 0xff && bytes[1] === 0xfe) return bytes.subarray(2).toString("utf16le");
-    if (bytes[0] === 0xfe && bytes[1] === 0xff) return Buffer.from(bytes.subarray(2)).swap16().toString("utf16le");
-    if (bytes.subarray(0, 3).equals(UTF8_BOM)) return bytes.subarray(3).toString("utf-8");
-    try {
-        return strictUtf8.decode(bytes);
-    } catch {
-        return windows1252.decode(bytes);
-    }
-}
-
 /**
  * The other Unicode form of `text` (composed or decomposed), when it has one: macOS writes accented names decomposed
  * (NFD) and Linux libraries keep them composed (NFC), and players take the two as the same name. Empty for text whose
@@ -193,7 +83,7 @@ export function unicodeForms(text: string): string[] {
 }
 
 /** The most spellings `caseSpellings` gives for one text. */
-const SPELLINGS_MAX = 8;
+export const SPELLINGS_MAX = 8;
 
 /**
  * `text` with its ASCII letters lower-cased and each non-ASCII letter written as it is, in lower case and in upper case:
@@ -224,7 +114,7 @@ export function libraryFileNames(filePath: string, readings: string[]): string[]
 }
 
 /** A path's segments for comparing: no empty, `.` or `..` segment (a leading `/`, `./` or `../` is no folder), letter case and Unicode form ignored. */
-function segmentsOf(path: string): string[] {
+export function segmentsOf(path: string): string[] {
     return posix
         .normalize(path)
         .split("/")
@@ -233,7 +123,7 @@ function segmentsOf(path: string): string[] {
 }
 
 /** How many segments, counted from the file name backwards, a library path and one reading of an entry's path share. */
-function sharedTrailingSegments(libraryPath: string, reading: string): number {
+export function sharedTrailingSegments(libraryPath: string, reading: string): number {
     const ours = segmentsOf(libraryPath);
     const theirs = segmentsOf(reading);
     let shared = 0;
@@ -252,3 +142,4 @@ export function longestSuffixMatches<T extends { filePath: string }>(songs: T[],
     const best = Math.max(0, ...shared);
     return best === 0 ? [] : songs.filter((_, at) => shared[at] === best);
 }
+

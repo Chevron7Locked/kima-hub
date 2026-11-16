@@ -14,7 +14,7 @@ jest.mock("../notificationService", () => ({
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { artistIdentityKey } from "../artistIdentity";
-import { spotifyImportService, getImportJob } from "../spotifyImport";
+import { playlistImportService, getImportJob } from "../playlistImport";
 import { deezerService } from "../deezer";
 import { distributedLock } from "../../utils/distributedLock";
 import { LockLostError } from "../../utils/lockErrors";
@@ -95,7 +95,7 @@ describe("building the playlist", () => {
         });
         const job = importJob([matched(), waiting(1)]);
 
-        await (spotifyImportService as any).buildPlaylist(job);
+        await playlistImportService.buildPlaylist(job as never);
 
         expect(seen.length).toBeGreaterThan(0);
         // At every moment a person's scan could look, a playlist that exists has its job.
@@ -108,7 +108,7 @@ describe("building the playlist", () => {
         const entries = [matched(), waiting(1), waiting(2)];
         const job = importJob(entries);
 
-        await (spotifyImportService as any).buildPlaylist(job);
+        await playlistImportService.buildPlaylist(job as never);
 
         const saved = await row();
         expect(saved).toMatchObject({ status: "completed", progress: 100, tracksMatched: 1, tracksTotal: 3 });
@@ -122,7 +122,7 @@ describe("building the playlist", () => {
         const job = importJob(entries);
         // The background retry starts once the playlist is made; a person dismissing an entry meanwhile is the same race.
         let retry: Promise<boolean> = Promise.resolve(false);
-        jest.spyOn(spotifyImportService as any, "autoRetryPendingTracks").mockImplementation(() => {
+        jest.spyOn(playlistImportService as any, "autoRetryPendingTracks").mockImplementation(() => {
             retry = (async () => {
                 const playlist = await prisma.playlist.findFirstOrThrow({ where: { userId: USER } });
                 const entry = await prisma.playlistPendingTrack.findFirstOrThrow({
@@ -133,7 +133,7 @@ describe("building the playlist", () => {
             return retry;
         });
 
-        await (spotifyImportService as any).buildPlaylist(job);
+        await playlistImportService.buildPlaylist(job as never);
         expect(await retry).toBe(true);
 
         const saved = await row();
@@ -151,7 +151,7 @@ describe("a build for a job that was cancelled", () => {
             return null;
         });
 
-        await (spotifyImportService as any).buildPlaylist(job);
+        await playlistImportService.buildPlaylist(job as never);
 
         expect(await prisma.playlist.count({ where: { userId: USER } })).toBe(0);
         expect(await prisma.playlistPendingTrack.count({ where: { playlist: { userId: USER } } })).toBe(0);
@@ -162,9 +162,9 @@ describe("a build for a job that was cancelled", () => {
 describe("failing an import", () => {
     it("leaves an import that completed meanwhile completed", async () => {
         const job = importJob([matched(), waiting(1)]);
-        await (spotifyImportService as any).buildPlaylist(job);
+        await playlistImportService.buildPlaylist(job as never);
 
-        await spotifyImportService.markJobFailed(JOB, "Worker crashed");
+        await playlistImportService.markJobFailed(JOB, "Worker crashed");
 
         expect((await row()).status).toBe("completed");
     });
@@ -172,7 +172,7 @@ describe("failing an import", () => {
     it("writes only the status and the error, not the counts or listing a dismissal changed since it read the job", async () => {
         const entries = [matched(), waiting(1), waiting(2)];
         const job = importJob(entries);
-        await (spotifyImportService as any).buildPlaylist(job);
+        await playlistImportService.buildPlaylist(job as never);
         const playlistId = job.createdPlaylistId!;
         // A failure that reaches an import still running (a late scan step), not one that completed.
         await prisma.spotifyImportJob.update({ where: { id: JOB }, data: { status: "scanning" } });
@@ -187,7 +187,7 @@ describe("failing an import", () => {
         }) as any);
         await redisClient.del(`import:job:${JOB}`);
 
-        await spotifyImportService.markJobFailed(JOB, "Worker crashed");
+        await playlistImportService.markJobFailed(JOB, "Worker crashed");
 
         const saved = await row();
         expect(saved).toMatchObject({ status: "failed", error: "Worker crashed", tracksTotal: 2, tracksMatched: 1 });
@@ -198,8 +198,8 @@ describe("failing an import", () => {
 describe("an import that ends in an error", () => {
     const preview = { summary: { total: 1, inLibrary: 1 }, albumsToDownload: [], matchedTracks: [] } as never;
     const crash = (job: ReturnType<typeof importJob>) => {
-        jest.spyOn(spotifyImportService as any, "buildPlaylist").mockRejectedValue(new Error("Disk full"));
-        return (spotifyImportService as any).processImport(job, [], preview);
+        jest.spyOn(playlistImportService, "buildPlaylist").mockRejectedValue(new Error("Disk full"));
+        return (playlistImportService as any).processImport(job, [], preview);
     };
     const withRow = (status: string) =>
         prisma.spotifyImportJob.create({
@@ -252,12 +252,12 @@ describe("telling the import page", () => {
             await prisma.spotifyImportJob.create({
                 data: { id: JOB, userId: USER, spotifyPlaylistId: "pl", playlistName: `${P} list`, status: "scanning", albumsTotal: 0, tracksTotal: 1, pendingTracks: [matched()] as any },
             });
-            await spotifyImportService.markJobFailed(JOB, "Worker crashed");
+            await playlistImportService.markJobFailed(JOB, "Worker crashed");
             expect(heard.filter((e) => e.type === "import:progress").map((e) => e.payload.status)).toEqual(["failed"]);
 
             heard.length = 0;
             await prisma.spotifyImportJob.update({ where: { id: JOB }, data: { status: "completed" } });
-            await spotifyImportService.markJobFailed(JOB, "Worker crashed again");
+            await playlistImportService.markJobFailed(JOB, "Worker crashed again");
 
             expect((await row()).status).toBe("completed");
             expect(heard.filter((e) => e.type === "import:progress")).toEqual([]);
@@ -268,7 +268,7 @@ describe("telling the import page", () => {
 });
 
 describe("one build per import", () => {
-    const build = (job: ReturnType<typeof importJob>) => (spotifyImportService as any).buildPlaylist(job);
+    const build = (job: ReturnType<typeof importJob>) => playlistImportService.buildPlaylist(job as never);
 
     it("makes one playlist when two builds of the same import run together", async () => {
         const entries = [matched(), waiting(1)];

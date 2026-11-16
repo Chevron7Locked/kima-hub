@@ -11,7 +11,7 @@ jest.mock("../notificationService", () => ({
 
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
-import { spotifyImportService } from "../spotifyImport";
+import { playlistImportService } from "../playlistImport";
 import { notificationService } from "../notificationService";
 import { requestScan } from "../../workers/scanRequest";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -40,7 +40,7 @@ afterAll(async () => {
 
 /** An import the check reads from its cache as downloading, with `downloads` of its album jobs. */
 async function downloading(downloads: string[], albumsTotal = 1) {
-    const started = await spotifyImportService.startImport(USER, "pl", "Road Trip", [], preview);
+    const started = await playlistImportService.startImport(USER, "pl", "Road Trip", [], preview);
     await prisma.spotifyImportJob.update({ where: { id: started.id }, data: { status: "downloading", albumsTotal } });
     await redisClient.setex(`import:job:${started.id}`, 600, JSON.stringify({ ...started, status: "downloading", albumsTotal }));
     for (const status of downloads) {
@@ -57,21 +57,21 @@ describe("checking an import's downloads", () => {
     it("does not bring back an import a person cancelled while its downloads were still running", async () => {
         const id = await downloading(["processing"]);
         await prisma.spotifyImportJob.delete({ where: { id } });
-        await spotifyImportService.checkImportCompletion(id);
+        await playlistImportService.checkImportCompletion(id);
         expect(await row(id)).toBeNull();
     });
 
     it("does not bring back a cancelled import whose downloads have all finished", async () => {
         const id = await downloading(["completed"]);
         await prisma.spotifyImportJob.delete({ where: { id } });
-        await spotifyImportService.checkImportCompletion(id);
+        await playlistImportService.checkImportCompletion(id);
         expect(await row(id)).toBeNull();
     });
 
     it("does not bring back, or tell the person of, a cancelled import that had no download jobs", async () => {
         const id = await downloading([]);
         await prisma.spotifyImportJob.delete({ where: { id } });
-        await spotifyImportService.checkImportCompletion(id);
+        await playlistImportService.checkImportCompletion(id);
         expect(await row(id)).toBeNull();
         expect(notificationService.notifyImportFailed).not.toHaveBeenCalled();
     });
@@ -79,13 +79,13 @@ describe("checking an import's downloads", () => {
     it("leaves an import another path already completed as it is", async () => {
         const id = await downloading(["completed"]);
         await prisma.spotifyImportJob.update({ where: { id }, data: { status: "completed", progress: 100 } });
-        await spotifyImportService.checkImportCompletion(id);
+        await playlistImportService.checkImportCompletion(id);
         expect(await row(id)).toMatchObject({ status: "completed", progress: 100 });
     });
 
     it("moves an import that is waiting for its downloads on to scanning once they have finished", async () => {
         const id = await downloading(["completed", "failed"]);
-        await spotifyImportService.checkImportCompletion(id);
+        await playlistImportService.checkImportCompletion(id);
         expect(await row(id)).toMatchObject({ status: "scanning", progress: 75 });
     });
 
@@ -101,7 +101,7 @@ describe("checking an import's downloads", () => {
         }) as never);
 
         try {
-            await spotifyImportService.checkImportCompletion(id);
+            await playlistImportService.checkImportCompletion(id);
         } finally {
             spy.mockRestore();
         }
@@ -118,7 +118,7 @@ describe("checking an import's downloads", () => {
             return { queued: true, jobId: "scan-1" };
         });
 
-        await spotifyImportService.checkImportCompletion(id);
+        await playlistImportService.checkImportCompletion(id);
 
         expect(statusAtRequest).toBe("scanning");
     });
@@ -128,7 +128,7 @@ describe("checking an import's downloads", () => {
         (requestScan as jest.Mock).mockClear();
         await prisma.spotifyImportJob.update({ where: { id }, data: { status: "creating_playlist", progress: 90 } });
 
-        await spotifyImportService.checkImportCompletion(id);
+        await playlistImportService.checkImportCompletion(id);
 
         expect(requestScan).not.toHaveBeenCalled();
         expect(await row(id)).toMatchObject({ status: "creating_playlist", progress: 90 });
@@ -138,10 +138,21 @@ describe("checking an import's downloads", () => {
         const id = await downloading(["completed"]);
         (requestScan as jest.Mock).mockRejectedValueOnce(new Error("queue down"));
 
-        await expect(spotifyImportService.checkImportCompletion(id)).rejects.toThrow("queue down");
+        await expect(playlistImportService.checkImportCompletion(id)).rejects.toThrow("queue down");
         expect(await row(id)).toMatchObject({ status: "downloading" });
 
-        await spotifyImportService.checkImportCompletion(id);
+        await playlistImportService.checkImportCompletion(id);
         expect(await row(id)).toMatchObject({ status: "scanning", progress: 75 });
+    });
+
+    it("puts an import that had not yet reached downloading back to the state it was in, not to downloading", async () => {
+        const id = await downloading(["completed"]);
+        await prisma.spotifyImportJob.update({ where: { id }, data: { status: "pending" } });
+        const cached = JSON.parse((await redisClient.get(`import:job:${id}`)) as string);
+        await redisClient.setex(`import:job:${id}`, 600, JSON.stringify({ ...cached, status: "pending" }));
+        (requestScan as jest.Mock).mockRejectedValueOnce(new Error("queue down"));
+
+        await expect(playlistImportService.checkImportCompletion(id)).rejects.toThrow("queue down");
+        expect(await row(id)).toMatchObject({ status: "pending" });
     });
 });

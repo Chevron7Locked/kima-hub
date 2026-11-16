@@ -16,7 +16,7 @@ import { processDiscoverWeekly } from "./processors/discoverProcessor";
 import { processImportJob } from "./processors/importProcessor";
 import { createWorkerConnection } from "./enrichmentQueues";
 import { withTimeout } from "../utils/timeout";
-import { spotifyImportService } from "../services/spotifyImport";
+import { playlistImportService } from "../services/playlistImport";
 import {
     startUnifiedEnrichmentWorker,
     triggerEnrichmentNow,
@@ -148,7 +148,7 @@ importWorker.on("failed", async (job, err) => {
     logger.error(`[ImportWorker] Job ${job?.id} failed: ${err.message}`);
     if (job?.data?.importJobId) {
         try {
-            await spotifyImportService.markJobFailed(job.data.importJobId, err.message);
+            await playlistImportService.markJobFailed(job.data.importJobId, err.message);
         } catch (e) {
             logger.error(`[ImportWorker] Failed to mark job as failed: ${(e as Error).message}`);
         }

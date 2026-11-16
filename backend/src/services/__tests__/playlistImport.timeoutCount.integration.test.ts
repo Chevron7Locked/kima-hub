@@ -16,7 +16,7 @@ jest.mock("../../workers/scanRequest", () => ({ requestScan: jest.fn().mockResol
 
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
-import { spotifyImportService } from "../spotifyImport";
+import { playlistImportService } from "../playlistImport";
 import * as downloadJobs from "../downloads/jobs";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
@@ -41,7 +41,7 @@ afterAll(async () => {
 });
 
 it("logs the counts after the timeout settle", async () => {
-    const importJob = await spotifyImportService.startImport(USER, "pl", "Road Trip", [], preview);
+    const importJob = await playlistImportService.startImport(USER, "pl", "Road Trip", [], preview);
     const job = (subject: string, status: string, ageMs: number) =>
         prisma.downloadJob.create({
             data: {
@@ -52,7 +52,7 @@ it("logs the counts after the timeout settle", async () => {
     await job("done", "completed", 20 * 60_000);
     await job("stuck", "processing", 20 * 60_000);
 
-    await spotifyImportService.checkImportCompletion(importJob.id);
+    await playlistImportService.checkImportCompletion(importJob.id);
     await downloadJobs.whenIdle();
 
     // Every report of the finish says the same: the settle also tells the import, whose own check reports too.

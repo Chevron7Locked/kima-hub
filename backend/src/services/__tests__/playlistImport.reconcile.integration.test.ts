@@ -8,7 +8,7 @@ jest.mock("../notificationService", () => ({
 }));
 
 import { prisma } from "../../utils/db";
-import { spotifyImportService } from "../spotifyImport";
+import { playlistImportService } from "../playlistImport";
 import { eventBus, type SSEEvent } from "../eventBus";
 import { artistWithTracks as addArtistWithTracks, removeImportRows } from "./helpers/spotifyImportRows";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -34,7 +34,7 @@ beforeAll(async () => {
         ],
     });
     const stop = eventBus.subscribe(`${P}usr`, { send: (event) => (heard.push(event), true) });
-    await spotifyImportService.reconcilePendingTracks().finally(stop);
+    await playlistImportService.reconcilePendingTracks().finally(stop);
 });
 
 afterAll(async () => {
@@ -63,7 +63,7 @@ describe("reconciling pending Spotify tracks", () => {
     it("tells nobody when a later pass finds nothing new", async () => {
         const again: SSEEvent[] = [];
         const stop = eventBus.subscribe(`${P}usr`, { send: (event) => (again.push(event), true) });
-        await spotifyImportService.reconcilePendingTracks().finally(stop);
+        await playlistImportService.reconcilePendingTracks().finally(stop);
         expect(again.filter((e) => e.type === "playlist:updated")).toEqual([]);
     });
 
@@ -74,11 +74,11 @@ describe("reconciling pending Spotify tracks", () => {
             data: { playlistId: `${P}pl2`, spotifyArtist: "The Beatles", spotifyTitle: "Let It Be", spotifyAlbum: "Let It Be", sort: 0, rank: "a" },
         });
 
-        await spotifyImportService.reconcilePendingTracks(`${P}pl`);
+        await playlistImportService.reconcilePendingTracks(`${P}pl`);
         expect(await prisma.playlistItem.count({ where: { playlistId: `${P}pl2` } })).toBe(0);
         expect(await prisma.playlistPendingTrack.count({ where: { playlistId: `${P}pl2` } })).toBe(1);
 
-        await spotifyImportService.reconcilePendingTracks(`${P}pl2`);
+        await playlistImportService.reconcilePendingTracks(`${P}pl2`);
         expect(await prisma.playlistItem.count({ where: { playlistId: `${P}pl2` } })).toBe(1);
     });
 });

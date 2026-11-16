@@ -9,7 +9,7 @@ jest.mock("../deezer", () => ({
 
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
-import { spotifyImportService } from "../spotifyImport";
+import { playlistImportService } from "../playlistImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "zz-import-order";
@@ -59,7 +59,7 @@ it("keeps the source order for a song found only by its title", async () => {
         ],
     };
 
-    await (spotifyImportService as any).buildPlaylist(job);
+    await playlistImportService.buildPlaylist(job as never);
 
     const playlist = await prisma.playlist.findFirstOrThrow({
         where: { userId: USER },

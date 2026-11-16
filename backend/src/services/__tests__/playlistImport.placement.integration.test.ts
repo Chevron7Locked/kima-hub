@@ -13,7 +13,7 @@ jest.mock("../notificationService", () => ({
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { artistIdentityKey } from "../artistIdentity";
-import { spotifyImportService } from "../spotifyImport";
+import { playlistImportService } from "../playlistImport";
 import * as playlistService from "../playlistService";
 import { moveItem } from "../playlistService";
 import { eventBus, type SSEEvent } from "../eventBus";
@@ -84,7 +84,7 @@ async function importOf(entries: ReturnType<typeof listing>[], id = JOB) {
         albumsTotal: 0, albumsCompleted: 0, tracksMatched: 0, tracksTotal: entries.length, tracksDownloadable: 0, createdPlaylistId: null as string | null,
         error: null, sourceUrl: null, createdAt: new Date(), updatedAt: new Date(), pendingTracks: entries,
     };
-    await (spotifyImportService as any).buildPlaylist(job);
+    await playlistImportService.buildPlaylist(job as never);
     return job.createdPlaylistId!;
 }
 
@@ -113,7 +113,7 @@ describe("a scan that finds a waiting song", () => {
         const playlistId = await importOf([entry(0), waiting(), entry(1)]);
         expect(await held(playlistId)).toEqual([ids[0], ids[1]]);
         const x = await libraryGains();
-        await spotifyImportService.reconcilePendingTracks(playlistId);
+        await playlistImportService.reconcilePendingTracks(playlistId);
         expect(await held(playlistId)).toEqual([ids[0], x.id, ids[1]]);
         expect(await prisma.playlistPendingTrack.count({ where: { playlistId } })).toBe(0);
     });
@@ -121,14 +121,14 @@ describe("a scan that finds a waiting song", () => {
     it("puts each copy of a song listed twice in its own place", async () => {
         const playlistId = await importOf([waiting(), entry(0), waiting()]);
         const x = await libraryGains();
-        await spotifyImportService.reconcilePendingTracks(playlistId);
+        await playlistImportService.reconcilePendingTracks(playlistId);
         expect(await held(playlistId)).toEqual([x.id, ids[0], x.id]);
     });
 
     it("puts a song that was first or last in the source first or last", async () => {
         const playlistId = await importOf([waiting(), entry(0), entry(1), waiting()]);
         const x = await libraryGains();
-        await spotifyImportService.reconcilePendingTracks(playlistId);
+        await playlistImportService.reconcilePendingTracks(playlistId);
         expect(await held(playlistId)).toEqual([x.id, ids[0], ids[1], x.id]);
     });
 
@@ -139,7 +139,7 @@ describe("a scan that finds a waiting song", () => {
         const shown = await pageOrder(playlistId);
         expect(shown).toEqual(["waiting", ids[1], ids[2], ids[0]]);
         const x = await libraryGains();
-        await spotifyImportService.reconcilePendingTracks(playlistId);
+        await playlistImportService.reconcilePendingTracks(playlistId);
         expect(await held(playlistId)).toEqual(shown.map((what) => (what === "waiting" ? x.id : what)));
     });
 
@@ -147,7 +147,7 @@ describe("a scan that finds a waiting song", () => {
         const playlistId = await importOf([entry(0), waiting(), entry(1)]);
         const mine = await prisma.playlistItem.create({ data: { playlistId, trackId: ids[2], sort: 9, rank: "zzz" } });
         const x = await libraryGains();
-        await spotifyImportService.reconcilePendingTracks(playlistId);
+        await playlistImportService.reconcilePendingTracks(playlistId);
         const order = await prisma.playlistItem.findMany({ where: { playlistId }, orderBy: { rank: "asc" } });
         expect(order.map((i) => i.trackId)).toEqual([ids[0], x.id, ids[1], ids[2]]);
         expect(order[3].id).toBe(mine.id);
@@ -156,7 +156,7 @@ describe("a scan that finds a waiting song", () => {
     it("adds the song once when two scans find it at the same moment", async () => {
         const playlistId = await importOf([entry(0), waiting(), entry(1)]);
         const x = await libraryGains();
-        await Promise.all([spotifyImportService.reconcilePendingTracks(playlistId), spotifyImportService.reconcilePendingTracks(playlistId)]);
+        await Promise.all([playlistImportService.reconcilePendingTracks(playlistId), playlistImportService.reconcilePendingTracks(playlistId)]);
         expect(await held(playlistId)).toEqual([ids[0], x.id, ids[1]]);
     });
 });
@@ -175,7 +175,7 @@ describe("a refresh that finds a waiting song", () => {
         const playlistId = await importOf([entry(0), waiting(), entry(1)]);
         await jobFor(playlistId, [waiting()]);
         const x = await libraryGains();
-        const result = await spotifyImportService.refreshJobMatches(JOB);
+        const result = await playlistImportService.refreshJobMatches(JOB);
         expect(result.added).toBe(1);
         expect(await held(playlistId)).toEqual([ids[0], x.id, ids[1]]);
         expect(await prisma.playlistPendingTrack.count({ where: { playlistId } })).toBe(0);
@@ -186,7 +186,7 @@ describe("a refresh that finds a waiting song", () => {
         const x = await libraryGains();
         await prisma.playlistItem.create({ data: { playlistId, trackId: x.id, sort: 9, rank: "zzz" } }); // added by hand
         await jobFor(playlistId, [waiting()]);
-        const result = await spotifyImportService.refreshJobMatches(JOB);
+        const result = await playlistImportService.refreshJobMatches(JOB);
         expect(result.added).toBe(1);
         expect(await held(playlistId)).toEqual([ids[0], x.id, ids[1], x.id]);
         expect(await prisma.playlistPendingTrack.count({ where: { playlistId } })).toBe(0);
@@ -201,7 +201,7 @@ describe("a refresh that finds a waiting song", () => {
         const y = await prisma.track.create({
             data: { title: `${P} compilation song`, albumId: ghostAlbumId, trackNo: 2, duration: 100, filePath: `${P}/ghost/2.flac`, fileModified: new Date(), fileSize: 1 },
         });
-        const result = await spotifyImportService.refreshJobMatches(JOB);
+        const result = await playlistImportService.refreshJobMatches(JOB);
         expect(result.added).toBe(2);
         expect(await held(playlistId)).toEqual([x.id, ids[0], y.id]);
         expect(await prisma.playlistPendingTrack.count({ where: { playlistId } })).toBe(0);
@@ -213,7 +213,7 @@ describe("a refresh that finds a waiting song", () => {
         const entryRow = await prisma.playlistPendingTrack.findFirstOrThrow({ where: { playlistId } });
         await prisma.playlistPendingTrack.delete({ where: { id: entryRow.id } }); // DELETE /playlists/:id/pending/:trackId
         await libraryGains();
-        const result = await spotifyImportService.refreshJobMatches(JOB);
+        const result = await playlistImportService.refreshJobMatches(JOB);
         expect(result.added).toBe(0);
         expect(await held(playlistId)).toEqual([ids[0], ids[1]]);
     });
@@ -224,7 +224,7 @@ describe("a refresh that finds a waiting song", () => {
         const [first] = await prisma.playlistPendingTrack.findMany({ where: { playlistId }, orderBy: { rank: "asc" } });
         await prisma.playlistPendingTrack.delete({ where: { id: first.id } });
         const x = await libraryGains();
-        const result = await spotifyImportService.refreshJobMatches(JOB);
+        const result = await playlistImportService.refreshJobMatches(JOB);
         expect(result.added).toBe(1);
         expect(await held(playlistId)).toEqual([ids[0], x.id]);
     });
@@ -233,7 +233,7 @@ describe("a refresh that finds a waiting song", () => {
         const playlistId = await importOf([waiting(), entry(0), waiting()]);
         await jobFor(playlistId, [waiting(), waiting()]);
         const x = await libraryGains();
-        const result = await spotifyImportService.refreshJobMatches(JOB);
+        const result = await playlistImportService.refreshJobMatches(JOB);
         expect(result.added).toBe(2);
         expect(await held(playlistId)).toEqual([x.id, ids[0], x.id]);
     });
@@ -254,7 +254,7 @@ describe("a scan over every playlist", () => {
         const stop = eventBus.subscribe(USER, { send: (event) => (heard.push(event), true) });
         (notificationService.create as jest.Mock).mockClear();
         try {
-            const result = await spotifyImportService.reconcilePendingTracks();
+            const result = await playlistImportService.reconcilePendingTracks();
             expect(result).toEqual({ playlistsUpdated: 1, tracksAdded: 1 });
         } finally {
             stop();

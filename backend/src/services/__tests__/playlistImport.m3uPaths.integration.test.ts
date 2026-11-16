@@ -12,7 +12,7 @@ import { prisma } from "../../utils/db";
 import { config } from "../../config";
 import { artistIdentityKey } from "../artistIdentity";
 import { m3uSongIds } from "../../__tests__/helpers/m3uImport";
-import type { M3UEntry } from "../m3uParser";
+import type { M3UEntry } from "../playlistImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(120_000);

@@ -38,7 +38,7 @@ const mockSoulseekDisconnect = jest.fn();
 jest.mock("../../services/soulseek", () => ({ soulseekService: { disconnect: mockSoulseekDisconnect } }));
 jest.mock("../../utils/redis", () => ({ redisClient: { quit: mockRedisQuit } }));
 jest.mock("../../services/stages/stageRecords", () => ({ SCAN_AGAIN_KEY: "scan-again" }));
-jest.mock("../../services/spotifyImport", () => ({ spotifyImportService: {} }));
+jest.mock("../../services/playlistImport", () => ({ playlistImportService: {} }));
 jest.mock("../unifiedEnrichment", () => ({
     startUnifiedEnrichmentWorker: jest.fn(async () => {}),
     triggerEnrichmentNow: jest.fn(),

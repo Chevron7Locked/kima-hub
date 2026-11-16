@@ -8,7 +8,7 @@ import { editionlessKey } from "../services/albumIdentity";
 class QueueCleanerService {
     // Imported on first use and cached
     private discoverWeeklyService: typeof import("../services/discoverWeekly")["discoverWeeklyService"] | null = null;
-    private spotifyImportService: typeof import("../services/spotifyImport")["spotifyImportService"] | null = null;
+    private playlistImportService: typeof import("../services/playlistImport")["playlistImportService"] | null = null;
 
     private async getDiscoverWeeklyService() {
         if (!this.discoverWeeklyService) {
@@ -18,12 +18,12 @@ class QueueCleanerService {
         return this.discoverWeeklyService;
     }
 
-    private async getSpotifyImportService() {
-        if (!this.spotifyImportService) {
-            const module = await import("../services/spotifyImport");
-            this.spotifyImportService = module.spotifyImportService;
+    private async getPlaylistImportService() {
+        if (!this.playlistImportService) {
+            const module = await import("../services/playlistImport");
+            this.playlistImportService = module.playlistImportService;
         }
-        return this.spotifyImportService;
+        return this.playlistImportService;
     }
 
     /**
@@ -110,8 +110,8 @@ class QueueCleanerService {
                 );
 
                 try {
-                    const spotifyImportService = await this.getSpotifyImportService();
-                    await spotifyImportService.checkImportCompletion(job.id);
+                    const playlistImportService = await this.getPlaylistImportService();
+                    await playlistImportService.checkImportCompletion(job.id);
                     recoveredCount++;
                 } catch (err: any) {
                     logger.debug(

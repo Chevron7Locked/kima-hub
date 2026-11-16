@@ -184,10 +184,10 @@ export async function processScan(
                 `[ScanJob ${job.id}] Building Spotify Import playlist for job ${spotifyImportJobId}`
             );
             try {
-                const { spotifyImportService } = await import(
-                    "../../services/spotifyImport"
+                const { playlistImportService } = await import(
+                    "../../services/playlistImport"
                 );
-                await spotifyImportService.buildPlaylistAfterScan(
+                await playlistImportService.buildPlaylistAfterScan(
                     spotifyImportJobId
                 );
                 logger.debug(
@@ -213,8 +213,8 @@ export async function processScan(
         // songs, was asked for by hand, or followed a retried download.
         if (result.tracksAdded > 0 || result.tracksUpdated > 0 || manual || source?.startsWith("retry-")) {
             try {
-                const { spotifyImportService } = await import("../../services/spotifyImport");
-                const reconciled = await spotifyImportService.reconcilePendingTracks();
+                const { playlistImportService } = await import("../../services/playlistImport");
+                const reconciled = await playlistImportService.reconcilePendingTracks();
                 logger.debug(
                     `[ScanJob ${job.id}] Reconciled ${reconciled.tracksAdded} pending tracks to ${reconciled.playlistsUpdated} playlists`,
                 );

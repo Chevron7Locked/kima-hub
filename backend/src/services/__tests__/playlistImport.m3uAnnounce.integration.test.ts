@@ -5,8 +5,8 @@
 import { prisma } from "../../utils/db";
 import { eventBus, type SSEEvent } from "../eventBus";
 import { artistIdentityKey } from "../artistIdentity";
-import { spotifyImportService } from "../spotifyImport";
-import { M3UNothingMatched } from "../m3uParser";
+import { playlistImportService } from "../playlistImport";
+import { M3UNothingMatched } from "../playlistImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "zz-m3u-announce";
@@ -40,7 +40,7 @@ afterAll(async () => {
 const heardDuring = async (filePath: string) => {
     const heard: SSEEvent[] = [];
     const stop = eventBus.subscribe(`${P}-usr`, { send: (event) => (heard.push(event), true) });
-    const result = await spotifyImportService
+    const result = await playlistImportService
         .importFromM3U(`${P}-usr`, `${P} list`, [{ filePath, artist: null, title: null, durationSeconds: 100 }])
         .catch((error) => (error instanceof M3UNothingMatched ? null : Promise.reject(error)))
         .finally(stop);

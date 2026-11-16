@@ -28,8 +28,8 @@ jest.mock("../../services/simpleDownloadManager", () => ({
     simpleDownloadManager: { startDownload: (...a: unknown[]) => mockStartDownload(...a) },
 }));
 const mockCheckImportCompletion = jest.fn();
-jest.mock("../../services/spotifyImport", () => ({
-    spotifyImportService: { checkImportCompletion: (...a: unknown[]) => mockCheckImportCompletion(...a) },
+jest.mock("../../services/playlistImport", () => ({
+    playlistImportService: { checkImportCompletion: (...a: unknown[]) => mockCheckImportCompletion(...a) },
 }));
 jest.mock("../../services/discoverWeekly", () => ({
     discoverWeeklyService: { checkBatchCompletion: jest.fn() },

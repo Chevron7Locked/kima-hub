@@ -1,6 +1,6 @@
 import { prisma } from "../../utils/db";
-import { spotifyImportService } from "../../services/spotifyImport";
-import { M3UNothingMatched, type M3UEntry } from "../../services/m3uParser";
+import { playlistImportService } from "../../services/playlistImport";
+import { M3UNothingMatched, type M3UEntry } from "../../services/playlistImport";
 
 /**
  * The song ids an M3U import puts in its playlist, in order. An import in which nothing matched makes no playlist
@@ -9,7 +9,7 @@ import { M3UNothingMatched, type M3UEntry } from "../../services/m3uParser";
  */
 export async function m3uSongIds(userId: string, playlistName: string, entries: M3UEntry[]): Promise<string[]> {
     try {
-        const { playlistId } = await spotifyImportService.importFromM3U(userId, playlistName, entries);
+        const { playlistId } = await playlistImportService.importFromM3U(userId, playlistName, entries);
         const items = await prisma.playlistItem.findMany({ where: { playlistId }, orderBy: { sort: "asc" } });
         return items.map((i) => i.trackId);
     } catch (error) {

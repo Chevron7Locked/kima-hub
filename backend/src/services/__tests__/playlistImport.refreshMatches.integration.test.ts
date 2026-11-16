@@ -6,7 +6,7 @@
  */
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
-import { spotifyImportService } from "../spotifyImport";
+import { playlistImportService } from "../playlistImport";
 import { eventBus, type SSEEvent } from "../eventBus";
 import { normalizeArtistName } from "../artistIdentity";
 import { artistWithTracks, removeImportRows } from "./helpers/spotifyImportRows";
@@ -57,7 +57,7 @@ afterAll(async () => {
 it("adds songs by artists whose names carry an ampersand or a slash, and tells the owner's devices", async () => {
     const heard: SSEEvent[] = [];
     const stop = eventBus.subscribe(`${P}usr`, { send: (event) => (heard.push(event), true) });
-    const result = await spotifyImportService.refreshJobMatches(JOB).finally(stop);
+    const result = await playlistImportService.refreshJobMatches(JOB).finally(stop);
     expect(result.added).toBe(2);
     expect(heard.filter((e) => e.type === "playlist:updated").map((e) => e.payload)).toEqual([{ playlistId: `${P}pl`, deleted: false }]);
     const items = await prisma.playlistItem.findMany({ where: { playlistId: `${P}pl` }, include: { track: true } });
@@ -67,7 +67,7 @@ it("adds songs by artists whose names carry an ampersand or a slash, and tells t
 it("tells nobody when a later refresh adds nothing", async () => {
     const heard: SSEEvent[] = [];
     const stop = eventBus.subscribe(`${P}usr`, { send: (event) => (heard.push(event), true) });
-    const result = await spotifyImportService.refreshJobMatches(JOB).finally(stop);
+    const result = await playlistImportService.refreshJobMatches(JOB).finally(stop);
     expect(result.added).toBe(0);
     expect(heard.filter((e) => e.type === "playlist:updated")).toEqual([]);
 });

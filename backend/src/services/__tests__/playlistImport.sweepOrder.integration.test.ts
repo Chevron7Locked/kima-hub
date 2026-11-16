@@ -13,7 +13,9 @@
  * - An artist whose shown name holds the word, and whose stored name does not, reaches the matcher through each sweep.
  */
 import { prisma } from "../../utils/db";
-import { spotifyImportService, songsOfArtistsHoldingWord } from "../spotifyImport";
+import { previewOfTracklist } from "../playlistImport/matching";
+import { songsOfArtistsHoldingWord } from "../playlistImport/matching/pools";
+import { tracklistOf } from "../../__tests__/helpers/tracklist";
 import { m3uSongIds } from "../../__tests__/helpers/m3uImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
@@ -78,9 +80,7 @@ const SAME = (title: string) => () => title;
 const LAST_IS = (title: string) => (n: number) => (n === COUNT - 1 ? title : `lorem ipsum ${n}`);
 
 const previewMatch = async (artist: string, title: string) => {
-    const preview = await spotifyImportService.generatePreviewFromDeezer({
-        id: "d", title: "d", tracks: [{ deezerId: "t1", title, artist, album: "x" }],
-    });
+    const preview = await previewOfTracklist(tracklistOf([{ title, artist, album: "x" }]));
     return preview.matchedTracks[0].localTrack?.id ?? null;
 };
 

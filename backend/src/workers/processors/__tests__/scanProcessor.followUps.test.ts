@@ -7,8 +7,8 @@ jest.mock("../../../services/musicScanner", () => ({
     MusicScannerService: jest.fn().mockImplementation(() => ({ scanLibrary: (...a: unknown[]) => mockScanLibrary(...a) })),
 }));
 const mockPending = jest.fn().mockResolvedValue({ tracksAdded: 0, playlistsUpdated: 0 });
-jest.mock("../../../services/spotifyImport", () => ({
-    spotifyImportService: { reconcilePendingTracks: () => mockPending(), buildPlaylistAfterScan: jest.fn() },
+jest.mock("../../../services/playlistImport", () => ({
+    playlistImportService: { reconcilePendingTracks: () => mockPending(), buildPlaylistAfterScan: jest.fn() },
 }));
 const mockDiscover = jest.fn().mockResolvedValue({ tracksAdded: 0, batchesChecked: 0 });
 jest.mock("../../../services/discoverWeekly", () => ({

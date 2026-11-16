@@ -12,7 +12,7 @@ import * as playlistService from "../services/playlistService";
 import { announcePlaylistChange } from "../services/playlistEvents";
 import { createPlaylist, KeyParamsMismatch, MAX_KEY_LENGTH } from "../services/playlistCreate";
 import { namedFields, playlistFields, playlistItemFields } from "../services/playlistFields";
-import { announceImportCounts } from "../services/spotifyImport";
+import { announceImportCounts } from "../services/playlistImport";
 import { proxyPreviewStream } from "../utils/previewProxy";
 import {
     downloadSources,

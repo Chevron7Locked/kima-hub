@@ -15,8 +15,8 @@
  */
 import { prisma } from "../../utils/db";
 import { artistIdentityKey, normalizeArtistName } from "../artistIdentity";
-import { spotifyImportService } from "../spotifyImport";
-import { M3UNothingMatched, type M3UEntry } from "../m3uParser";
+import { playlistImportService } from "../playlistImport";
+import { M3UNothingMatched, type M3UEntry } from "../playlistImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(120_000);
@@ -53,7 +53,7 @@ async function seedSongs(key: string, artistName: string, songs: [string, string
 const entry = (filePath: string, artist: string | null = null, title: string | null = null): M3UEntry => ({ filePath, durationSeconds: null, artist, title });
 let count = 0;
 const matches = async (entries: M3UEntry[]) => {
-    const { playlistId } = await spotifyImportService.importFromM3U(USER, `${P}-m3u-${++count}`, entries);
+    const { playlistId } = await playlistImportService.importFromM3U(USER, `${P}-m3u-${++count}`, entries);
     const items = await prisma.playlistItem.findMany({ where: { playlistId }, orderBy: { sort: "asc" } });
     return items.map((i) => i.trackId);
 };
@@ -120,7 +120,7 @@ describe("a bare file name that more than one song answers to is skipped", () =>
     it("counts it as unmatched, in a list with other entries too", async () => {
         const entries = [entry("zzdup song.flac"), entry("zzsolo song.flac")];
         expect(await matches(entries)).toEqual([`${P}-solo-a-only`]);
-        const { unmatched } = await spotifyImportService.importFromM3U(USER, `${P}-m3u-${++count}`, entries);
+        const { unmatched } = await playlistImportService.importFromM3U(USER, `${P}-m3u-${++count}`, entries);
         expect(unmatched).toBe(1);
     });
 
@@ -381,7 +381,7 @@ describe("when no entry matches", () => {
 
     it("makes no playlist and throws, naming how many entries had no match", async () => {
         const name = `${P}-none-list`;
-        const result = spotifyImportService.importFromM3U(USER, name, nothing);
+        const result = playlistImportService.importFromM3U(USER, name, nothing);
         await expect(result).rejects.toBeInstanceOf(M3UNothingMatched);
         await expect(result).rejects.toMatchObject({ total: 2 });
         expect(await prisma.playlist.count({ where: { userId: USER, name } })).toBe(0);
@@ -389,7 +389,7 @@ describe("when no entry matches", () => {
 
     it("tells the owner in the notification tray, as a failed import is told", async () => {
         const name = `${P}-none-notice`;
-        await spotifyImportService.importFromM3U(USER, name, nothing).catch(() => undefined);
+        await playlistImportService.importFromM3U(USER, name, nothing).catch(() => undefined);
         const rows = await prisma.notification.findMany({ where: { userId: USER, type: "error" } });
         expect(rows.length).toBeGreaterThan(0);
         const row = rows.find((r) => r.message?.includes(name));

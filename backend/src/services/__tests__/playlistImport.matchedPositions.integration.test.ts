@@ -13,7 +13,7 @@ jest.mock("../notificationService", () => ({
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { artistIdentityKey } from "../artistIdentity";
-import { spotifyImportService } from "../spotifyImport";
+import { playlistImportService } from "../playlistImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "zz-import-positions";
@@ -85,7 +85,7 @@ async function build(entries: ReturnType<typeof listing>[]) {
         createdPlaylistId: null as string | null, error: null, sourceUrl: null, createdAt: new Date(), updatedAt: new Date(),
         pendingTracks: entries,
     };
-    await (spotifyImportService as any).buildPlaylist(job);
+    await playlistImportService.buildPlaylist(job as never);
     const playlistId = job.createdPlaylistId!;
     return {
         playlistId,
@@ -100,7 +100,7 @@ describe("a built import playlist", () => {
         expect(held).toEqual([ids.compilation]);
         expect(waiting).toEqual([]);
         // A later scan has nothing to place a second time.
-        await spotifyImportService.reconcilePendingTracks(playlistId);
+        await playlistImportService.reconcilePendingTracks(playlistId);
         expect(await prisma.playlistItem.count({ where: { playlistId } })).toBe(1);
     });
 

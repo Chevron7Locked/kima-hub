@@ -1,6 +1,6 @@
 import { Job } from "bullmq";
 import { logger } from "../../utils/logger";
-import { spotifyImportService } from "../../services/spotifyImport";
+import { playlistImportService } from "../../services/playlistImport";
 
 export interface ImportJobData {
     importJobId: string;
@@ -17,8 +17,8 @@ export async function processImportJob(job: Job<ImportJobData>): Promise<void> {
 
     if (quickImport) {
         if (!url) throw new Error("Quick import requires a URL");
-        await spotifyImportService.processQuickImportFromQueue(importJobId, url, playlistName);
+        await playlistImportService.processQuickImportFromQueue(importJobId, url, playlistName);
     } else {
-        await spotifyImportService.processImportFromQueue(importJobId, albumMbidsToDownload || []);
+        await playlistImportService.processImportFromQueue(importJobId, albumMbidsToDownload || []);
     }
 }

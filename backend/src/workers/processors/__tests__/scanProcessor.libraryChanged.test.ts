@@ -14,8 +14,8 @@ jest.mock("../../../services/musicScanner", () => ({
         },
     })),
 }));
-jest.mock("../../../services/spotifyImport", () => ({
-    spotifyImportService: { reconcilePendingTracks: jest.fn().mockResolvedValue({ tracksAdded: 0, playlistsUpdated: 0 }), buildPlaylistAfterScan: jest.fn() },
+jest.mock("../../../services/playlistImport", () => ({
+    playlistImportService: { reconcilePendingTracks: jest.fn().mockResolvedValue({ tracksAdded: 0, playlistsUpdated: 0 }), buildPlaylistAfterScan: jest.fn() },
 }));
 jest.mock("../../../services/discoverWeekly", () => ({
     discoverWeeklyService: { reconcileDiscoveryTracks: jest.fn().mockResolvedValue({ tracksAdded: 0, batchesChecked: 0 }), buildFinalPlaylist: jest.fn() },

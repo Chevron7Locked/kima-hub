@@ -17,7 +17,7 @@ import { searchRouter } from "../search";
 import { libraryRouter } from "../library";
 import { playbackRouter } from "../playback";
 import { searchService } from "../../../services/search";
-import { spotifyImportService } from "../../../services/spotifyImport";
+import { playlistImportService } from "../../../services/playlistImport";
 import { deezerService } from "../../../services/deezer";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 
@@ -232,7 +232,7 @@ describe("a playlist import finds a song by the title shown too", () => {
         await prisma.playlistPendingTrack.create({
             data: { playlistId, spotifyArtist: "Nobody Anyone", spotifyTitle, spotifyAlbum: "x", sort: 0, rank: "a0" },
         });
-        await spotifyImportService.reconcilePendingTracks(playlistId);
+        await playlistImportService.reconcilePendingTracks(playlistId);
         return (await prisma.playlistItem.findMany({ where: { playlistId } })).map((i) => i.trackId);
     }
 

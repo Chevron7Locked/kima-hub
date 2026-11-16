@@ -13,7 +13,7 @@ jest.mock("../../utils/playlistLogger", () => {
 
 import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
-import { spotifyImportService } from "../spotifyImport";
+import { playlistImportService } from "../playlistImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const USER = "sif_user";
@@ -64,7 +64,7 @@ afterAll(async () => {
 it("tells the user when an import that matched nothing fails", async () => {
     await importJob([{ artist: "Interpol", title: "Evil" }]);
 
-    await spotifyImportService.markJobFailed(JOB, "Worker crashed");
+    await playlistImportService.markJobFailed(JOB, "Worker crashed");
 
     await waitForRows(1);
     expect((await trayRows()).map((n) => n.message)).toEqual(['"Road Trip": Worker crashed']);
@@ -75,9 +75,9 @@ it("tells the user once and keeps a partly matched import", async () => {
     await importJob([{ artist: "Interpol", title: "Evil", preMatchedTrackId: "t1" }]);
 
     // The import's own catch reports first, then the worker's failure handler: still one row.
-    await spotifyImportService.markJobFailed(JOB, "Lidarr unreachable");
+    await playlistImportService.markJobFailed(JOB, "Lidarr unreachable");
     await waitForRows(1);
-    await spotifyImportService.markJobFailed(JOB, "Worker crashed");
+    await playlistImportService.markJobFailed(JOB, "Worker crashed");
     await waitFor(async () => (await trayRows())[0]?.message === '"Road Trip": Worker crashed');
 
     expect((await trayRows()).map((n) => n.message)).toEqual(['"Road Trip": Worker crashed']);
@@ -91,7 +91,7 @@ describe("a late worker failure", () => {
     it("does not announce a failure for an import that completed meanwhile, and leaves it completed", async () => {
         await importJob([{ artist: "Interpol", title: "Evil", preMatchedTrackId: "t1" }], "completed");
 
-        await spotifyImportService.markJobFailed(JOB, "Worker crashed");
+        await playlistImportService.markJobFailed(JOB, "Worker crashed");
         await settle();
 
         expect(await trayRows()).toEqual([]);
@@ -101,7 +101,7 @@ describe("a late worker failure", () => {
     it("does not announce, or remove, a completed import that kept no matched listing", async () => {
         await importJob([{ artist: "Interpol", title: "Evil" }], "completed");
 
-        await spotifyImportService.markJobFailed(JOB, "Worker crashed");
+        await playlistImportService.markJobFailed(JOB, "Worker crashed");
         await settle();
 
         expect(await trayRows()).toEqual([]);
@@ -115,11 +115,11 @@ describe("a late worker failure", () => {
             albumsToDownload: [],
             matchedTracks: [{ spotifyTrack: { spotifyId: "s1", title: "Evil", artist: "Interpol", album: "A", albumId: "" }, localTrack: { id: "t1" } }],
         } as never;
-        const started = await spotifyImportService.startImport(USER, "pl", "Road Trip", [], preview);
-        await spotifyImportService.markJobFailed(started.id, "Worker crashed");
+        const started = await playlistImportService.startImport(USER, "pl", "Road Trip", [], preview);
+        await playlistImportService.markJobFailed(started.id, "Worker crashed");
         loggerLines.length = 0;
 
-        await spotifyImportService.cancelJob(started.id);
+        await playlistImportService.cancelJob(started.id);
 
         expect(loggerLines).not.toContain("Job cancelled by user");
         await prisma.spotifyImportJob.deleteMany({ where: { id: started.id } });

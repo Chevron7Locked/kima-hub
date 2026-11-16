@@ -4,7 +4,7 @@
  * and sort ahead of it. Real database.
  */
 import { prisma } from "../../utils/db";
-import { spotifyImportService } from "../spotifyImport";
+import { playlistImportService } from "../playlistImport";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(120_000);
@@ -51,7 +51,7 @@ afterAll(async () => {
 });
 
 it("finds the song that plays among more than 500 missing songs with the same words", async () => {
-    await spotifyImportService.reconcilePendingTracks(PLAYLIST);
+    await playlistImportService.reconcilePendingTracks(PLAYLIST);
     const items = await prisma.playlistItem.findMany({ where: { playlistId: PLAYLIST } });
     expect(items.map((i) => i.trackId)).toEqual([PLAYABLE_ID]);
 });

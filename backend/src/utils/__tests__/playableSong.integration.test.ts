@@ -76,8 +76,11 @@ import recommendationsRouter from "../../routes/recommendations";
 import { deezerService } from "../../services/deezer";
 import { dataCacheService } from "../../services/dataCache";
 import { spotifyService } from "../../services/spotify";
-import { spotifyImportService } from "../../services/spotifyImport";
-import { M3UNothingMatched } from "../../services/m3uParser";
+import { playlistImportService, M3UNothingMatched } from "../../services/playlistImport";
+import { previewOfTracklist } from "../../services/playlistImport/matching";
+import { readMusicLink } from "../../services/playlistImport/reading";
+import { recogniseMusicLink } from "../../services/musicLink";
+import { tracklistOf } from "../../__tests__/helpers/tracklist";
 import { discoverWeeklyService } from "../../services/discoverWeekly";
 
 jest.setTimeout(120_000);
@@ -231,7 +234,7 @@ async function importBuilt(pending: ReturnType<typeof pendingOf>[]): Promise<str
     const id = `${P}-build-${++importCount}`;
     const preview = jest.spyOn(deezerService, "getTrackPreview").mockResolvedValue(null as never);
     try {
-        await (spotifyImportService as any).buildPlaylist({
+        await playlistImportService.buildPlaylist({
             id, userId: USER, spotifyPlaylistId: "pl", playlistName: id, status: "scanning", progress: 80, albumsTotal: 0, albumsCompleted: 0,
             tracksMatched: 0, tracksTotal: pending.length, tracksDownloadable: 0, createdPlaylistId: null, error: null, sourceUrl: null,
             createdAt: new Date(), updatedAt: new Date(), pendingTracks: pending,
@@ -254,7 +257,7 @@ async function importRefreshed(pending: ReturnType<typeof pendingOf>[]): Promise
         data: pending.map((p, i) => ({ playlistId: id, spotifyArtist: p.artist, spotifyTitle: p.title, spotifyAlbum: p.album, sort: i, rank: `a${i}` })),
     });
     try {
-        await spotifyImportService.refreshJobMatches(id);
+        await playlistImportService.refreshJobMatches(id);
     } finally {
         await redisClient.del(`import:job:${id}`);
         await prisma.spotifyImportJob.delete({ where: { id } });
@@ -268,7 +271,7 @@ async function importReconciled(pending: { artist: string; title: string }[]): P
     await prisma.playlistPendingTrack.createMany({
         data: pending.map((p, i) => ({ playlistId: id, spotifyArtist: p.artist, spotifyTitle: p.title, spotifyAlbum: "x", sort: i, rank: `a${i}` })),
     });
-    await spotifyImportService.reconcilePendingTracks(id);
+    await playlistImportService.reconcilePendingTracks(id);
     return songsInPlaylistNamed(id);
 }
 /** The songs an import preview matched. */
@@ -281,7 +284,7 @@ const sourceTrack = (over: Record<string, unknown>) => ({
 /** The songs an M3U import puts in its playlist for these entries. */
 async function m3uMatches(entries: { filePath: string; artist?: string; title?: string }[]): Promise<string[]> {
     const name = `${P}-m3u-${++importCount}`;
-    const imported = await spotifyImportService
+    const imported = await playlistImportService
         .importFromM3U(USER, name, entries.map((e) => ({ durationSeconds: 100, ...e })) as never)
         .then(() => true, (error) => (error instanceof M3UNothingMatched ? false : Promise.reject(error)));
     return imported ? songsInPlaylistNamed(name) : [];
@@ -504,9 +507,7 @@ const PICKERS: Record<string, () => Promise<string[]>> = {
     },
     "the import preview, matching a source song by artist and title": () =>
         previewMatches(
-            spotifyImportService.generatePreviewFromDeezer({
-                id: "d", title: "d", tracks: KINDS.map((kind) => ({ deezerId: kind, title: titleOf(kind), artist: P, album: "x" })),
-            }),
+            previewOfTracklist(tracklistOf(KINDS.map((kind) => ({ title: titleOf(kind), artist: P, album: "x" })))),
         ),
     // The source's artist is nobody in the library, so only the song's ISRC can lead to it.
     "the import preview, matching a source song by its ISRC": async () => {
@@ -515,16 +516,14 @@ const PICKERS: Record<string, () => Promise<string[]>> = {
             tracks: KINDS.map((kind) => sourceTrack({ title: titleOf(kind), isrc: `${SONG[kind as keyof typeof SONG]}-isrc` })),
         } as never);
         try {
-            return await previewMatches(spotifyImportService.generatePreview("https://open.spotify.com/playlist/x"));
+            return await previewMatches(readMusicLink(recogniseMusicLink("https://open.spotify.com/playlist/x")!).then(previewOfTracklist));
         } finally {
             fetched.mockRestore();
         }
     },
     "the import preview, matching a source song by an artist's first word": () =>
         previewMatches(
-            spotifyImportService.generatePreviewFromDeezer({
-                id: "d", title: "d", tracks: KINDS.map((kind) => ({ deezerId: kind, title: titleOf(kind), artist: `${P} and friends`, album: "x" })),
-            }),
+            previewOfTracklist(tracklistOf(KINDS.map((kind) => ({ title: titleOf(kind), artist: `${P} and friends`, album: "x" })))),
         ),
     "the import's playlist build, matching by artist and title": () =>
         importBuilt(KINDS.map((kind) => pendingOf({ artist: P, title: titleOf(kind) }))),

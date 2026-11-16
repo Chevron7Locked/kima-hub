@@ -10,15 +10,16 @@ jest.mock("../../middleware/auth", () => ({
     },
 }));
 const mockImportFromM3U = jest.fn();
-jest.mock("../../services/spotifyImport", () => ({
-    spotifyImportService: { importFromM3U: (...a: unknown[]) => mockImportFromM3U(...a) },
+jest.mock("../../services/playlistImport", () => ({
+    ...jest.requireActual("../../services/playlistImport/reading"),
+    playlistImportService: { importFromM3U: (...a: unknown[]) => mockImportFromM3U(...a) },
     getImportJob: jest.fn(),
 }));
 
 import express from "express";
 import request from "supertest";
 import spotifyRoutes from "../spotify";
-import { M3UNothingMatched } from "../../services/m3uParser";
+import { M3UNothingMatched } from "../../services/playlistImport";
 import { mountAsServer } from "./helpers/serverMount";
 
 const app = mountAsServer(express().use(express.json()), "/spotify", spotifyRoutes, "/api/spotify");

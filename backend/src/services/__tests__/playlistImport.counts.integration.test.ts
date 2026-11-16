@@ -11,11 +11,15 @@ jest.mock("../notificationService", () => ({
     notificationService: { create: jest.fn(), notifyImportComplete: jest.fn(), notifyImportFailed: jest.fn() },
 }));
 
+// A plain copy of the matching part, so a test can pause one of its calls.
+jest.mock("../playlistImport/matching", () => ({ ...jest.requireActual("../playlistImport/matching"), __esModule: true }));
+
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { artistIdentityKey } from "../artistIdentity";
-import { spotifyImportService, getImportJob, announceImportCounts } from "../spotifyImport";
+import { playlistImportService, getImportJob, announceImportCounts } from "../playlistImport";
 import { eventBus } from "../eventBus";
+import * as matching from "../playlistImport/matching";
 import { dismissWaitingEntry, placeFoundSongs } from "../playlistService";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
@@ -80,7 +84,7 @@ async function importOf(entries: ReturnType<typeof listing>[]) {
         albumsTotal: 0, albumsCompleted: 0, tracksMatched: 0, tracksTotal: entries.length, tracksDownloadable: 0, createdPlaylistId: null as string | null,
         error: null, sourceUrl: null, createdAt: new Date(), updatedAt: new Date(), pendingTracks: entries,
     };
-    await (spotifyImportService as any).buildPlaylist(job);
+    await playlistImportService.buildPlaylist(job as never);
     return job.createdPlaylistId!;
 }
 
@@ -102,10 +106,10 @@ describe("songs a scan or a refresh places", () => {
         const playlistId = await importOf([matched(), waiting(1), waiting(2)]);
         expect(await counts()).toEqual({ matched: 1, total: 3 });
         await libraryGains(1);
-        await spotifyImportService.reconcilePendingTracks(playlistId);
+        await playlistImportService.reconcilePendingTracks(playlistId);
         expect(await counts()).toEqual({ matched: 2, total: 3 });
         await libraryGains(2);
-        const result = await spotifyImportService.refreshJobMatches(JOB);
+        const result = await playlistImportService.refreshJobMatches(JOB);
         expect(result).toEqual({ added: 1, total: 3 });
         expect(await counts()).toEqual({ matched: 3, total: 3 });
         expect((await getImportJob(JOB))!.tracksMatched).toBe(3);
@@ -116,9 +120,9 @@ describe("songs a scan or a refresh places", () => {
         await libraryGains(1);
         await libraryGains(2);
         const [, refreshed, again] = await Promise.all([
-            spotifyImportService.reconcilePendingTracks(playlistId),
-            spotifyImportService.refreshJobMatches(JOB),
-            spotifyImportService.refreshJobMatches(JOB),
+            playlistImportService.reconcilePendingTracks(playlistId),
+            playlistImportService.refreshJobMatches(JOB),
+            playlistImportService.refreshJobMatches(JOB),
         ]);
         expect(await prisma.playlistPendingTrack.count({ where: { playlistId } })).toBe(0);
         expect(await prisma.playlistItem.count({ where: { playlistId } })).toBe(3);
@@ -196,13 +200,13 @@ describe("the person's open import page", () => {
     it("is told the new counts when a scan places songs", async () => {
         const playlistId = await importOf([matched(), waiting(1), waiting(2)]);
         await libraryGains(1);
-        const seen = await progressDuring(() => spotifyImportService.reconcilePendingTracks(playlistId));
+        const seen = await progressDuring(() => playlistImportService.reconcilePendingTracks(playlistId));
         expect(seen.at(-1)).toMatchObject({ jobId: JOB, tracksMatched: 2, tracksTotal: 3 });
     });
 
     it("is told nothing when a scan places nothing", async () => {
         const playlistId = await importOf([matched(), waiting(1)]);
-        expect(await progressDuring(() => spotifyImportService.reconcilePendingTracks(playlistId))).toEqual([]);
+        expect(await progressDuring(() => playlistImportService.reconcilePendingTracks(playlistId))).toEqual([]);
     });
 
     it("is told the new counts when a waiting song is dismissed", async () => {
@@ -231,14 +235,14 @@ describe("a refresh that overlaps another change to the import", () => {
         const gate = new Promise<void>((r) => (release = r));
         let paused!: () => void;
         const isPaused = new Promise<void>((r) => (paused = r));
-        const realMatch = (spotifyImportService as any).matchWaitingEntries.bind(spotifyImportService);
-        jest.spyOn(spotifyImportService as any, "matchWaitingEntries").mockImplementation(async (...args: unknown[]) => {
+        const realMatch = matching.matchEntries;
+        jest.spyOn(matching, "matchEntries").mockImplementationOnce(async (...args) => {
             const found = await realMatch(...args);
             paused();
             await gate;
             return found;
         });
-        const refreshed = spotifyImportService.refreshJobMatches(JOB);
+        const refreshed = playlistImportService.refreshJobMatches(JOB);
         await isPaused;
         await dismissWaitingEntry(playlistId, second); // the import now lists 2 songs in all
         release();

@@ -2,10 +2,16 @@
  * Importing a playlist downloads in three places, and each is acquisition (#238): quick import picks every missing
  * album, a queued import downloads the albums chosen when it was queued, and building the playlist retries each
  * unmatched song through Soulseek. A member may do none of them while member downloads are off; the playlist is
- * still made. Real database and Redis; the playlist fetch, Soulseek and Deezer's preview lookup are stubbed.
+ * still made. Real database and Redis; the playlist fetch, the matching part, Soulseek and Deezer's preview lookup
+ * are stubbed.
  */
 jest.mock("../soulseek", () => ({
     soulseekService: { isConnected: jest.fn(), searchTrack: jest.fn(), downloadBestMatch: jest.fn() },
+}));
+jest.mock("../playlistImport/matching", () => ({
+    ...jest.requireActual("../playlistImport/matching"),
+    previewOfTracklist: jest.fn(),
+    pendingTracksOf: jest.fn(),
 }));
 
 import { prisma } from "../../utils/db";
@@ -14,7 +20,8 @@ import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { deezerService } from "../deezer";
 import { soulseekService } from "../soulseek";
 import { eventBus, type SSEEvent } from "../eventBus";
-import { spotifyImportService } from "../spotifyImport";
+import { playlistImportService } from "../playlistImport";
+import * as matching from "../playlistImport/matching";
 
 const MEMBER = "zz-import-member";
 const ADMIN = "zz-import-admin";
@@ -34,18 +41,18 @@ const UNMATCHED = {
     isrc: null,
 };
 const soulseek = soulseekService as unknown as Record<"isConnected" | "searchTrack" | "downloadBestMatch", jest.Mock>;
-const service = spotifyImportService as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+const service = playlistImportService as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
 
 /** The albums quick import hands to the import that follows it. */
 async function albumsQuickImportHandsOn(userId: string): Promise<string[]> {
-    jest.spyOn(deezerService, "getPlaylist").mockResolvedValue({ id: "90210" } as never);
+    jest.spyOn(deezerService, "getPlaylist").mockResolvedValue({ id: "90210", title: "Road trip", tracks: [] } as never);
     // quickImport asks Deezer for the playlist's name; this test is about who may download, so it gets none.
     jest.spyOn(deezerService, "getPlaylistName").mockResolvedValue(null);
-    jest.spyOn(spotifyImportService, "generatePreviewFromDeezer").mockResolvedValue(preview as never);
-    jest.spyOn(spotifyImportService as never, "buildPendingTracks").mockReturnValue([] as never);
-    const processImport = jest.spyOn(spotifyImportService as never, "processImport").mockResolvedValue(undefined as never);
-    const { jobId } = await spotifyImportService.quickImport(URL, userId);
-    await spotifyImportService.processQuickImportFromQueue(jobId, URL);
+    (matching.previewOfTracklist as jest.Mock).mockResolvedValue(preview);
+    (matching.pendingTracksOf as jest.Mock).mockReturnValue([]);
+    const processImport = jest.spyOn(playlistImportService as never, "processImport").mockResolvedValue(undefined as never);
+    const { jobId } = await playlistImportService.quickImport(URL, userId);
+    await playlistImportService.processQuickImportFromQueue(jobId, URL);
     expect(processImport).toHaveBeenCalledTimes(1);
     return (processImport.mock.calls[0] as unknown[])[1] as string[];
 }
@@ -57,8 +64,8 @@ async function albumsQueuedImportDownloads(userId: string): Promise<string[]> {
         data: { id, userId, spotifyPlaylistId: "90210", playlistName: "Road trip", status: "pending", albumsTotal: 1, tracksTotal: 1, pendingTracks: [] },
     });
     await redisClient.setex(`import:preview:${id}`, 60, JSON.stringify(preview));
-    const processImport = jest.spyOn(spotifyImportService as never, "processImport").mockResolvedValue(undefined as never);
-    await spotifyImportService.processImportFromQueue(id, ["mbid-a"]);
+    const processImport = jest.spyOn(playlistImportService as never, "processImport").mockResolvedValue(undefined as never);
+    await playlistImportService.processImportFromQueue(id, ["mbid-a"]);
     expect(processImport).toHaveBeenCalledTimes(1);
     return (processImport.mock.calls[0] as unknown[])[1] as string[];
 }
@@ -66,7 +73,7 @@ async function albumsQueuedImportDownloads(userId: string): Promise<string[]> {
 /** Runs an import with no albums chosen through the real playlist build, and waits for its retry of the unmatched song. */
 async function importWithoutAlbums(userId: string): Promise<void> {
     jest.spyOn(deezerService, "getTrackPreview").mockResolvedValue(null);
-    const retry = jest.spyOn(spotifyImportService as never, "autoRetryPendingTracks");
+    const retry = jest.spyOn(playlistImportService as never, "autoRetryPendingTracks");
     const now = new Date();
     await service.processImport(
         {

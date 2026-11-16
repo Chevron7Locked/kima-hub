@@ -20,7 +20,7 @@ import { redisClient } from "../../utils/redis";
 import { deezerService } from "../../services/deezer";
 import { spotifyService } from "../../services/spotify";
 import { trackIdentityService } from "../../services/trackIdentity";
-import { spotifyImportService } from "../../services/spotifyImport";
+import { playlistImportService } from "../../services/playlistImport";
 import { importQueue } from "../../workers/queues";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
@@ -70,7 +70,7 @@ beforeEach(() => {
         sourceUrl: YT_SINGLE, platform: "youtube", spotifyId: null, isrc: null, title: "Single Song", artist: "Single Artist",
         album: null, genres: [], tags: [], coverUrl: null, songLinkData: null,
     });
-    processImport = jest.spyOn(spotifyImportService as never, "processImport").mockResolvedValue(undefined as never);
+    processImport = jest.spyOn(playlistImportService as never, "processImport").mockResolvedValue(undefined as never);
 });
 
 afterEach(async () => {
@@ -107,7 +107,7 @@ async function quickImport(url: string) {
     const jobId: string = queued.body.jobId;
     jobIds.push(jobId);
     const data = (await importQueue.getJob(jobId))!.data as { url: string };
-    await spotifyImportService.processQuickImportFromQueue(jobId, data.url);
+    await playlistImportService.processQuickImportFromQueue(jobId, data.url);
     return (await request(app).get(`/spotify/import/${jobId}/status`).expect(200)).body;
 }
 

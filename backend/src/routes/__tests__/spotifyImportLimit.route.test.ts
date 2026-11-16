@@ -9,8 +9,9 @@ jest.mock("../../middleware/auth", () => ({
     },
 }));
 const mockImport = jest.fn();
-jest.mock("../../services/spotifyImport", () => ({
-    spotifyImportService: { importFromM3U: (...a: unknown[]) => mockImport(...a) },
+jest.mock("../../services/playlistImport", () => ({
+    ...jest.requireActual("../../services/playlistImport/reading"),
+    playlistImportService: { importFromM3U: (...a: unknown[]) => mockImport(...a) },
     getImportJob: jest.fn(),
 }));
 

@@ -21,13 +21,12 @@ const mockService = {
     getUserJobs: jest.fn(),
     refreshJobMatches: jest.fn(),
     cancelJob: jest.fn(),
-    generatePreview: jest.fn(),
-    generatePreviewFromDeezer: jest.fn(),
     importFromM3U: jest.fn(),
 };
 const mockGetImportJob = jest.fn();
-jest.mock("../../services/spotifyImport", () => ({
-    spotifyImportService: mockService,
+jest.mock("../../services/playlistImport", () => ({
+    ...jest.requireActual("../../services/playlistImport/reading"),
+    playlistImportService: mockService,
     getImportJob: (...a: unknown[]) => mockGetImportJob(...a),
 }));
 
@@ -184,7 +183,7 @@ describe("POST /spotify/import", () => {
         const { previewJobId: _, ...withoutPreview } = importBody;
         const res = await request(app).post("/spotify/import").send({ ...withoutPreview, url: "https://open.spotify.com/playlist/pl" });
         expect(res.status).toBe(400);
-        expect(mockService.generatePreview).not.toHaveBeenCalled();
+        expect(mockService.startPreviewJob).not.toHaveBeenCalled();
         expect(mockService.startImport).not.toHaveBeenCalled();
     });
 
