@@ -98,10 +98,10 @@ export async function reconcileDeletedTracks(
     const missing = await holdSongs(tx, flagged, scanStartedAt);
     if (missing.length === 0) return NOTHING_RETIRED;
 
-    // A song whose plays move to another copy waits for no repair of its listeners' history (a scan never blocks behind
-    // a per-user maintenance job): it stays exactly as it is for the next sweep, and the rest carry on.
-    const heldIds = new Set(missing.map((t) => t.id));
-    const busy = await songsWithBusyPlayHistory(tx, replacements.filter((p) => heldIds.has(p.gone)).map((p) => p.gone));
+    // A song whose plays move to another copy, or are kept when it goes, waits for no repair of its listeners' history (a
+    // scan never blocks behind a per-user maintenance job): it stays exactly as it is for the next sweep, and the rest
+    // carry on.
+    const busy = await songsWithBusyPlayHistory(tx, missing.map((t) => t.id));
     const retiring = missing.filter((t) => !busy.has(t.id));
     const retiringIds = new Set(retiring.map((t) => t.id));
     // The copies that take over are held from here until the commit: a copy deleted between choosing and moving would
@@ -151,7 +151,7 @@ export async function reconcileDeletedTracks(
     // The songs go through the delete module, which takes what names them (their share links) and the albums they
     // leave empty (an album with no song was never listed, so no marker moves), and unnames them in Discover's records
     // without deleting those: a Discover row keeps its user-keep history.
-    const deletion = await deleteSongs(ids, { within: tx, detachDiscovery: true, alsoTell: playlists });
+    const deletion = await deleteSongs(ids, { within: tx, detachDiscovery: true, alsoTell: playlists, canWait: false });
 
     // Then every genre left with no songs goes, library-wide (only when songs were retired).
     await tx.genre.deleteMany({ where: { trackGenres: { none: {} } } });
@@ -330,11 +330,18 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
  * has read it; else its size over its duration, in kbps, which also counts tags and art; a copy with neither ranks last),
  * then the lower id, so every sweep chooses the same. A song with no such copy follows its recording (`recordingMbid`) to the
  * best library copy on another album (`songHistory`); with no recording id, or no copy, it has no entry.
+ *
+ * On the same album a copy is the same recording when both songs have a recording id (`recordingMbid`): two songs whose
+ * ids differ are different recordings, whatever their titles, and a song's id with none on the other says nothing. The
+ * title match decides only when either song has no recording id.
  */
 async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Replacement[]> {
     // Titles are compared here, not in SQL: the database lower-cases ASCII only.
-    const sameSlot = await tx.$queryRaw<Array<{ gone: string; kept: string; playable: boolean; goneTitle: string; keptTitle: string }>>`
-        SELECT g.id AS gone, k.id AS kept, (${playableSongSql("k", "ka")}) AS playable, g.title AS "goneTitle", k.title AS "keptTitle"
+    const sameSlot = await tx.$queryRaw<
+        Array<{ gone: string; kept: string; playable: boolean; goneTitle: string; keptTitle: string; goneMbid: string | null; keptMbid: string | null }>
+    >`
+        SELECT g.id AS gone, k.id AS kept, (${playableSongSql("k", "ka")}) AS playable, g.title AS "goneTitle", k.title AS "keptTitle",
+               g."recordingMbid" AS "goneMbid", k."recordingMbid" AS "keptMbid"
           FROM "Track" g
           JOIN "Track" k
             ON k."albumId" = g."albumId"
@@ -346,7 +353,11 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
            AND k."missingSince" IS NULL
          ORDER BY g.id, ${bestCopyFirst()}
     `;
-    const pairs = pairsOf(sameSlot.filter((row) => row.goneTitle.toLowerCase() === row.keptTitle.toLowerCase()));
+    const pairs = pairsOf(
+        sameSlot.filter((row) =>
+            row.goneMbid && row.keptMbid ? row.goneMbid === row.keptMbid : row.goneTitle.toLowerCase() === row.keptTitle.toLowerCase(),
+        ),
+    );
     // A song with no copy on its own album follows its recording to a library copy on another album (match by
     // MusicBrainz recording id only; a song with no id follows nothing).
     const found = new Set(pairs.map((p) => p.gone));

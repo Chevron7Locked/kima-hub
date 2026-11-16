@@ -441,6 +441,29 @@ describe("reconcileDeletedTracks", () => {
             }
         });
 
+        it("leaves a song with no copy alone while its listener's history is being repaired: its plays are not kept yet", async () => {
+            await prisma.track.create({
+                data: { id: `${P}solo`, albumId: `${P}alb`, title: "Solo", trackNo: 1, duration: 200, filePath: `/tmp/${P}solo.mp3`,
+                    fileModified: new Date(), fileSize: 1, missingSince: new Date(Date.now() - 5 * MIN) },
+            });
+            await prisma.play.create({ data: { userId: `${P}user`, trackId: `${P}solo`, playedAt: new Date(Date.now() - 3 * MIN) } });
+            const repair = await repairHolding(`${P}user`);
+            const spy = jest.spyOn(config, "music", "get").mockReturnValue({ ...config.music, reconcileMode: "delete" });
+            try {
+                expect((await runReconcile(scanStartedAt())).removed).toBe(0);
+                expect(await prisma.track.findUnique({ where: { id: `${P}solo` } })).not.toBeNull();
+                expect(await prisma.play.count({ where: { trackId: `${P}solo`, keptTitle: null } })).toBe(1);
+
+                repair.release();
+                await repair.done;
+                expect((await runReconcile(scanStartedAt())).removed).toBe(1);
+                expect(await prisma.play.count({ where: { userId: `${P}user`, trackId: null, keptTitle: "Solo" } })).toBe(1);
+            } finally {
+                repair.release();
+                spy.mockRestore();
+            }
+        });
+
         it("leaves a song alone when any one of its listeners is busy: none of its plays moves", async () => {
             await seedReplacedSongPlayedBy(`${P}user`, OTHER);
             const repair = await repairHolding(OTHER);
@@ -1157,6 +1180,58 @@ describe("which copy takes over", () => {
             await expect(probe("FOR NO KEY UPDATE", `${P}chosen`)).resolves.toBeUndefined();
             await expect(probe("FOR UPDATE", `${P}other`)).resolves.toBeUndefined();
         }, { timeout: 30_000 });
+    });
+
+    describe("a copy on the same album is the same recording", () => {
+        const REC_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        const REC_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        const song = (id: string, title: string, recordingMbid: string | null, gone = false) =>
+            prisma.track.create({
+                data: { id: `${P}${id}`, albumId: `${P}alb`, trackNo: 1, title, duration: 200, filePath: `/tmp/${P}${id}.mp3`,
+                    fileModified: new Date(), fileSize: 1, recordingMbid, ...(gone ? { missingSince: new Date(Date.now() - 5 * MIN) } : {}) },
+            });
+
+        it("two songs with the same recording id are copies, whatever their titles", async () => {
+            await song("g", "Schema", REC_A, true);
+            await song("c", "Schema (2024 remaster)", REC_A);
+            await seedHistoryAndQueue();
+
+            expect((await sweep()).removed).toBe(1);
+
+            expect((await where()).play).toBe(`${P}c`);
+        });
+
+        it("two songs with different recording ids are not copies, though their titles match: the plays are kept", async () => {
+            await song("g", "Schema", REC_A, true);
+            await song("c", "Schema", REC_B);
+            await seedHistoryAndQueue();
+
+            expect((await sweep()).removed).toBe(1);
+
+            expect((await where()).play).toBeNull();
+            expect(await prisma.play.count({ where: { userId: `${P}user`, trackId: null, keptTitle: "Schema" } })).toBe(1);
+            expect(await prisma.play.count({ where: { trackId: `${P}c` } })).toBe(0);
+        });
+
+        it("the title decides when either song has no recording id", async () => {
+            await song("g", "Schema", REC_A, true);
+            await song("c", "SCHEMA", null);
+            await seedHistoryAndQueue();
+
+            expect((await sweep()).removed).toBe(1);
+
+            expect((await where()).play).toBe(`${P}c`);
+        });
+
+        it("a different title with no recording id on one side is no copy", async () => {
+            await song("g", "Schema", null, true);
+            await song("c", "Another", REC_A);
+            await seedHistoryAndQueue();
+
+            await sweep();
+
+            expect((await where()).play).toBeNull();
+        });
     });
 
     describe("a saved mood mix", () => {
