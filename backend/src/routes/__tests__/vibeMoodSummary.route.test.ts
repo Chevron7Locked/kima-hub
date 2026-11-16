@@ -19,7 +19,7 @@ import { buildMoodState } from "../../services/moods/state";
 import { LEGEND, summariseMoods } from "../../services/vibeMap";
 import { mountAsServer } from "./helpers/serverMount";
 
-const P = "cvsum";
+const P = "cvsum00000000000000";
 const ANALYZED_AT = new Date("2026-10-23T00:00:00Z");
 
 function moods(strong?: Mood | "low") {
@@ -72,7 +72,8 @@ beforeAll(async () => {
                 },
             });
             // The mood snapshot already leaves Discover songs unscored; the summary's own query leaves them out too.
-            expectedMood[id] = location === "DISCOVER" ? "unanalyzed" : { happy: "moodHappy", calm: "moodRelaxed", flat: "neutral", quiet: "neutral", fresh: "unanalyzed" }[kind];
+            // A Discover song is no playable song: the mood answer does not know it.
+            expectedMood[id] = location === "DISCOVER" ? "not found" : { happy: "moodHappy", calm: "moodRelaxed", flat: "neutral", quiet: "neutral", fresh: "unanalyzed" }[kind];
             await prisma.$executeRawUnsafe(
                 `INSERT INTO track_embeddings (track_id, embedding, model_version, analyzed_at) VALUES ($1, $2::vector, $3, $4)`,
                 id, `[1${",0".repeat(MOOD_HEADS.dims - 1)}]`, MOOD_HEADS.model, ANALYZED_AT,
@@ -106,7 +107,9 @@ describe("GET /api/vibe/mood-summary", () => {
     it("starts from the moods the map gives these tracks", async () => {
         for (const [id, mood] of Object.entries(expectedMood)) {
             const res = await auth(request(app()).get(`/api/vibe/mood/${id}`));
-            expect([id, res.body.dominantMood]).toEqual([id, mood]);
+            expect([id, res.status, res.body.dominantMood]).toEqual(
+                mood === "not found" ? [id, 404, undefined] : [id, 200, mood],
+            );
         }
     });
 

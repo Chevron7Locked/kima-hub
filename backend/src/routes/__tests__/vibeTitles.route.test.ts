@@ -23,7 +23,9 @@ import { prisma } from "../../utils/db";
 import vibeRouter from "../vibe";
 import { mountAsServer } from "./helpers/serverMount";
 
-const P = "vtitle";
+const P = "cvtitle";
+/** The song the similar answers are asked about: a real playable song, with an id the route accepts. */
+const SEED = `${P}seed0000000000000`;
 const app = mountAsServer(express().use(express.json()), "/vibe", vibeRouter, "/api/vibe");
 
 const row = (id: string) => ({
@@ -41,7 +43,7 @@ beforeAll(async () => {
     await cleanup();
     await prisma.artist.create({ data: { id: `${P}_art`, name: "Artist", identityKey: `${P}_ik` } });
     await prisma.album.create({ data: { id: `${P}_alb`, rgMbid: `${P}_rg`, artistId: `${P}_art`, title: "Album", primaryType: "Album" } });
-    for (const [id, displayTitle] of [[`${P}_edited`, "edited title"], [`${P}_plain`, null]] as const) {
+    for (const [id, displayTitle] of [[`${P}_edited`, "edited title"], [`${P}_plain`, null], [SEED, null]] as const) {
         await prisma.track.create({
             data: { id, albumId: `${P}_alb`, title: "file title", displayTitle, trackNo: 1, duration: 200, filePath: `/tmp/${id}.flac`, fileModified: new Date(), fileSize: 1 },
         });
@@ -58,7 +60,7 @@ const titles = (tracks: Array<{ displayTitle?: string | null }>) => tracks.map((
 describe("vibe answers carry the edited title", () => {
     it("similar songs", async () => {
         mockSimilar.mockResolvedValue([row(`${P}_edited`), row(`${P}_plain`)]);
-        const res = await request(app).get(`/vibe/similar/${P}_seed`).expect(200);
+        const res = await request(app).get(`/vibe/similar/${SEED}`).expect(200);
         expect(titles(res.body.tracks)).toEqual(["edited title", null]);
     });
 
@@ -99,7 +101,7 @@ describe("how many results a vibe answer holds", () => {
 
     it.each([["500", 100], ["many", 20], ["7", 7]])("similar songs asking for %p get %p", async (limit, expected) => {
         mockSimilar.mockResolvedValue([row(`${P}_plain`)]);
-        await request(app).get(`/vibe/similar/${P}_seed?limit=${limit}`);
+        await request(app).get(`/vibe/similar/${SEED}?limit=${limit}`);
         expect(mockSimilar.mock.calls.at(-1)?.[1]).toBe(expected);
     });
 });

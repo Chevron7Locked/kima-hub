@@ -13,11 +13,17 @@ import { matchingContext, rankMatches, weightedTracks } from "../services/matchi
 import { createHash } from "node:crypto";
 import { parseLimit } from "./library/paging";
 import { prisma } from "../utils/db";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 
 const router = Router();
 const gzipAsync = promisify(gzip);
 
 const CUID_RE = /^c[a-z0-9]{20,30}$/;
+
+/** Whether `id` is a playable song: the vibe answers speak only of songs a person can play. */
+async function isPlayableSong(id: string): Promise<boolean> {
+    return (await prisma.track.count({ where: { id, ...PLAYABLE_SONG } })) > 0;
+}
 
 function sanitizeForLog(s: string): string {
     return s.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 100);
@@ -106,6 +112,11 @@ router.post("/path", async (req, res) => {
 
         if (startTrackId === endTrackId) {
             return refuseRequest(req, res, "startTrackId and endTrackId are the same track");
+        }
+
+        // A length is a whole number of songs; an absent one takes the default.
+        if (length !== undefined && length !== null && !Number.isInteger(length)) {
+            return refuseRequest(req, res, "length: a whole number");
         }
 
         const result = await generateSongPath(startTrackId, endTrackId, {
@@ -219,7 +230,11 @@ router.post("/alchemy", async (req, res) => {
 router.get("/similar/:trackId", async (req, res) => {
     try {
         const { trackId } = req.params;
+        if (!CUID_RE.test(trackId)) return refuseRequest(req, res, "trackId: not a track id");
         const limit = parseLimit(req.query.limit, 20, 100);
+
+        // "No such song" and "not analysed yet" are different answers to a client.
+        if (!(await isPlayableSong(trackId))) return res.status(404).json({ error: "Song not found" });
 
         const tracks = await findSimilarTracks(trackId, limit);
 
@@ -327,8 +342,12 @@ router.post("/search", async (req, res) => {
  */
 router.get("/mood/:trackId", async (req, res) => {
     try {
-        const snap = await currentMoodSnapshot();
-        res.json({ dominantMood: moodOutput(snap.views.get(req.params.trackId)).dominantMood });
+        const { trackId } = req.params;
+        if (!CUID_RE.test(trackId)) return refuseRequest(req, res, "trackId: not a track id");
+        const view = (await currentMoodSnapshot()).views.get(trackId);
+        // "Unanalysed" is for a song that plays and has no scores yet; an id that is no playable song is not found.
+        if (!view && !(await isPlayableSong(trackId))) return res.status(404).json({ error: "Song not found" });
+        res.json({ dominantMood: moodOutput(view).dominantMood });
     } catch (error) {
         logger.error("Track mood error:", error);
         res.status(500).json({ error: "Failed to read the track's mood" });

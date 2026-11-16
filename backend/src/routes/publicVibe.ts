@@ -11,6 +11,7 @@ import zlib from "zlib";
 import { promisify } from "util";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { prisma } from "../utils/db";
+import { PLAYABLE_SONG } from "../utils/playableSong";
 import { logger } from "../utils/logger";
 import { USER_AGENT, config } from "../config";
 import { latestLibraryExport } from "../services/publicLibraryExport";
@@ -58,11 +59,11 @@ async function readLocalCover(ref: string): Promise<CoverBytes | null> {
     return { buffer, etag: etagFor(buffer), contentType: null };
 }
 
-// Only covers Kima stores itself are served. A stored cover whose file has gone
-// missing is looked up again through the artwork service.
+// Only covers Kima stores itself are served, and only for playable songs: a Discover song's cover appears nowhere else.
+// A stored cover whose file has gone missing is looked up again through the artwork service.
 async function resolveCoverBytes(trackId: string): Promise<CoverBytes | null> {
-    const row = await prisma.track.findUnique({
-        where: { id: trackId },
+    const row = await prisma.track.findFirst({
+        where: { id: trackId, ...PLAYABLE_SONG },
         select: {
             album: {
                 select: {

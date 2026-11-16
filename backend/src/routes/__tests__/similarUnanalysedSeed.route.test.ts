@@ -52,9 +52,10 @@ const UNANALYSED_ID = "ctrkuna000000000000000001"; // Track row, NO embedding
 const SEED_ID = "ctrkemb000000000000000001"; // embedded, drives the happy path
 const NEIGHBOUR_ID = "ctrkemb000000000000000002"; // embedded, nearest to SEED
 const MISSING_ID = "ctrkmissing0000000000001"; // never created
-const ALL_TRACK_IDS = [UNANALYSED_ID, SEED_ID, NEIGHBOUR_ID];
+const DISCOVER_ID = "ctrkdis0000000000000000001"; // embedded, but on a Discover album
+const ALL_TRACK_IDS = [UNANALYSED_ID, SEED_ID, NEIGHBOUR_ID, DISCOVER_ID];
 
-async function seedTrack(id: string) {
+async function seedTrack(id: string, location: "LIBRARY" | "DISCOVER" = "LIBRARY") {
     const artist = await prisma.artist.create({
         data: { id: `cart_${id}`, name: `A ${id}`, identityKey: `a_${id}` },
     });
@@ -65,6 +66,7 @@ async function seedTrack(id: string) {
             artistId: artist.id,
             title: `L ${id}`,
             primaryType: "Album",
+            location,
         },
     });
     await prisma.track.create({
@@ -104,6 +106,8 @@ beforeAll(async () => {
     await seedTrack(UNANALYSED_ID);
     await seedTrack(SEED_ID);
     await seedTrack(NEIGHBOUR_ID);
+    await seedTrack(DISCOVER_ID, "DISCOVER");
+    await seedEmbedding(DISCOVER_ID, UNIT_VECTOR);
     await seedEmbedding(SEED_ID, UNIT_VECTOR);
     await seedEmbedding(NEIGHBOUR_ID, UNIT_VECTOR);
     await buildMatching();
@@ -131,13 +135,17 @@ describe("similar tracks for an unanalysed seed", () => {
         });
     });
 
-    it("GET /api/vibe/similar/:trackId answers 404 for a nonexistent id too", async () => {
-        const res = await request(vibeApp).get(`/api/vibe/similar/${MISSING_ID}`);
-        expect(res.status).toBe(404);
-        expect(res.body).toEqual({
-            error: "No similar tracks found",
-            message: "This track may not have been analyzed yet, or no analyzer is running",
-        });
+    it("GET /api/vibe/similar/:trackId says no such song for an id that is no song, or a song that does not play", async () => {
+        for (const id of [MISSING_ID, DISCOVER_ID]) {
+            const res = await request(vibeApp).get(`/api/vibe/similar/${id}`);
+            expect(res.status).toBe(404);
+            expect(res.body).toEqual({ error: "Song not found" });
+        }
+    });
+
+    it("GET /api/vibe/similar/:trackId refuses an id that is not an id", async () => {
+        const res = await request(vibeApp).get("/api/vibe/similar/nope");
+        expect(res.status).toBe(400);
     });
 
     it("an analysed seed still returns its neighbours with the documented shape", async () => {

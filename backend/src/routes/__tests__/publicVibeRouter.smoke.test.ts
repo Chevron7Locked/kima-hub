@@ -50,6 +50,8 @@ const P = "pvibe_smoke";
 const COVER_TRACK = "cpvibesmoketrack0001";
 const NO_COVER_TRACK = "cpvibesmoketrack0002";
 const MISSING_FILE_TRACK = "cpvibesmoketrack0003";
+const DISCOVER_TRACK = "cpvibesmoketrack0004";
+const CORRUPT_TRACK = "cpvibesmoketrack0005";
 const LIBRARY = { version: 1, tracks: [{ id: TRACK }] };
 const ETAG = '"abc123"';
 
@@ -215,15 +217,15 @@ describe("GET /cover/:trackId", () => {
     const file = path.join(coverDir, `${P}.jpg`);
     const bytes = Buffer.from("ffd8ffe000104a464946", "hex");
 
-    async function seedTrack(id: string, key: string, coverUrl: string | null) {
+    async function seedTrack(id: string, key: string, coverUrl: string | null, kind: "playable" | "discover" | "corrupt" = "playable") {
         await prisma.artist.create({
             data: { id: `${P}_art_${key}`, name: "Ar", normalizedName: "ar", identityKey: `${P}_ik_${key}` },
         });
         await prisma.album.create({
-            data: { id: `${P}_alb_${key}`, rgMbid: `${P}_rg_${key}`, artistId: `${P}_art_${key}`, identityKey: `${P}_ak_${key}`, title: "Al", primaryType: "Album", coverUrl },
+            data: { id: `${P}_alb_${key}`, rgMbid: `${P}_rg_${key}`, artistId: `${P}_art_${key}`, identityKey: `${P}_ak_${key}`, title: "Al", primaryType: "Album", coverUrl, location: kind === "discover" ? "DISCOVER" : "LIBRARY" },
         });
         await prisma.track.create({
-            data: { id, albumId: `${P}_alb_${key}`, title: "T", trackNo: 1, duration: 100, filePath: `${P}/${key}.flac`, fileModified: new Date(), fileSize: 1 },
+            data: { id, albumId: `${P}_alb_${key}`, title: "T", trackNo: 1, duration: 100, filePath: `${P}/${key}.flac`, fileModified: new Date(), fileSize: 1, corrupt: kind === "corrupt" },
         });
     }
 
@@ -234,10 +236,13 @@ describe("GET /cover/:trackId", () => {
         await seedTrack(NO_COVER_TRACK, "none", null);
         // A stored cover whose file has gone; the mocked artwork sources have no copy.
         await seedTrack(MISSING_FILE_TRACK, "gone", `native:albums/${P}_gone.jpg`);
+        // Covers that exist on disk, under songs that do not play.
+        await seedTrack(DISCOVER_TRACK, "discover", `native:albums/${P}.jpg`, "discover");
+        await seedTrack(CORRUPT_TRACK, "corrupt", `native:albums/${P}.jpg`, "corrupt");
     });
 
     afterAll(async () => {
-        await prisma.track.deleteMany({ where: { id: { in: [COVER_TRACK, NO_COVER_TRACK, MISSING_FILE_TRACK] } } });
+        await prisma.track.deleteMany({ where: { id: { in: [COVER_TRACK, NO_COVER_TRACK, MISSING_FILE_TRACK, DISCOVER_TRACK, CORRUPT_TRACK] } } });
         await prisma.album.deleteMany({ where: { id: { startsWith: `${P}_alb_` } } });
         await prisma.artist.deleteMany({ where: { id: { startsWith: `${P}_art_` } } });
         fs.rmSync(path.join(os.tmpdir(), `kima-pvibe-${process.pid}`), { recursive: true, force: true });
@@ -265,6 +270,12 @@ describe("GET /cover/:trackId", () => {
     it("answers 404 for a stored cover whose file has gone and no source has a copy", async () => {
         const res = await request(app).get(`/api/public/vibe/cover/${MISSING_FILE_TRACK}`).set(auth);
         expect(res.status).toBe(404);
+    });
+
+    it("answers 404 for a Discover or corrupt song, whose cover is on disk", async () => {
+        for (const id of [DISCOVER_TRACK, CORRUPT_TRACK]) {
+            expect((await request(app).get(`/api/public/vibe/cover/${id}`).set(auth)).status).toBe(404);
+        }
     });
 
     it("answers 404 for a track that is not in the library", async () => {

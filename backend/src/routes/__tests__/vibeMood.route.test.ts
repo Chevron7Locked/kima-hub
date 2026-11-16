@@ -15,7 +15,7 @@ import { MOODS, MOOD_HEADS, type Mood } from "../../services/moods/heads";
 import { buildMoodState } from "../../services/moods/state";
 import { mountAsServer } from "./helpers/serverMount";
 
-const P = "cvmood";
+const P = "cvmood000000000000000";
 const ANALYZED_AT = new Date("2026-10-23T00:00:00Z");
 
 /** Learned scores: 0 on every mood, `strong` far above, or every mood below the rest of the library. */
@@ -41,6 +41,15 @@ beforeAll(async () => {
     token = generateToken(user);
     await prisma.artist.create({ data: { id: `${P}art`, name: "Mood Artist", identityKey: `${P}-art` } });
     await prisma.album.create({ data: { id: `${P}alb`, artistId: `${P}art`, rgMbid: `${P}-rg`, title: "Mood Album", primaryType: "Album" } });
+    await prisma.album.create({ data: { id: `${P}dis`, artistId: `${P}art`, rgMbid: `${P}-rg-dis`, identityKey: `${P}-dis`, title: "Discover Album", primaryType: "Album", location: "DISCOVER" } });
+    for (const [name, albumId, corrupt] of [["discover", `${P}dis`, false], ["corrupt", `${P}alb`, true]] as const) {
+        await prisma.track.create({
+            data: {
+                id: `${P}${name}`, albumId, title: name, trackNo: 50, duration: 200, corrupt,
+                filePath: `/tmp/${P}${name}.flac`, fileModified: new Date(), fileSize: 1000,
+            },
+        });
+    }
     // Ten quiet tracks give the library a mean and spread to stand out against.
     const tracks: [string, Record<Mood, number> | null, string][] = [
         ["happy", moods("happy"), "completed"],
@@ -96,6 +105,16 @@ describe("GET /api/vibe/mood/:trackId", () => {
 
     it("says not analysed for a track without moods yet", async () => {
         expect((await mood(`${P}fresh`)).body).toEqual({ dominantMood: "unanalyzed" });
+    });
+
+    it("answers not found for an id that is no song, and for a song that does not play", async () => {
+        for (const id of [`${P}nosuchsong`, `${P}discover`, `${P}corrupt`]) {
+            expect((await mood(id)).status).toBe(404);
+        }
+    });
+
+    it("refuses an id that is not an id", async () => {
+        expect((await mood("nope")).status).toBe(400);
     });
 
     it("refuses a request that is not signed in", async () => {
