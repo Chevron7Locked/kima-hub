@@ -489,9 +489,12 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
             });
     }
 
+    // getAlbumList2 lists AlbumID3; the legacy getAlbumList lists Child folders, as getMusicDirectory does.
+    const id3 = req.path.includes("getAlbumList2");
     const albumList = albums.map((a) => {
         const artistName = a.artist.displayName || a.artist.name;
         const genres = shownAlbumGenres(a, a.artist);
+        if (!id3) return mapAlbumChild({ ...a, artistId: a.artist.id, genres }, artistName);
         const songCount = a.tracks?.length ?? a.songCount ?? 0;
         const duration = a.tracks
             ? a.tracks.reduce((sum, t) => sum + (t.duration ?? 0), 0)
@@ -499,8 +502,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
         return mapAlbum({ ...a, artistId: a.artist.id, songCount, duration, genres }, artistName);
     });
 
-    const key = req.path.includes("getAlbumList2") ? "albumList2" : "albumList";
-    subsonicOk(req, res, { [key]: { album: albumList } });
+    subsonicOk(req, res, { [id3 ? "albumList2" : "albumList"]: { album: albumList } });
 }));
 
 // ===================== GENRES =====================

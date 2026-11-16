@@ -69,6 +69,29 @@ describe.each(['/getAlbumList2.view', '/getAlbumList.view'])('%s', (path) => {
     });
 });
 
+/**
+ * The two calls answer two shapes: getAlbumList2 lists AlbumID3 (`name`, `songCount`, `duration`), and the legacy
+ * getAlbumList lists albums as Child folders (`title`, `parent`, `isDir`) under their artist, as getMusicDirectory does.
+ */
+describe('the shape of an album in the list', () => {
+    const entry = async (path: string, key: 'albumList' | 'albumList2') => {
+        const body = await ask(path, { size: '500' });
+        return list<Record<string, unknown>>(body[key].album).find((a) => a.id === id('c'))!;
+    };
+
+    it('is an AlbumID3 in getAlbumList2', async () => {
+        expect(await entry('/getAlbumList2.view', 'albumList2')).toMatchObject({ name: id('c'), artistId: `${P}-ar`, songCount: 1 });
+    });
+
+    it('is a Child folder in the legacy getAlbumList', async () => {
+        const album = await entry('/getAlbumList.view', 'albumList');
+
+        expect(album).toMatchObject({ title: id('c'), album: id('c'), parent: `${P}-ar`, isDir: true, artist: P, artistId: `${P}-ar` });
+        expect(album).not.toHaveProperty('songCount');
+        expect(album).not.toHaveProperty('name');
+    });
+});
+
 it('pages newest albums without repeating or skipping one across pages', async () => {
     // A page at a time from the top, until this file's albums have all appeared (their dates sort them first):
     // each comes out once, in order.
