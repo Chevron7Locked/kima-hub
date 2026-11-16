@@ -294,6 +294,31 @@ describe("an old artist picture saved as .png or .webp", () => {
         expect(await marker()).not.toBeNull();
     });
 
+    it.each(["png", "webp"] as const)("is found by an artist whose address has gained a version, and the version is replaced (%s)", async (format) => {
+        await artist("v", `native:artists/${P}_v.${format}?v=oldversion1`);
+        put(path.join(artists, `${P}_v.${format}`), await picture(format));
+
+        const result = await repairCoverFormatsOnce({});
+
+        expect(result).toMatchObject({ artistPicturesConverted: 1, failed: 0 });
+        expect(await hero("v")).toBe(`native:artists/${P}_v.jpg?v=${await versionOfFile(path.join(artists, `${P}_v.jpg`))}`);
+        expect(fs.readdirSync(artists)).toEqual([`${P}_v.jpg`]);
+    });
+
+    it("is not removed while only the person's own picture points at it", async () => {
+        await prisma.artist.create({
+            data: { id: `${P}_own`, name: "Repair own", identityKey: `${P}_own_ik`, userHeroUrl: `native:artists/${P}_own.png?v=oldversion1` },
+        });
+        put(path.join(artists, `${P}_own.png`), await picture("png"));
+        put(path.join(artists, `${P}_own.jpg`), await picture("jpeg"));
+
+        await repairCoverFormatsOnce({});
+
+        const row = await prisma.artist.findUniqueOrThrow({ where: { id: `${P}_own` } });
+        expect(row.userHeroUrl).toBe(`native:artists/${P}_own.jpg?v=${await versionOfFile(path.join(artists, `${P}_own.jpg`))}`);
+        expect(fs.existsSync(path.join(artists, `${P}_own.png`))).toBe(false);
+    });
+
     it("moves every row that pointed at it, and no other artist", async () => {
         await artist("b", `native:artists/${P}_b.png`);
         await artist("other", `native:artists/${P}_other.jpg`);

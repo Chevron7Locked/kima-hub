@@ -1,7 +1,7 @@
 /**
- * The one-time repair of stored covers saved before every stored picture was written as a JPEG (tickets 104 and 108): a
- * `.jpg` could hold PNG or WebP bytes, and was served as `image/jpeg`; and a local artist picture was once copied as
- * `<id>.png` or `<id>.webp`, with the artist's `heroUrl` pointing at that name. The pass converts the old-named artist
+ * The one-time repair of stored covers saved before every stored picture was written as a JPEG: a `.jpg` can hold PNG or
+ * WebP bytes, and is then served as `image/jpeg`; and a local artist picture can sit as `<id>.png` or `<id>.webp`, with
+ * the artist's pictures pointing at that name (with or without a version). The pass converts the old-named artist
  * pictures first (each to `<id>.jpg` through `storeAsJpeg`, the artist rows moved over to it, then the old file removed),
  * then walks every covers folder once and converts the `.jpg` files in place through `replaceWithJpeg` (atomic, so a
  * reader never meets half a file; and dropped when the file was written anew since it was read, so the older bytes never
@@ -20,10 +20,10 @@ import path from "path";
 import { logger } from "../utils/logger";
 import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
-import { audiobookCoversPath, coversBasePath, MAX_PICTURE_BYTES, replaceWithJpeg, storeAsJpeg, storedCoverValue, versionOfFile } from "./imageStorage";
+import { audiobookCoversPath, coverAddressWhere, coversBasePath, MAX_PICTURE_BYTES, replaceWithJpeg, storeAsJpeg, versionOfFile } from "./imageStorage";
 import { rewriteCoverValues, storedVersions } from "./coverVersionBackfill";
 import type { StopCheck } from "../utils/stopCheck";
-import { flushShownChanges, rewritePictureColumn } from "./shownChanges";
+import { flushShownChanges } from "./shownChanges";
 
 export interface CoverRepairResult {
     /** Files that held another format and are JPEGs now. */
@@ -76,12 +76,14 @@ const OLD_ARTIST_PICTURE = /^(.+)\.(png|webp)$/;
 async function convertOldArtistPicture(dir: string, name: string, id: string, result: CoverRepairResult): Promise<void> {
     const file = path.join(dir, name);
     const jpeg = path.join(dir, `${id}.jpg`);
-    const was = `native:artists/${name}`;
+    const was = `artists/${name}`;
     // lstat, not stat: a symbolic link is not ours to read through or remove.
     const onDisk = await fs.promises.lstat(file);
     if (!onDisk.isFile()) return;
 
-    if ((await prisma.artist.count({ where: { heroUrl: was } })) === 0) {
+    // Any version: the version backfill may have stamped the old name before this pass finished.
+    const pointing = { OR: [coverAddressWhere("heroUrl", was), coverAddressWhere("userHeroUrl", was)] };
+    if ((await prisma.artist.count({ where: pointing })) === 0) {
         if (await fs.promises.access(jpeg).then(() => true, () => false)) await fs.promises.rm(file, { force: true });
         return;
     }
@@ -95,7 +97,7 @@ async function convertOldArtistPicture(dir: string, name: string, id: string, re
         logger.warn(`[COVER-REPAIR] ${file} is no picture; left as it is`);
         return;
     }
-    await rewritePictureColumn("artist", "heroUrl", was, storedCoverValue(`artists/${id}.jpg`, version));
+    await rewriteCoverValues(was, version, { newRelativePath: `artists/${id}.jpg` });
     await fs.promises.rm(file, { force: true });
     result.artistPicturesConverted++;
     logger.debug(`[COVER-REPAIR] Converted ${file} to ${jpeg}`);

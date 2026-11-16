@@ -18,6 +18,7 @@ import {
   coverCacheControl,
   parseStoredCover,
   readPicture,
+  coverAddressWhere,
 } from "../../services/imageStorage";
 import { sendStoredFile } from "../../utils/sendStoredFile";
 import crypto from "crypto";
@@ -159,7 +160,7 @@ async function serveStoredCover(address: string, size: string | undefined, req: 
         const stored = await prisma.album.updateMany({
           where: {
             id: albumId,
-            OR: [{ coverUrl: `native:${nativePath}` }, { coverUrl: { startsWith: `native:${nativePath}?v=` } }],
+            ...coverAddressWhere("coverUrl", nativePath),
           },
           data: { coverUrl: found.url },
         });

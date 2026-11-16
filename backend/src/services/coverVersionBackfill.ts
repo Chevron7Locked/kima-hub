@@ -3,7 +3,7 @@
  * unversioned and every address clients are sent can be kept for good. A value names its file (`native:albums/<id>.jpg`);
  * the pass reads the file once per value and stores `native:albums/<id>.jpg?v=<version>` in every column that held it:
  * album covers, a person's album cover, artist pictures. Audiobooks get the version of their cached cover on their own
- * `coverVersion` column. The scanner once stored album covers in the covers folder itself (`native:<id>.jpg`); those are
+ * `coverVersion` column. An album cover that sits in the covers folder itself (`native:<id>.jpg`) is
  * filed under `albums/` with the rest (the file moved, the value rewritten to match), unless a cover of that name already
  * stands there, and then the value keeps its place and is only versioned.
  *
@@ -22,7 +22,7 @@ import path from "path";
 import { logger } from "../utils/logger";
 import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
-import { coversBasePath, dropResizedCopies, parseStoredCover, resolveInCoversDir, storedCoverValue, versionOfFile } from "./imageStorage";
+import { coverAddressWhere, coversBasePath, dropResizedCopies, parseStoredCover, resolveInCoversDir, storedCoverValue, versionOfFile } from "./imageStorage";
 import type { StopCheck } from "../utils/stopCheck";
 import { notePictureChange, rewritePictureColumn, shownPicture, flushShownChanges } from "./shownChanges";
 
@@ -41,13 +41,31 @@ export interface CoverVersionResult {
     stopped: boolean;
 }
 
-/** The columns that hold a stored cover's address. */
-const ADDRESS_COLUMNS = [
-    { model: "album", column: "coverUrl" },
-    { model: "album", column: "userCoverUrl" },
-    { model: "artist", column: "heroUrl" },
-    { model: "artist", column: "userHeroUrl" },
+/** What each kind of row stores: the picture found for it, and the person's own, both as stored cover addresses. */
+const PICTURES = [
+    { model: "album", found: "coverUrl", own: "userCoverUrl" },
+    { model: "artist", found: "heroUrl", own: "userHeroUrl" },
 ] as const;
+
+/** The columns that hold a stored cover's address. */
+const ADDRESS_COLUMNS = PICTURES.flatMap(({ model, found, own }) => [
+    { model, column: found },
+    { model, column: own },
+]);
+
+type Row = Record<string, string | null>;
+interface Rows {
+    findMany(args: object): Promise<Row[]>;
+    update(args: object): Promise<unknown>;
+}
+/** The rows of one kind. Their columns are named in `PICTURES`, so one body serves albums and artists. */
+const rowsOf = (model: "album" | "artist") => prisma[model] as unknown as Rows;
+
+/** Every distinct value of `column` among the rows matching `where`. */
+async function valuesOf(model: "album" | "artist", column: string, where: object): Promise<string[]> {
+    const rows = await rowsOf(model).findMany({ where, distinct: [column], select: { [column]: true } });
+    return rows.map((row) => row[column]).filter((value): value is string => value !== null);
+}
 
 /**
  * Stores `version` on every value, in any column, that points at the file at `relativePath` (under the covers folder),
@@ -65,44 +83,23 @@ export async function rewriteCoverValues(
         if (cover?.relativePath !== relativePath) return false;
         return !onlyOtherVersions || (cover.version !== null && cover.version !== version);
     };
-    // The database narrows by prefix (which can match a little more than the exact path); the exact test is here.
-    const prefix = { startsWith: `native:${relativePath}` };
     let written = 0;
 
-    const albums = await prisma.album.findMany({
-        where: { OR: [{ coverUrl: prefix }, { userCoverUrl: prefix }] },
-        select: { id: true, coverUrl: true, userCoverUrl: true },
-    });
-    for (const album of albums) {
-        const data = {
-            ...(points(album.coverUrl) && { coverUrl: value }),
-            ...(points(album.userCoverUrl) && { userCoverUrl: value }),
-        };
-        const keys = Object.keys(data).length;
-        if (keys > 0) {
-            await prisma.album.update({ where: { id: album.id }, data });
-            notePictureChange("album", album.id, {
-                was: shownPicture(album.coverUrl, album.userCoverUrl),
-                now: shownPicture(data.coverUrl || album.coverUrl, data.userCoverUrl || album.userCoverUrl),
-            });
-            written += keys;
-        }
-    }
-    const artists = await prisma.artist.findMany({
-        where: { OR: [{ heroUrl: prefix }, { userHeroUrl: prefix }] },
-        select: { id: true, heroUrl: true, userHeroUrl: true },
-    });
-    for (const artist of artists) {
-        const data = {
-            ...(points(artist.heroUrl) && { heroUrl: value }),
-            ...(points(artist.userHeroUrl) && { userHeroUrl: value }),
-        };
-        const keys = Object.keys(data).length;
-        if (keys > 0) {
-            await prisma.artist.update({ where: { id: artist.id }, data });
-            notePictureChange("artist", artist.id, {
-                was: shownPicture(artist.heroUrl, artist.userHeroUrl),
-                now: shownPicture(data.heroUrl || artist.heroUrl, data.userHeroUrl || artist.userHeroUrl),
+    for (const { model, found, own } of PICTURES) {
+        const rows = await rowsOf(model).findMany({
+            where: { OR: [coverAddressWhere(found, relativePath), coverAddressWhere(own, relativePath)] },
+            select: { id: true, [found]: true, [own]: true },
+        });
+        for (const row of rows) {
+            const data: Record<string, string> = {};
+            if (points(row[found])) data[found] = value;
+            if (points(row[own])) data[own] = value;
+            const keys = Object.keys(data).length;
+            if (keys === 0) continue;
+            await rowsOf(model).update({ where: { id: row.id }, data });
+            notePictureChange(model, row.id as string, {
+                was: shownPicture(row[found], row[own]),
+                now: shownPicture(data[found] ?? row[found], data[own] ?? row[own]),
             });
             written += keys;
         }
@@ -113,36 +110,29 @@ export async function rewriteCoverValues(
 /** The versions stored values carry, by the path under the covers folder they name (a value with no version adds none). */
 export async function storedVersions(): Promise<Map<string, Set<string>>> {
     const found = new Map<string, Set<string>>();
-    const add = (values: (string | null)[]) => {
-        for (const value of values) {
+    for (const { model, column } of ADDRESS_COLUMNS) {
+        for (const value of await valuesOf(model, column, { [column]: { startsWith: "native:", contains: "?v=" } })) {
             const cover = parseStoredCover(value);
             if (!cover?.version) continue;
             const known = found.get(cover.relativePath) ?? new Set<string>();
             known.add(cover.version);
             found.set(cover.relativePath, known);
         }
-    };
-    const where = (column: string) => ({ [column]: { startsWith: "native:", contains: "?v=" } });
-    add((await prisma.album.findMany({ where: where("coverUrl"), distinct: ["coverUrl"], select: { coverUrl: true } })).map((r) => r.coverUrl));
-    add((await prisma.album.findMany({ where: where("userCoverUrl"), distinct: ["userCoverUrl"], select: { userCoverUrl: true } })).map((r) => r.userCoverUrl));
-    add((await prisma.artist.findMany({ where: where("heroUrl"), distinct: ["heroUrl"], select: { heroUrl: true } })).map((r) => r.heroUrl));
-    add((await prisma.artist.findMany({ where: where("userHeroUrl"), distinct: ["userHeroUrl"], select: { userHeroUrl: true } })).map((r) => r.userHeroUrl));
+    }
     return found;
 }
 
 /** Every distinct stored address, in any column, that has no version yet. */
 async function unversionedValues(): Promise<string[]> {
-    // Unversioned, or a root-folder cover (no folder in its name) that is to be filed under albums/ whether versioned or not.
-    const where = (column: string) => ({
-        [column]: { startsWith: "native:" },
-        OR: [{ NOT: { [column]: { contains: "?v=" } } }, { NOT: { [column]: { contains: "/" } } }],
-    });
     const found = new Set<string>();
-    const add = (values: (string | null)[]) => values.forEach((v) => v && found.add(v));
-    add((await prisma.album.findMany({ where: where("coverUrl"), distinct: ["coverUrl"], select: { coverUrl: true } })).map((r) => r.coverUrl));
-    add((await prisma.album.findMany({ where: where("userCoverUrl"), distinct: ["userCoverUrl"], select: { userCoverUrl: true } })).map((r) => r.userCoverUrl));
-    add((await prisma.artist.findMany({ where: where("heroUrl"), distinct: ["heroUrl"], select: { heroUrl: true } })).map((r) => r.heroUrl));
-    add((await prisma.artist.findMany({ where: where("userHeroUrl"), distinct: ["userHeroUrl"], select: { userHeroUrl: true } })).map((r) => r.userHeroUrl));
+    for (const { model, column } of ADDRESS_COLUMNS) {
+        // Unversioned, or a root-folder cover (no folder in its name) that is to be filed under albums/ whether versioned or not.
+        const where = {
+            [column]: { startsWith: "native:" },
+            OR: [{ NOT: { [column]: { contains: "?v=" } } }, { NOT: { [column]: { contains: "/" } } }],
+        };
+        for (const value of await valuesOf(model, column, where)) found.add(value);
+    }
     return [...found];
 }
 

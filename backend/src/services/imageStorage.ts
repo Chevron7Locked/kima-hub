@@ -55,6 +55,22 @@ export function parseStoredCover(value: string | null | undefined): { relativePa
 }
 
 /**
+ * A database filter for the rows whose `column` holds the stored cover at `relativePath`, with any version or none. The
+ * one place the shape of a versioned address is known to a query.
+ */
+export function coverAddressWhere<C extends string>(
+    column: C,
+    relativePath: string,
+): { OR: [{ [K in C]: string }, { [K in C]: { startsWith: string } }] } {
+    return {
+        OR: [
+            { [column]: `native:${relativePath}` } as { [K in C]: string },
+            { [column]: { startsWith: `native:${relativePath}?v=` } } as { [K in C]: { startsWith: string } },
+        ],
+    };
+}
+
+/**
  * The address clients load an audiobook's cover from, or null when the book has none. Its version is the digest of the
  * picture, taken when the sync stores the cover, so the address changes when the picture does and not when the book is
  * synced again. A book with no stored version yet (its cover is only at Audiobookshelf) has an address without one.

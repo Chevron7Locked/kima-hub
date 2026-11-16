@@ -6,7 +6,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
-import { parseStoredCover } from "./imageStorage";
+import { coverAddressWhere } from "./imageStorage";
 
 const albumTrackFields = {
     id: true,
@@ -50,8 +50,8 @@ function publicTrack(track: TrackRow) {
     };
 }
 
-/** Whether `coverArtId` is the cover of an album the share holds: the song's album, the shared album, or the album of a playable song in the shared playlist. */
-export async function shareHoldsCover(share: { entityType: string; entityId: string }, coverArtId: string): Promise<boolean> {
+/** Whether the stored cover at `relativePath` (under the covers folder, whatever its version) is the cover of an album the share holds: the song's album, the shared album, or the album of a playable song in the shared playlist. */
+export async function shareHoldsCover(share: { entityType: string; entityId: string }, relativePath: string): Promise<boolean> {
     const { entityType, entityId } = share;
     const holds: Prisma.AlbumWhereInput | null =
         entityType === "track" ? { tracks: { some: { id: entityId, ...PLAYABLE_SONG } } }
@@ -59,12 +59,8 @@ export async function shareHoldsCover(share: { entityType: string; entityId: str
         : entityType === "playlist" ? { tracks: { some: { ...PLAYABLE_SONG, playlistItems: { some: { playlistId: entityId } } } } }
         : null;
     if (!holds) return false;
-    // The cover's file, whatever version either address carries: a page loaded before the cover was stored again still asks by the old one.
-    const stored = parseStoredCover(coverArtId);
-    const sameCover: Prisma.AlbumWhereInput = stored
-        ? { OR: [{ coverUrl: `native:${stored.relativePath}` }, { coverUrl: { startsWith: `native:${stored.relativePath}?v=` } }] }
-        : { coverUrl: coverArtId };
-    const album = await prisma.album.findFirst({ where: { AND: [sameCover, holds] }, select: { id: true } });
+    // A page loaded before the cover was stored again still asks by the old version.
+    const album = await prisma.album.findFirst({ where: { AND: [coverAddressWhere("coverUrl", relativePath), holds] }, select: { id: true } });
     return album !== null;
 }
 

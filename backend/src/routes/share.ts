@@ -195,18 +195,10 @@ router.get("/:token/cover-art/:coverArtId", shareCoverLimiter, async (req: Reque
         const { coverArtId } = req.params;
         const size = req.query.size as string | undefined;
 
-        if (!coverArtId.startsWith("native:")) {
-            return res.status(404).json({ error: "Cover art not found" });
-        }
-
         // A share shows only its own content: any other cover, an artist picture or another album's, is not found.
-        if (!(await shareHoldsCover(shareLink, coverArtId))) {
-            return res.status(404).json({ error: "Cover art not found" });
-        }
-
-        const localPath = getLocalImagePath(coverArtId);
         const stored = parseStoredCover(coverArtId);
-        if (!localPath || !stored) {
+        const localPath = stored && getLocalImagePath(coverArtId);
+        if (!stored || !localPath || !(await shareHoldsCover(shareLink, stored.relativePath))) {
             return res.status(404).json({ error: "Cover art not found" });
         }
 
