@@ -1051,6 +1051,80 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
             }
         });
 
+        it('lets a request that lost the window to its own listener join the play, so a first request that then fails cannot give back a play it is streaming', async () => {
+            const { token } = await own({ maxPlays: 1 });
+            const stall = stallCounting();
+            // Both requests look for the listener's window before either has taken it, and so both find none.
+            const realGet = redisClient.get.bind(redisClient) as (key: string) => Promise<string | null>;
+            const answers: Array<() => void> = [];
+            let bothLooked!: () => void;
+            const looked = new Promise<void>((resolve) => (bothLooked = resolve));
+            let lookups = 0;
+            const look = jest.spyOn(redisClient, 'get').mockImplementation(((key: string) => {
+                if (!key.startsWith('share:play:') || ++lookups > 2) return realGet(key);
+                return realGet(key).then((value) => new Promise<string | null>((resolve) => {
+                    answers.push(() => resolve(value));
+                    if (answers.length === 2) bothLooked();
+                }));
+            }) as never);
+            // The request that streams first is the one that did not take the window; the one that did takes its turn after it, and fails.
+            const real = AudioStreamingService.prototype.streamFileWithRangeSupport;
+            let turn = 0;
+            let streamed!: () => void;
+            const heard = new Promise<void>((resolve) => (streamed = resolve));
+            const streaming = jest.spyOn(AudioStreamingService.prototype, 'streamFileWithRangeSupport').mockImplementation(async function (this: AudioStreamingService, ...args) {
+                if (++turn === 1) return real.apply(this, args).then(streamed);
+                args[1].status(500).end();
+            });
+            const server = http.createServer(app).listen(0);
+            try {
+                const { port } = server.address() as AddressInfo;
+                const listen = () => over(port, `/share/${token}/stream/${songs.playable}`).then(drain);
+                const requests = [listen(), listen()];
+                await looked;
+                answers[0]();
+                await stall.stalled;
+                answers[1]();
+                await heard;
+                stall.release();
+
+                expect((await Promise.all(requests)).sort()).toEqual([200, 500]);
+                await settleShareBackgroundWork();
+            } finally {
+                stall.release();
+                stall.restore();
+                look.mockRestore();
+                streaming.mockRestore();
+                server.closeAllConnections();
+                server.close();
+            }
+
+            // The play it streamed is the one counted, and the failing request leaves it be.
+            expect(await playsOf(token)).toBe(1);
+        }, 15_000);
+
+        it('asks the listener to try again, and streams nothing, when its play can neither be joined nor taken', async () => {
+            const { token } = await own({ maxPlays: 1 });
+            // The window is never there to join, and never free to take: every look finds none and every take loses.
+            const realGet = redisClient.get.bind(redisClient) as (key: string) => Promise<string | null>;
+            const look = jest.spyOn(redisClient, 'get').mockImplementation(((key: string) => (key.startsWith('share:play:') ? Promise.resolve(null) : realGet(key))) as never);
+            const realSet = redisClient.set.bind(redisClient) as (...args: unknown[]) => Promise<unknown>;
+            const take = jest.spyOn(redisClient, 'set').mockImplementation(((...args: unknown[]) => (String(args[0]).startsWith('share:play:') ? Promise.resolve(null) : realSet(...args))) as never);
+            const streaming = jest.spyOn(AudioStreamingService.prototype, 'streamFileWithRangeSupport');
+            try {
+                const res = await request(app).get(`/share/${token}/stream/${songs.playable}`).set('User-Agent', 'one-listener');
+                await settleShareBackgroundWork();
+
+                expect([res.status, res.headers['retry-after']]).toEqual([503, '1']);
+                expect(streaming).not.toHaveBeenCalled();
+            } finally {
+                look.mockRestore();
+                take.mockRestore();
+                streaming.mockRestore();
+            }
+            expect(await playsOf(token)).toBe(0);
+        });
+
         describe('a first request that fails while a seek of the same play is open', () => {
             it('leaves the window and the play to the seek that is using them', async () => {
                 const long = await longSong('long3', 12);

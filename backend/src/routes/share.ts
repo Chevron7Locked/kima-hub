@@ -171,6 +171,8 @@ redis.call("del", KEYS[3])
 return redis.call("del", KEYS[1])`;
 
 const PLAY_WINDOW_MS = PLAY_WINDOW_SECONDS * 1000;
+/** How often a request looks for its listener's window and tries to take it, before it streams without one. */
+const PLAY_JOIN_TURNS = 3;
 const openCountKey = (token: string) => `share:open:${token}`;
 const playedKey = (token: string) => `share:played:${token}`;
 
@@ -600,44 +602,54 @@ router.get("/:token/stream/:trackId", shareStreamLimiter, async (req: Request, r
 
         // Only a request that will be answered with audio reaches the window: one that is refused above (not in the share,
         // not playable, no file) neither joins a play nor keeps its window alive.
-        //
         watchAudio(res);
         // A listener's follow-up requests (a seek, the next range) belong to a play already counted for that listener: they
         // are not a new play, and the limit, which that play may just have reached, does not apply to them. Expiry still
         // does. Another listener's play is not this one's: it has its own window.
-        const joined = await joinCountedPlay(playKey);
-        if (joined) {
-            // Watched from the moment it is counted open, so every way this request ends leaves the count.
-            keepPlayOnlyIfStreamStarts(res, shareLink.id, joined);
-            keepWindowWhileOpen(res, joined);
-        } else {
+        // A request that finds no window and then loses the taking of it to another request of the same listener belongs to
+        // that play: it looks again and joins, so it is counted open and watched like any follow-up. A look finds the window
+        // the take lost to, unless that has ended meanwhile, so a few turns are enough.
+        let inPlay = false;
+        for (let turn = 0; turn < PLAY_JOIN_TURNS && !inPlay; turn++) {
+            const joined = await joinCountedPlay(playKey);
+            if (joined) {
+                // Watched from the moment it is counted open, so every way this request ends leaves the count.
+                keepPlayOnlyIfStreamStarts(res, shareLink.id, joined);
+                keepWindowWhileOpen(res, joined);
+                inPlay = true;
+                continue;
+            }
             if (outOfPlays(shareLink)) {
                 return sendEnded(res, "play-limit");
             }
             // A listener who has gone takes no window and counts no play: there is nobody to answer.
             if (!listenerThere(res)) return;
-            // The first request of a listener's play takes the window and counts it. A request that finds the window taken
-            // belongs to that play: two requests of one listener arriving together are one play.
+            // The first request of a listener's play takes the window and counts it.
             const claim = await claimPlayWindow(playKey);
-            if (claim) {
-                await openResponse(claim);
-                let counted: boolean;
-                try {
-                    counted = await countPlay(shareLink.id);
-                } catch (error) {
-                    // The play was not counted, so the window it took must not let the listener's next request play free.
-                    await leaveUncountedPlay(claim);
-                    await releasePlayWindow(claim);
-                    throw error;
-                }
-                if (!counted) {
-                    await leaveUncountedPlay(claim);
-                    await releasePlayWindow(claim);
-                    return sendEnded(res, "play-limit");
-                }
-                keepPlayOnlyIfStreamStarts(res, shareLink.id, claim);
-                keepWindowWhileOpen(res, claim);
+            // The window was taken first by another request of this listener: two requests arriving together are one play.
+            if (!claim) continue;
+            await openResponse(claim);
+            let counted: boolean;
+            try {
+                counted = await countPlay(shareLink.id);
+            } catch (error) {
+                // The play was not counted, so the window it took must not let the listener's next request play free.
+                await leaveUncountedPlay(claim);
+                await releasePlayWindow(claim);
+                throw error;
             }
+            if (!counted) {
+                await leaveUncountedPlay(claim);
+                await releasePlayWindow(claim);
+                return sendEnded(res, "play-limit");
+            }
+            keepPlayOnlyIfStreamStarts(res, shareLink.id, claim);
+            keepWindowWhileOpen(res, claim);
+            inPlay = true;
+        }
+        // Never streamed outside a play: an unwatched response would be a play that is not counted.
+        if (!inPlay) {
+            return res.status(503).set("Retry-After", "1").json({ error: "Could not start the play, try again" });
         }
 
         const mimeType = getMimeType(track.filePath);

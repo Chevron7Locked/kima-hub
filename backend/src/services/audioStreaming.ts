@@ -567,6 +567,12 @@ export class AudioStreamingService {
                 }
             }
 
+            // An empty file has nothing to play, and no byte range to read: it is not found, with a range or without.
+            if (fileSize === 0) {
+                res.status(404).json({ error: "Track not available" });
+                return;
+            }
+
             // Parse Range header
             const range = req.headers.range;
             let start = 0;
@@ -612,12 +618,6 @@ export class AudioStreamingService {
                 headers["Access-Control-Allow-Credentials"] = "true";
             }
 
-            // An empty file has nothing to play, and no byte range to read.
-            if (fileSize === 0) {
-                res.status(404).json({ error: "Track not available" });
-                return;
-            }
-
             // Opened before any header is set, so a file gone by now is still a plain not-found.
             handle = await fsPromises.open(filePath, "r");
             // A listener who left during the open is past the close event the stream would be destroyed on.
@@ -642,13 +642,7 @@ export class AudioStreamingService {
             // Handle stream errors
             stream.on("error", (err) => {
                 logger.error(`[AudioStreaming] Stream error for ${filePath}:`, err);
-                if (!res.headersSent) {
-                    res.status(500).end();
-                } else {
-                    // Part of the file went out: a pipe does not end its target on error, so without this the
-                    // listener waits on a response that never finishes. Closing the connection tells the player.
-                    res.destroy(err);
-                }
+                failStream(res, err);
             });
 
             // Handle cleanup on response close
@@ -661,13 +655,14 @@ export class AudioStreamingService {
         } catch (err) {
             await handle?.close().catch(() => {});
             if (isFileGone(err)) {
-                if (!res.headersSent) res.status(404).json({ error: "Track not available" });
+                if (!res.headersSent) {
+                    dropAudioHeaders(res);
+                    res.status(404).json({ error: "Track not available" });
+                }
                 return;
             }
             logger.error(`[AudioStreaming] Failed to stream ${filePath}:`, err);
-            if (!res.headersSent) {
-                res.status(500).end();
-            }
+            failStream(res, err);
         }
     }
 
@@ -680,6 +675,27 @@ export class AudioStreamingService {
             this.evictionInterval = null;
         }
     }
+}
+
+/** What a stream sets for the audio it is about to send (see `headers` in streamFileWithRangeSupport): none of it describes an error answer. */
+const AUDIO_HEADERS = ["Content-Type", "Accept-Ranges", "Content-Length", "Content-Range", "ETag", "Last-Modified"];
+
+function dropAudioHeaders(res: Response): void {
+    for (const name of AUDIO_HEADERS) res.removeHeader(name);
+}
+
+/**
+ * A stream failed. Before any byte went out the listener gets a plain 500 without the audio's own headers (a Content-Length
+ * for a body that never comes leaves a client waiting on it); once part of the file went out a pipe does not end its target
+ * on error, so the connection is closed, which tells the player.
+ */
+function failStream(res: Response, err: unknown): void {
+    if (res.headersSent) {
+        res.destroy(err instanceof Error ? err : undefined);
+        return;
+    }
+    dropAudioHeaders(res);
+    res.status(500).end();
 }
 
 let singletonInstance: AudioStreamingService | null = null;

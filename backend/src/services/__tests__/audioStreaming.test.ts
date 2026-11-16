@@ -107,6 +107,11 @@ function makeRes() {
         return this;
     };
 
+    (through as any).removeHeader = function(name: string) {
+        delete state.headers[name];
+        return this;
+    };
+
     const origEnd = through.end.bind(through);
     (through as any).end = function(...args: any[]) {
         state.ended = true;
@@ -299,6 +304,8 @@ describe("streamFileWithRangeSupport for a file that is gone", () => {
             const res: any = { headersSent: false, statusCode: 0, body: undefined };
             res.status = (code: number) => ((res.statusCode = code), res);
             res.json = (body: unknown) => ((res.body = body), res);
+            res.set = () => res;
+            res.removeHeader = () => res;
             res.end = () => res;
             return res;
         };
@@ -313,6 +320,11 @@ describe("streamFileWithRangeSupport for a file that is gone", () => {
             fs.writeFileSync(emptyFile, "");
             await svc.streamFileWithRangeSupport({ headers: {} } as any, empty, emptyFile, "audio/flac");
             expect(empty.statusCode).toBe(404);
+
+            // A range on it is no different: there is nothing to play, not a range that cannot be satisfied.
+            const emptyRanged = answer();
+            await svc.streamFileWithRangeSupport({ headers: { range: "bytes=0-" } } as any, emptyRanged, emptyFile, "audio/flac");
+            expect(emptyRanged.statusCode).toBe(404);
 
             const denied = answer();
             jest.spyOn(fs.promises, "stat").mockRejectedValueOnce(Object.assign(new Error("no"), { code: "EACCES" }));
@@ -533,6 +545,22 @@ describe("streamFileWithRangeSupport caching and failure", () => {
         expect(res._status).toBe(500);
         expect(res._ended).toBe(true);
         expect(res.destroyed).toBe(false);
+    });
+
+    it("sends none of the audio's own headers with a 500 that comes before any audio, a range request's included", async () => {
+        const res = makeRes();
+        failingAfterFirstChunk(res, false);
+
+        await svc.streamFileWithRangeSupport(makeReq({ range: "bytes=0-9" }), res, filePath, "audio/mpeg", { cacheControl: "private, no-store" });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        expect(res._status).toBe(500);
+        const sent = Object.keys(res._headers);
+        for (const name of ["Content-Length", "Content-Range", "Content-Type", "ETag", "Accept-Ranges", "Last-Modified"]) {
+            expect([name, sent.includes(name)]).toEqual([name, false]);
+        }
+        // How the answer is cached is still the caller's.
+        expect(res._headers["Cache-Control"]).toBe("private, no-store");
     });
 });
 
