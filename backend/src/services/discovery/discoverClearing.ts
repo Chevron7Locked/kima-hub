@@ -13,7 +13,7 @@ import { artistNamed, isMbid } from "../artistIdentity";
 import { updateArtistCounts } from "../artistCountsService";
 import { markLibraryChangedQuietly } from "../libraryChanged";
 import { notificationService } from "../notificationService";
-import { announcePlaylistsChanged, playlistsHoldingTracks } from "../playlistEvents";
+import { deleteAlbums } from "../library/albumDelete";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "../../routes/library/trackPath";
 import { removeDiscoveryAlbum } from "./lidarrRemoval";
 import { NameIndex, RUNNING_BATCH, couldBeArtist, sameArtist, sameName } from "./discoverEvidence";
@@ -167,29 +167,16 @@ async function deleteAlbumFiles(albumId: string): Promise<{ failed: string } | n
     return null;
 }
 
-/** The songs' Discover records, playlist entries, songs and album, in one transaction; playlists are told after it. */
+/**
+ * The suggestion's song records, then the album when it is Discover's (never a library album) with what goes with it
+ * (library/albumDelete.ts), in one transaction.
+ */
 async function deleteAlbumRows(albumId: string | null, suggestionId: string | null): Promise<void> {
-    const { playlists, artistId } = await prisma.$transaction(async (tx) => {
-        const album = albumId
-            ? await tx.album.findFirst({ where: { id: albumId, location: "DISCOVER" }, include: { tracks: { select: { id: true } } } })
-            : null;
-        const trackIds = album?.tracks.map((t) => t.id) ?? [];
-        const owners = [...(suggestionId ? [{ discoveryAlbumId: suggestionId }] : []), ...(trackIds.length ? [{ trackId: { in: trackIds } }] : [])];
-        if (owners.length > 0) await tx.discoveryTrack.deleteMany({ where: { OR: owners } });
-        if (!album) return { playlists: [], artistId: null };
-        // The songs' playlist entries go with them: told once the transaction commits.
-        const holding = await playlistsHoldingTracks(tx, { albumId: album.id });
-        await tx.track.deleteMany({ where: { albumId: album.id } });
-        await tx.album.delete({ where: { id: album.id } });
-        return { playlists: holding, artistId: album.artistId };
+    const deleted = await prisma.$transaction(async (tx) => {
+        if (suggestionId) await tx.discoveryTrack.deleteMany({ where: { discoveryAlbumId: suggestionId } });
+        return deleteAlbums(albumId ? [albumId] : [], { within: tx, only: "DISCOVER" });
     });
-    announcePlaylistsChanged(playlists);
-    if (artistId) {
-        // The album is gone either way; a recount that fails is caught up by the next scan's.
-        await updateArtistCounts(artistId).catch((error) =>
-            logger.warn("[DiscoverClear] Artist counts not updated after clearing an album:", error),
-        );
-    }
+    await deleted.settle();
 }
 
 /**
