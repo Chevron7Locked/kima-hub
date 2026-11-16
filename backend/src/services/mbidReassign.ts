@@ -136,6 +136,22 @@ export async function moveOwnership(tx: MoveClient, oldRgMbid: string, newRgMbid
     }
 }
 
+/** One artist's ownership of an album id becomes another's; on a clash the more protective source stays. */
+export async function moveOwnerArtist(tx: Pick<MoveClient, "ownedAlbum">, fromArtistId: string, toArtistId: string, rgMbid: string): Promise<void> {
+    if (fromArtistId === toArtistId) return;
+    const row = await tx.ownedAlbum.findUnique({ where: { artistId_rgMbid: { artistId: fromArtistId, rgMbid } } });
+    if (!row) return;
+    const clash = await tx.ownedAlbum.findUnique({ where: { artistId_rgMbid: { artistId: toArtistId, rgMbid } } });
+    if (clash) {
+        if (ownershipRank(row.source) < ownershipRank(clash.source)) {
+            await tx.ownedAlbum.update({ where: { artistId_rgMbid: { artistId: toArtistId, rgMbid } }, data: { source: row.source } });
+        }
+        await tx.ownedAlbum.delete({ where: { artistId_rgMbid: { artistId: fromArtistId, rgMbid } } });
+    } else {
+        await tx.ownedAlbum.update({ where: { artistId_rgMbid: { artistId: fromArtistId, rgMbid } }, data: { artistId: toArtistId } });
+    }
+}
+
 /**
  * DiscoveryAlbum rows move to the new id. Rows whose (userId, weekStartDate, newRgMbid) slot is
  * taken are left and logged, since a unique violation would abort the transaction; a racing

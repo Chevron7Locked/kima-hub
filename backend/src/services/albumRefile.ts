@@ -13,7 +13,7 @@ import { canonicalizeVariousArtists, isPlaceholderArtistName } from "../utils/ar
 import { albumIdentityKey } from "./albumIdentity";
 import { artistIdentityKey, artistSortName, normalizeArtistName, resolveArtist } from "./artistIdentity";
 import { albumFolder, electAlbumArtist, fileCredit, isOldCut, type ArtistCandidate, type FileCredit } from "./albumArtistVote";
-import { moveAlbumRgMbid, moveDiscoverExclusions, moveDiscoveryAlbums, moveOwnership, ownershipRank } from "./mbidReassign";
+import { moveAlbumRgMbid, moveDiscoverExclusions, moveDiscoveryAlbums, moveOwnerArtist, moveOwnership } from "./mbidReassign";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
 import { artistIsListed, markLibraryChangedQuietly } from "./libraryChanged";
 import { PLAYABLE_SONG } from "../utils/playableSong";
@@ -295,7 +295,7 @@ async function restoreCutName(mbid: string, filesName: string): Promise<string |
                 }
                 // Every ownership record of the twin, with an album row or not.
                 for (const owned of await tx.ownedAlbum.findMany({ where: { artistId: twin.id }, select: { rgMbid: true } })) {
-                    await rekeyOwner(tx, twin.id, current.id, owned.rgMbid);
+                    await moveOwnerArtist(tx, twin.id, current.id, owned.rgMbid);
                 }
                 await tx.artist.delete({ where: { id: twin.id } });
             }
@@ -379,7 +379,7 @@ async function refileAlbum(
                         data: { artistId: target.id, title, identityKey, sortName: artistSortName(title) },
                         select: ALBUM_FIELDS,
                     });
-                    await rekeyOwner(tx, best.artistId, target.id, best.rgMbid);
+                    await moveOwnerArtist(tx, best.artistId, target.id, best.rgMbid);
                     outcome = "moved";
                 } else {
                     gained = true;
@@ -461,22 +461,6 @@ async function retireIfEmpty(tx: Tx, staleRow: AlbumRow, staleKeeper: AlbumRow, 
         await moveDiscoverExclusions(tx, row.rgMbid, survivor.rgMbid);
     }
     // The row's own artist's ownership becomes the target's.
-    await rekeyOwner(tx, row.artistId, targetArtistId, survivor.rgMbid);
+    await moveOwnerArtist(tx, row.artistId, targetArtistId, survivor.rgMbid);
     return survivor;
-}
-
-/** One artist's ownership of an album id becomes another's; on a clash the more protective source stays. */
-async function rekeyOwner(tx: Tx, fromArtistId: string, toArtistId: string, rgMbid: string): Promise<void> {
-    if (fromArtistId === toArtistId) return;
-    const row = await tx.ownedAlbum.findUnique({ where: { artistId_rgMbid: { artistId: fromArtistId, rgMbid } } });
-    if (!row) return;
-    const clash = await tx.ownedAlbum.findUnique({ where: { artistId_rgMbid: { artistId: toArtistId, rgMbid } } });
-    if (clash) {
-        if (ownershipRank(row.source) < ownershipRank(clash.source)) {
-            await tx.ownedAlbum.update({ where: { artistId_rgMbid: { artistId: toArtistId, rgMbid } }, data: { source: row.source } });
-        }
-        await tx.ownedAlbum.delete({ where: { artistId_rgMbid: { artistId: fromArtistId, rgMbid } } });
-    } else {
-        await tx.ownedAlbum.update({ where: { artistId_rgMbid: { artistId: fromArtistId, rgMbid } }, data: { artistId: toArtistId } });
-    }
 }
