@@ -445,7 +445,7 @@ async function retireIfEmpty(
     targetArtistId: string,
     afterCommit: Settle[],
 ): Promise<AlbumRow> {
-    await tx.$queryRaw`SELECT id FROM "Album" WHERE id IN (${staleRow.id}, ${staleKeeper.id}) FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Album" WHERE id IN (${staleRow.id}, ${staleKeeper.id}) ORDER BY id FOR UPDATE`;
     // As they are now that they are locked: enrichment may have changed an id or a cover meanwhile.
     const keeper = await tx.album.findUniqueOrThrow({ where: { id: staleKeeper.id }, select: ALBUM_FIELDS });
     const row = await tx.album.findUnique({ where: { id: staleRow.id }, select: ALBUM_FIELDS });
@@ -499,6 +499,9 @@ export async function mergeArtistInto(
 ): Promise<{ merged: boolean; kept: number; afterCommit: Settle[] }> {
     const afterCommit: Settle[] = [];
     const closed = (row: AlbumRow) => row.location !== "LIBRARY" || row.hasUserOverrides;
+    // Locks in the order a scan takes them (artists, then albums, each by id), before any album moves.
+    await tx.$queryRaw`SELECT id FROM "Artist" WHERE id IN (${fromArtistId}, ${toArtistId}) ORDER BY id FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Album" WHERE "artistId" = ${fromArtistId} ORDER BY id FOR UPDATE`;
     const rows = await tx.album.findMany({ where: { artistId: fromArtistId }, select: ALBUM_FIELDS });
     for (const row of rows) {
         const same = await tx.album.findUnique({ where: { artistId_identityKey: { artistId: toArtistId, identityKey: row.identityKey } }, select: ALBUM_FIELDS });

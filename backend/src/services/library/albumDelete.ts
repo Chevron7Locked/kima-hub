@@ -26,8 +26,9 @@
  *
  * Out of this module: the song files and folders (their callers know the music root and what they may touch), and
  * what a deleted album's plays and likes become (the plays go with the songs, as the database does it). Every delete
- * locks the album and artist rows it removes before it reads them (artists first, then albums, each in id order), so
- * a scan filing a song into an album or an album under an artist waits for the commit and then files fresh. Where a
+ * of albums or artists locks the rows it removes before it reads them (an artist's row, then its albums', each batch in
+ * id order), so a scan filing a song into an album or an album under an artist waits for the commit and then files
+ * fresh. `deleteSongs` locks its songs' albums before it deletes the songs. Where a
  * caller lists the albums or artists to delete earlier than it deletes them (the prune), `onlyEmpty` also asks again
  * under the lock at the delete, so a song or album a scan added in between is never deleted.
  *
@@ -182,6 +183,9 @@ export async function deleteSongs(
             });
             if (rows.length === 0) continue;
             const songIds = rows.map((row) => row.id);
+            // The albums are locked before their songs change (the order a scan takes them), so a scan holding an album
+            // and wanting one of these songs never meets this delete holding the song and wanting the album.
+            await tx.$queryRaw`SELECT id FROM "Album" WHERE id = ANY(${[...new Set(rows.map((row) => row.albumId))]}::text[]) ORDER BY id FOR UPDATE`;
             if (!owed.listed) {
                 owed.listed = (await tx.track.findFirst({ where: { AND: [PLAYABLE_SONG, { id: { in: songIds } }] }, select: { id: true } })) !== null;
             }
