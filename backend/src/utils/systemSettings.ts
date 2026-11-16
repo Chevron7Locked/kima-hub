@@ -82,7 +82,7 @@ export async function getSystemSettings() {
 /**
  * Reads plain (not credential) fields straight from the row, past the cache. For a value that another process may have
  * just changed and that the caller acts on at once: the sign-up gate (an admin closing registration must take effect
- * now, not when the cache next expires) and the library change marker (a stale one makes a client miss a change). Null before
+ * now, not when the cache next expires) and the library change marker a client compares (a stale one makes it miss a change; search keys its own cached answers by the cached marker instead, libraryChangedAtCached). Null before
  * the row exists.
  */
 export async function readSystemSettingsFresh<F extends Exclude<keyof SystemSettings, EncryptedField>>(
