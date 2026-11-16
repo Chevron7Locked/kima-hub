@@ -142,6 +142,19 @@ describe("GET /audiobooks/:id/cover", () => {
         fs.rmSync(inside);
     });
 
+    it("serves a cover file found for an id that names no audiobook, recording nothing", async () => {
+        const stray = path.join(MUSIC, "cover-cache", "audiobooks", "cover_rt_stray.jpg");
+        fs.mkdirSync(path.dirname(stray), { recursive: true });
+        fs.writeFileSync(stray, "a cover with no book");
+
+        const res = await request(app).get("/cover_rt_stray/cover");
+
+        expect(res.status).toBe(200);
+        expect(res.body.toString()).toBe("a cover with no book");
+        expect(await prisma.audiobook.count({ where: { id: "cover_rt_stray" } })).toBe(0);
+        fs.rmSync(stray);
+    });
+
     it("asks the client to revalidate a stored cover, so a changed cover is sent again and an unchanged one is not", async () => {
         const inside = path.join(MUSIC, "cover-cache", "audiobooks", `${BOOK}.jpg`);
         fs.mkdirSync(path.dirname(inside), { recursive: true });
@@ -235,6 +248,20 @@ describe("GET /audiobooks/:id/cover", () => {
                 expect(res.headers["cache-control"]).toBe("public, max-age=300");
             },
         );
+
+        it("is a 404 when Audiobookshelf does not answer within ten seconds, so a stalled upstream cannot hold the request", async () => {
+            expectLog("error");
+            const timeout = jest.spyOn(AbortSignal, "timeout").mockReturnValue(AbortSignal.abort(new DOMException("timed out", "TimeoutError")));
+            // Like a stalled server: with no signal the call never settles; with an aborted one it rejects, as fetch does.
+            fetchSpy = jest.spyOn(global, "fetch").mockImplementation(((_url: unknown, init?: RequestInit) =>
+                init?.signal?.aborted ? Promise.reject(init.signal.reason) : new Promise(() => undefined)) as typeof fetch);
+
+            const res = await request(app).get(`/${BOOK}/cover`).timeout(3000);
+
+            expect(res.status).toBe(404);
+            expect(timeout).toHaveBeenCalledWith(10_000);
+            timeout.mockRestore();
+        });
 
         it("is a 404 when what comes back is over the size cap", async () => {
             expectLog("warn");

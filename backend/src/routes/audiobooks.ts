@@ -370,6 +370,8 @@ async function proxyAudiobookshelfCover(req: Request, res: Response, id: string,
     try {
         const response = await fetch(`${baseUrl}/api/${coverUrl}`, {
             headers: { Authorization: `Bearer ${settings.audiobookshelfApiKey}` },
+            // The route is public: a stalled Audiobookshelf must not hold the request, or its socket, open.
+            signal: AbortSignal.timeout(10_000),
         });
         if (!response.ok) {
             await response.body?.cancel().catch(() => undefined);
@@ -428,12 +430,11 @@ router.get("/:id/cover/:version([A-Za-z0-9_-]+)?", async (req, res) => {
                 coverPath = fallbackPath;
                 // Update database with the correct path, and the version the addresses sent from now on carry
                 const coverVersion = await versionOfFile(fallbackPath);
-                await prisma.audiobook
-                    .update({
-                        where: { id },
-                        data: { localCoverPath: fallbackPath, coverVersion },
-                    })
-                    .catch(() => {}); // Ignore errors if audiobook doesn't exist
+                // The id is the caller's and may name no book: `updateMany` writes nothing then.
+                await prisma.audiobook.updateMany({
+                    where: { id },
+                    data: { localCoverPath: fallbackPath, coverVersion },
+                });
             }
         }
 

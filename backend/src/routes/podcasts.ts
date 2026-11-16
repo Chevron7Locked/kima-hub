@@ -218,9 +218,9 @@ async function answerChart(req: Request, res: Response, category: number | null,
 
 /** GET /podcasts/charts?category=<id>&limit&offset — Apple's chart for a category, the overall chart without one. */
 router.get("/charts", (req, res) => {
-    // An empty or blank category is malformed, not category 0: Number("") is 0, which would reach the 404.
+    // A blank or half-numeric category (`wholeNumber` answers NaN) is malformed, not category 0 or 16.
     const given = req.query.category;
-    const category = given === undefined ? null : typeof given === "string" && given.trim() !== "" ? Number(given) : NaN;
+    const category = given === undefined ? null : wholeNumber(given);
     return answerChart(req, res, category, req.query, "Error fetching podcast chart");
 });
 
@@ -322,7 +322,7 @@ router.get("/discover/genres", async (req, res) => {
 
 /** GET /podcasts/discover/genre/:genreId?limit&offset — one category's chart, as /charts (kept for the iOS app). */
 router.get("/discover/genre/:genreId", (req, res) =>
-    answerChart(req, res, Number(req.params.genreId), req.query, "Error fetching paginated genre podcasts"),
+    answerChart(req, res, wholeNumber(req.params.genreId), req.query, "Error fetching paginated genre podcasts"),
 );
 
 // Apple (iTunes) ids are numbers. Anything else (Kima's own podcast id, which the podcast page falls back to) is not

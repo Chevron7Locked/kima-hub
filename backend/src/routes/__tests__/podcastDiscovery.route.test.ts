@@ -81,6 +81,11 @@ it("refuses a category that is not an id", async () => {
     expect((await request(app).get("/podcasts/charts?category=comedy")).status).toBe(400);
 });
 
+it.each(["0x10", "1e1", "1.0", "+5", "5abc", ""])("refuses a category id written as %p: only a whole number is one", async (written) => {
+    expect((await request(app).get(`/podcasts/charts?category=${encodeURIComponent(written)}`)).status).toBe(400);
+    expect((await request(app).get(`/podcasts/discover/genre/${encodeURIComponent(written || " ")}`)).status).toBe(400);
+});
+
 it("answers the discover top and genres endpoints from the charts", async () => {
     const top = await request(app).get("/podcasts/discover/top?limit=3");
     expect(top.status).toBe(200);
