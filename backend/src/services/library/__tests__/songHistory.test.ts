@@ -14,10 +14,10 @@ const REC = "11111111-1111-4111-8111-111111111111";
 const REC2 = "22222222-2222-4222-8222-222222222222";
 
 async function clear(): Promise<void> {
+    await prisma.play.deleteMany({ where: { userId: { in: [id("user"), id("user2")] } } });
     await prisma.shareLink.deleteMany({ where: { token: { startsWith: P } } });
     await prisma.playlist.deleteMany({ where: { userId: id("user") } });
     await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
-    await prisma.play.deleteMany({ where: { userId: { in: [id("user"), id("user2")] } } });
 }
 
 async function artist(n: string, name = `${P}${n}`): Promise<string> {
@@ -598,5 +598,47 @@ describe("a delete honours the play-history lock of the listeners whose plays it
             repair.release();
             await repair.done;
         }
+    });
+});
+
+describe("a play has its song or a kept title", () => {
+    it("refuses a play with neither", async () => {
+        await expect(
+            prisma.$executeRaw`INSERT INTO "Play" (id, "userId", "trackId", "playedAt") VALUES (${id("orphan")}, ${id("user")}, NULL, now())`,
+        ).rejects.toThrow(/Play_has_song_or_kept_title/);
+    });
+
+    it("refuses to take the song from a play that kept nothing", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {} });
+        await play("gone");
+
+        await expect(prisma.$executeRaw`UPDATE "Play" SET "trackId" = NULL WHERE "trackId" = ${id("gone")}`).rejects.toThrow(
+            /Play_has_song_or_kept_title/,
+        );
+        expect(await playsOf("gone")).toBe(1);
+    });
+
+    it("fails a delete that went around the delete module, and leaves the song and its play where they were", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {} });
+        await play("gone");
+
+        await expect(prisma.$executeRaw`DELETE FROM "Track" WHERE id = ${id("gone")}`).rejects.toThrow(/Play_has_song_or_kept_title/);
+
+        expect(await prisma.track.count({ where: { id: id("gone") } })).toBe(1);
+        expect(await playsOf("gone")).toBe(1);
+    });
+
+    it("lets the delete module keep a play past its song, and adoption give it a song again", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {} });
+        await play("gone");
+        await deleteSongs([id("gone")]);
+        expect(await kept()).toHaveLength(1);
+
+        await album("back", a, "LIBRARY", { returned: {} });
+        expect(await adoptKeptPlays()).toBe(1);
+        expect(await playsOf("returned")).toBe(1);
     });
 });
