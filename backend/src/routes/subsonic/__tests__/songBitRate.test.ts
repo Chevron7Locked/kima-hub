@@ -6,7 +6,7 @@
 import { mapSong, type TrackRow } from "../mappers";
 import { isLosslessCodec } from "../../../utils/audioCodec";
 
-const album = { id: "alb", title: "Album", displayTitle: null, year: null };
+const album = { id: "alb", title: "Album", displayTitle: null, year: null, originalYear: null, displayYear: null };
 const bitRate = (mime: string | null, bitrate: number | null = null) => {
     const track: TrackRow = { id: "t", title: "T", displayTitle: null, trackNo: 1, discNumber: null, duration: 200, filePath: "/m/t", mime, bitrate, fileSize: 1 };
     return mapSong(track, album, "Artist", "art")["@_bitRate"];

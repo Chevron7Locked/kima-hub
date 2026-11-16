@@ -33,6 +33,7 @@ import { parseLimit, parseOffset } from "./library/paging";
 import { wholeNumber } from "../utils/wholeNumber";
 import { isWebAddress } from "../utils/webAddress";
 import { getMergedGenres } from "../utils/metadataOverrides";
+import { getEffectiveYear } from "../utils/dateFilters";
 
 const router = Router();
 
@@ -119,7 +120,7 @@ const TRACK_EDIT_REPLY = {
 } as const;
 
 /**
- * The names (and, for an artist or album, the picture, and for an artist its genres) a row shows, read inside the transaction `tx` with the row held
+ * The names (and, for an artist or album, the picture and genres, and for an album its year) a row shows, read inside the transaction `tx` with the row held
  * until it ends. A plain read would let a second edit that overlaps this one pass between the read and the write, and
  * "did what is shown change" would be judged against a value that is already gone. Null when the row does not exist.
  */
@@ -132,9 +133,14 @@ async function lockedArtistShown(tx: Prisma.TransactionClient, id: string) {
 }
 /** The genres an artist shows, in order, as one comparable text: the person's list when set, else the enriched one. */
 const genresShown = (artist: { genres?: unknown; userGenres?: unknown }): string => JSON.stringify(getMergedGenres(artist));
+/** An album's year columns and genre lists, as the shown year and genres are judged from them. */
+type AlbumYearGenres = { year: number | null; originalYear: number | null; displayYear: number | null; genres: unknown; userGenres: unknown };
+/** The year an album shows: `displayYear ?? originalYear ?? year`, none as null. */
+const yearShown = (album: AlbumYearGenres): number | null => getEffectiveYear(album) || null;
 async function lockedAlbumShown(tx: Prisma.TransactionClient, id: string) {
-  const rows = await tx.$queryRaw<Array<{ title: string; displayTitle: string | null; coverUrl: string | null; userCoverUrl: string | null }>>`
-    SELECT "title", "displayTitle", "coverUrl", "userCoverUrl" FROM "Album" WHERE "id" = ${id} FOR UPDATE`;
+  const rows = await tx.$queryRaw<Array<{ title: string; displayTitle: string | null; coverUrl: string | null; userCoverUrl: string | null } & AlbumYearGenres>>`
+    SELECT "title", "displayTitle", "coverUrl", "userCoverUrl", "year", "originalYear", "displayYear", "genres", "userGenres"
+      FROM "Album" WHERE "id" = ${id} FOR UPDATE`;
   return rows[0] ?? null;
 }
 async function lockedTrackTitles(tx: Prisma.TransactionClient, id: string) {
@@ -634,11 +640,15 @@ router.put("/albums/:id/metadata", async (req, res) => {
       });
       if (moved) forgetOwnedIndex();
 
-      // Only a shown title or cover that changed is a change to what a client lists.
+      // Only a shown title, cover, year or genre list that changed is a change to what a client lists.
       if (before && (album.displayTitle || album.title) !== (before.displayTitle || before.title)) {
         await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's title edit");
       } else if (before && (album.userCoverUrl || album.coverUrl) !== (before.userCoverUrl || before.coverUrl)) {
         await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's cover edit");
+      } else if (before && yearShown(album) !== yearShown(before)) {
+        await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's year edit");
+      } else if (before && genresShown(album) !== genresShown(before)) {
+        await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's genre edit");
       }
       res.json(album);
     } catch (error) {
@@ -802,9 +812,11 @@ router.post("/albums/:id/reset", async (req, res) => {
     }
     const { existingAlbum, album } = done;
 
-    // Only a shown title or cover that changed back is a change to what a client lists.
+    // Only a shown title, cover, year or genre list that changed back is a change to what a client lists.
     if ((existingAlbum.displayTitle || existingAlbum.title) !== existingAlbum.title) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's title reset");
     else if ((existingAlbum.userCoverUrl || existingAlbum.coverUrl) !== existingAlbum.coverUrl) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's cover reset");
+    else if (yearShown(existingAlbum) !== yearShown({ ...existingAlbum, displayYear: null })) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's year reset");
+    else if (genresShown(existingAlbum) !== genresShown({ genres: existingAlbum.genres, userGenres: [] })) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's genre reset");
     res.json({
       message: "Album metadata reset to original values",
       album,

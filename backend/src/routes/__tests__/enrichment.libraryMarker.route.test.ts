@@ -5,6 +5,7 @@
  * no name a client shows. Real router, real admin token, real database and the real marker.
  */
 import express from "express";
+import type { Prisma } from "@prisma/client";
 import request from "supertest";
 import router from "../enrichment";
 import { prisma } from "../../utils/db";
@@ -113,7 +114,7 @@ describe("editing a shown name", () => {
     it("leaves the marker when an edit sends no name", async () => {
         const s = await seed("nn", "playable", false);
         expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { bio: "text" }))).toBe(false);
-        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { year: 1999 }))).toBe(false);
+        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { rgMbid: "22222222-2222-4222-8222-222222222222" }))).toBe(false);
         // A new MusicBrainz id changes no name a client lists.
         expect(await markerMoves(() => put(`/enrichment/artists/${s.artist}/metadata`, { mbid: "11111111-1111-4111-8111-111111111111" }))).toBe(false);
     });
@@ -392,7 +393,7 @@ describe("an artist's picture left in the cache", () => {
 /**
  * The genres a client lists for an artist are the ones a person set when they set any, else the enriched ones (getMergedGenres),
  * in that order: Subsonic's getGenres, its genre filters and the genre on every song, album and artist read them. An
- * album's own genre list and its year are shown to no Subsonic client, so editing either moves nothing.
+ * album's own genres and year are the next describe.
  */
 describe("editing or resetting the genres an artist shows", () => {
     const withGenres = async (key: string, kind: Kind, genres: string[], userGenres: string[]) => {
@@ -459,10 +460,80 @@ describe("editing or resetting the genres an artist shows", () => {
         expect(other).toEqual({ moved: true, status: 200 });
     });
 
-    it("leaves the marker for an album's own genres and year, which no client shows", async () => {
-        const s = await seed("gna", "playable", false);
-        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { genres: ["Jazz"] }))).toBe(false);
-        expect(await markerMoves(() => put(`/enrichment/albums/${s.album}/metadata`, { year: 1999 }))).toBe(false);
+});
+
+/**
+ * An album shows the year `displayYear ?? originalYear ?? year` and its own merged genres (the person's list when set, else the
+ * enriched one) to Subsonic clients, so an edit or a reset that changes either moves the marker, and one that does not
+ * (a year under a displayYear or an originalYear, a repeat) does not.
+ */
+describe("editing or resetting the year and genres an album shows", () => {
+    const withAlbum = async (key: string, kind: Kind, data: Prisma.AlbumUpdateInput) => {
+        const s = await seed(key, kind, false);
+        await prisma.album.update({ where: { id: s.album }, data });
+        return s;
+    };
+    const editAlbum = (id: string, body: Record<string, unknown>) => put(`/enrichment/albums/${id}/metadata`, body);
+
+    it("moves the marker when an edit changes the year shown", async () => {
+        const s = await withAlbum("yr", "playable", { year: 2005 });
+        expect(await markerMoves(() => editAlbum(s.album, { year: 1999 }))).toBe(true);
+        expect(await markerMoves(() => editAlbum(s.album, { year: 2001 }))).toBe(true);
+        // Clearing the person's year brings the stored one back.
+        expect(await markerMoves(() => editAlbum(s.album, { year: null }))).toBe(true);
+    });
+
+    it("leaves the marker when the year shown stays the same", async () => {
+        const s = await withAlbum("yrs", "playable", { year: 2005 });
+        // A year equal to the one showing; a repeat; a clear of nothing.
+        expect(await markerMoves(() => editAlbum(s.album, { year: 2005 }))).toBe(false);
+        expect(await markerMoves(() => editAlbum(s.album, { year: 2005 }))).toBe(false);
+        expect(await markerMoves(() => editAlbum(s.album, { year: null }))).toBe(false);
+    });
+
+    it("judges the year by what is shown: an original year under the person's, or over the file's", async () => {
+        const s = await withAlbum("yro", "playable", { year: 2005, originalYear: 1990 });
+        // 1990 shows already.
+        expect(await markerMoves(() => editAlbum(s.album, { year: 1990 }))).toBe(false);
+        expect(await markerMoves(() => editAlbum(s.album, { year: 1975 }))).toBe(true);
+        // Clearing brings back 1990, which differs from 1975.
+        expect(await markerMoves(() => editAlbum(s.album, { year: null }))).toBe(true);
+    });
+
+    it("moves the marker when an edit changes the genres shown, and not when they stay", async () => {
+        const s = await withAlbum("agn", "playable", { genres: ["Rock"] });
+        expect(await markerMoves(() => editAlbum(s.album, { genres: ["Jazz"] }))).toBe(true);
+        expect(await markerMoves(() => editAlbum(s.album, { genres: ["Blues", "Jazz"] }))).toBe(true);
+        expect(await markerMoves(() => editAlbum(s.album, { genres: ["Jazz", "Blues"] }))).toBe(true);
+        expect(await markerMoves(() => editAlbum(s.album, { genres: ["Jazz", "Blues"] }))).toBe(false);
+        expect(await markerMoves(() => editAlbum(s.album, { genres: null }))).toBe(true);
+        expect(await markerMoves(() => editAlbum(s.album, { genres: null }))).toBe(false);
+
+        const same = await withAlbum("agns", "playable", { genres: ["Rock", "Pop"] });
+        expect(await markerMoves(() => editAlbum(same.album, { genres: ["Rock", "Pop"] }))).toBe(false);
+    });
+
+    it("moves the marker when a reset takes the person's year or genres away and what shows differs, and not otherwise", async () => {
+        const s = await withAlbum("ar", "playable", { year: 2005, displayYear: 1975, genres: ["Rock"], userGenres: ["Jazz"] });
+        expect(await markerMoves(() => post(`/enrichment/albums/${s.album}/reset`))).toBe(true);
+        const after = await prisma.album.findUniqueOrThrow({ where: { id: s.album } });
+        expect(after.displayYear).toBeNull();
+        expect(after.userGenres).toEqual([]);
+        expect(await markerMoves(() => post(`/enrichment/albums/${s.album}/reset`))).toBe(false);
+
+        const years = await withAlbum("ary", "playable", { year: 2005, displayYear: 1975 });
+        expect(await markerMoves(() => post(`/enrichment/albums/${years.album}/reset`))).toBe(true);
+        const genres = await withAlbum("arg", "playable", { genres: ["Rock"], userGenres: ["Jazz"] });
+        expect(await markerMoves(() => post(`/enrichment/albums/${genres.album}/reset`))).toBe(true);
+        // A year and genres that already equal what the reset brings back.
+        const same = await withAlbum("arsame", "playable", { year: 2005, displayYear: 2005, genres: ["Rock"], userGenres: ["Rock"] });
+        expect(await markerMoves(() => post(`/enrichment/albums/${same.album}/reset`))).toBe(false);
+    });
+
+    it.each(unlisted)("leaves the marker for an album that is not listed (%s)", async (kind) => {
+        const s = await withAlbum(`ayu${kind}`, kind, { year: 2005, genres: ["Rock"] });
+        expect(await markerMoves(() => editAlbum(s.album, { year: 1999 }))).toBe(false);
+        expect(await markerMoves(() => editAlbum(s.album, { genres: ["Jazz"] }))).toBe(false);
         expect(await markerMoves(() => post(`/enrichment/albums/${s.album}/reset`))).toBe(false);
         expect((await prisma.album.findUniqueOrThrow({ where: { id: s.album } })).displayYear).toBeNull();
     });

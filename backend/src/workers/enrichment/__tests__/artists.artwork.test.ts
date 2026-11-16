@@ -443,4 +443,56 @@ describe("the enrichment worker's found pictures and the library marker", () => 
         mockFindLocalArtistImage.mockResolvedValue("native:artists/folder.jpg");
         expect(await enrichAndFlush(await arrange("https://x/y.jpg", "LIBRARY", { heroUrl: "native:artists/folder.jpg" }))).toBe(false);
     });
+
+    describe("the genres it finds", () => {
+        const knownAs = (...names: string[]) =>
+            mockGetArtist.mockResolvedValue(
+                answeredWith({ name: "Perturbator", "sort-name": "Perturbator", aliases: [], genres: names.map((name, i) => ({ name, count: 10 - i })) }),
+            );
+        const setGenres = (data: { genres?: string[]; userGenres?: string[] }) => prisma.artist.update({ where: { id: `${P}1` }, data });
+
+        it("moves the marker when genres are found for an artist that had none", async () => {
+            knownAs("synthwave", "darksynth");
+            expect(await enrichAndFlush(await arrange("https://x/y.jpg"))).toBe(true);
+            expect((await stored(`${P}1`)).genres).toEqual(["synthwave", "darksynth"]);
+        });
+
+        it("moves the marker when the genres found differ from the ones stored, in list or order", async () => {
+            knownAs("darksynth", "synthwave");
+            const artist = await arrange("https://x/y.jpg");
+            await setGenres({ genres: ["synthwave", "darksynth"] });
+            expect(await enrichAndFlush(artist)).toBe(true);
+        });
+
+        it("leaves the marker when the genres found are the ones stored", async () => {
+            knownAs("synthwave", "darksynth");
+            const artist = await arrange("https://x/y.jpg");
+            await setGenres({ genres: ["synthwave", "darksynth"] });
+            expect(await enrichAndFlush(artist)).toBe(false);
+        });
+
+        it("leaves the marker when the person's own genres show either way", async () => {
+            knownAs("synthwave");
+            const artist = await arrange("https://x/y.jpg");
+            await setGenres({ userGenres: ["horrorsynth"] });
+            expect(await enrichAndFlush(artist)).toBe(false);
+        });
+
+        it("leaves the marker when no genres were found", async () => {
+            expect(await enrichAndFlush(await arrange("https://x/y.jpg"))).toBe(false);
+        });
+
+        it("leaves the marker for an artist no client lists (a Discover album only)", async () => {
+            knownAs("synthwave");
+            expect(await enrichAndFlush(await arrange("https://x/y.jpg", "DISCOVER"))).toBe(false);
+        });
+
+        it("moves the marker when dropping another artist's id takes the genres it brought away", async () => {
+            mockGetArtist.mockResolvedValue(answeredWith({ name: "Sam Cooke", "sort-name": "Cooke, Sam", aliases: [] }));
+            const artist = await arrange("https://x/y.jpg");
+            await setGenres({ genres: ["soul"] });
+            expect(await enrichAndFlush(await prisma.artist.findUniqueOrThrow({ where: { id: artist.id } }))).toBe(true);
+            expect((await stored(`${P}1`)).genres).toBeNull();
+        });
+    });
 });

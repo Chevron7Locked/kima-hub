@@ -284,3 +284,24 @@ describe("dataCache found pictures and the library marker", () => {
         expect(await flushed(() => dataCacheService.getArtistImage(`${P}albart`, "Brad Sucks", null))).toBe(false);
     });
 });
+
+/** An artist shows its own picture when one is set, else the found one: an emptied own picture ("") is not a picture. */
+describe("an emptied own artist picture", () => {
+    const HERO = "native:artists/found.jpg";
+    beforeEach(async () => {
+        jest.clearAllMocks();
+        await wipe();
+        mockFindArtistArtwork.mockResolvedValue(null);
+    });
+
+    it("shows the found picture on the artist page read", async () => {
+        await prisma.artist.create({ data: { id: ARTIST, name: "Soen", identityKey: ARTIST, heroUrl: HERO, userHeroUrl: "" } });
+        expect(await dataCacheService.getArtistImage(ARTIST, "Soen", null)).toBe(HERO);
+        expect(mockFindArtistArtwork).not.toHaveBeenCalled();
+    });
+
+    it("shows the found picture in a list", async () => {
+        const shown = await dataCacheService.getArtistImagesBatch([{ id: ARTIST, heroUrl: HERO, userHeroUrl: "" }]);
+        expect(shown.get(ARTIST)).toBe(HERO);
+    });
+});

@@ -33,7 +33,7 @@ class DataCacheService {
                 where: { id: artistId },
                 select: { heroUrl: true, userHeroUrl: true },
             });
-            const displayHeroUrl = artist?.userHeroUrl ?? artist?.heroUrl;
+            const displayHeroUrl = artist?.userHeroUrl || artist?.heroUrl;
             if (displayHeroUrl) {
                 // Also populate Redis for faster future reads
                 this.setRedisCache(cacheKey, displayHeroUrl, ARTIST_IMAGE_TTL);
@@ -169,7 +169,7 @@ class DataCacheService {
 
         // First, use any heroUrls/userHeroUrls already in the data (with override pattern)
         for (const artist of artists) {
-            const displayHeroUrl = artist.userHeroUrl ?? artist.heroUrl;
+            const displayHeroUrl = artist.userHeroUrl || artist.heroUrl;
             if (displayHeroUrl) {
                 results.set(artist.id, displayHeroUrl);
             }

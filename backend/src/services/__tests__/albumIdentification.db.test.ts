@@ -147,13 +147,48 @@ describe("identifyAlbumsBySound", () => {
 
     it("moves the library marker once when it stores a cover for a listed album, and not when the person's own cover shows", async () => {
         await seedAlbum();
+        // The year and genres it fills show nothing new here (the person set both), so only the cover can move the marker.
+        const ownYearAndGenres = { displayYear: 2014, userGenres: ["synthwave"] };
+        await prisma.album.update({ where: { id: id("alb") }, data: ownYearAndGenres });
         expect(await markerMoves(() => identifyAlbumsBySound([id("alb")]))).toBe(true);
 
         await cleanup();
         await clearRedis();
         await seedAlbum();
-        await prisma.album.update({ where: { id: id("alb") }, data: { userCoverUrl: "https://pictures.example/mine.jpg" } });
+        await prisma.album.update({ where: { id: id("alb") }, data: { ...ownYearAndGenres, userCoverUrl: "https://pictures.example/mine.jpg" } });
         expect(await markerMoves(() => identifyAlbumsBySound([id("alb")]))).toBe(false);
+    });
+
+    describe("the year and genres it fills, as a Subsonic client shows them", () => {
+        const ownCover = { userCoverUrl: "https://pictures.example/mine.jpg" };
+
+        it("moves the marker when the year it fills is the year shown", async () => {
+            await seedAlbum();
+            // Everything else the run changes is hidden behind the person's own values.
+            await prisma.album.update({ where: { id: id("alb") }, data: { ...ownCover, userGenres: ["synthwave"] } });
+            expect(await markerMoves(() => identifyAlbumsBySound([id("alb")]))).toBe(true);
+            expect((await album())?.year).toBe(2014);
+        });
+
+        it("leaves the marker when the year it fills is under the person's own year or the original year", async () => {
+            await seedAlbum();
+            await prisma.album.update({ where: { id: id("alb") }, data: { ...ownCover, userGenres: ["synthwave"], originalYear: 2010 } });
+            expect(await markerMoves(() => identifyAlbumsBySound([id("alb")]))).toBe(false);
+            expect((await album())?.year).toBe(2014);
+        });
+
+        it("moves the marker when the genres it fills are the genres shown", async () => {
+            await seedAlbum();
+            await prisma.album.update({ where: { id: id("alb") }, data: { ...ownCover, displayYear: 2014 } });
+            expect(await markerMoves(() => identifyAlbumsBySound([id("alb")]))).toBe(true);
+            expect((await album())?.genres).toEqual(["synthwave"]);
+        });
+
+        it("leaves the marker when the genres it fills are under the person's own list", async () => {
+            await seedAlbum();
+            await prisma.album.update({ where: { id: id("alb") }, data: { ...ownCover, displayYear: 2014, userGenres: ["horrorsynth"] } });
+            expect(await markerMoves(() => identifyAlbumsBySound([id("alb")]))).toBe(false);
+        });
     });
 
     it("decides an album once", async () => {

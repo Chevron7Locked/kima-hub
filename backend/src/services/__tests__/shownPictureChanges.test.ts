@@ -1,6 +1,6 @@
 /**
- * A found picture that replaces the one a client shows moves the library-changed marker once per window, and only when a
- * listed artist or album's shown picture really changed. Real database and the real marker.
+ * A found picture, year or genre list that replaces the one a client shows moves the library-changed marker once per window,
+ * and only when a listed artist or album's shown value really changed. Real database and the real marker.
  */
 import { prisma } from "../../utils/db";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -8,7 +8,15 @@ import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import * as libraryChanged from "../libraryChanged";
 import * as systemSettings from "../../utils/systemSettings";
-import { PICTURE_CHANGE_WINDOW_MS, flushShownPictureChanges, notePictureChange, rewritePictureColumn, shownPicture } from "../shownPictureChanges";
+import {
+    PICTURE_CHANGE_WINDOW_MS,
+    flushShownPictureChanges,
+    noteGenresChange,
+    notePictureChange,
+    noteYearChange,
+    rewritePictureColumn,
+    shownPicture,
+} from "../shownPictureChanges";
 
 jest.setTimeout(60_000);
 
@@ -128,6 +136,72 @@ describe("a found picture that changes what is shown", () => {
             for (let i = 0; i < 100 && (await libraryChanged.libraryChangedAt()) === before; i++) await new Promise((r) => setTimeout(r, 20));
         });
         expect(moved).toBe(true);
+    });
+});
+
+describe("a year that changes what is shown", () => {
+    it("moves the marker for a listed album whose shown year changed", async () => {
+        const s = await seed("y1", "playable");
+        expect(await flushedMoves(() => noteYearChange(s.album, { was: { year: null }, now: { year: 1999 } }))).toBe(true);
+        expect(await flushedMoves(() => noteYearChange(s.album, { was: { year: 2005 }, now: { year: 2006 } }))).toBe(true);
+    });
+
+    it.each(["discover", "missing", "corrupt"] as const)("leaves the marker when no client lists the album (%s)", async (kind) => {
+        const s = await seed(`yu${kind}`, kind);
+        expect(await flushedMoves(() => noteYearChange(s.album, { was: { year: null }, now: { year: 1999 } }))).toBe(false);
+    });
+
+    it("judges the year shown: an original or the person's year hides a change of the file's", async () => {
+        const s = await seed("y2", "playable");
+        expect(await flushedMoves(() => noteYearChange(s.album, { was: { year: null, originalYear: 1990 }, now: { year: 2005, originalYear: 1990 } }))).toBe(false);
+        expect(await flushedMoves(() => noteYearChange(s.album, { was: { year: null, displayYear: 1975 }, now: { year: 2005, displayYear: 1975 } }))).toBe(false);
+        expect(await flushedMoves(() => noteYearChange(s.album, { was: { year: 2005 }, now: { year: 2005 } }))).toBe(false);
+        // An original year found under a file's year shows a different one.
+        expect(await flushedMoves(() => noteYearChange(s.album, { was: { year: 2005 }, now: { year: 2005, originalYear: 1990 } }))).toBe(true);
+    });
+
+    it("leaves the marker when a year changed and changed back inside the window", async () => {
+        const s = await seed("y3", "playable");
+        expect(
+            await flushedMoves(() => {
+                noteYearChange(s.album, { was: { year: 2000 }, now: { year: 2001 } });
+                noteYearChange(s.album, { was: { year: 2001 }, now: { year: 2000 } });
+            }),
+        ).toBe(false);
+    });
+
+    it("keeps a picture note and a year note of one album apart", async () => {
+        const s = await seed("y4", "playable");
+        // The year goes there and back; the picture, noted on the same album, still changed.
+        expect(
+            await flushedMoves(() => {
+                noteYearChange(s.album, { was: { year: 2000 }, now: { year: 2001 } });
+                notePictureChange("album", s.album, { was: null, now: pic("p") });
+                noteYearChange(s.album, { was: { year: 2001 }, now: { year: 2000 } });
+            }),
+        ).toBe(true);
+    });
+});
+
+describe("genres that change what is shown", () => {
+    it("moves the marker for a listed artist or album whose merged genres changed", async () => {
+        const s = await seed("g1", "playable");
+        expect(await flushedMoves(() => noteGenresChange("artist", s.artist, { was: { genres: null }, now: { genres: ["rock"] } }))).toBe(true);
+        expect(await flushedMoves(() => noteGenresChange("album", s.album, { was: { genres: ["rock"] }, now: { genres: ["rock", "pop"] } }))).toBe(true);
+        expect(await flushedMoves(() => noteGenresChange("artist", s.artist, { was: { genres: ["rock", "pop"] }, now: { genres: ["pop", "rock"] } }))).toBe(true);
+    });
+
+    it("leaves the marker when the list shown stays the same, or the person's own list shows either way", async () => {
+        const s = await seed("g2", "playable");
+        expect(await flushedMoves(() => noteGenresChange("artist", s.artist, { was: { genres: ["rock"] }, now: { genres: ["rock"] } }))).toBe(false);
+        expect(await flushedMoves(() => noteGenresChange("artist", s.artist, { was: { genres: null }, now: { genres: [] } }))).toBe(false);
+        expect(await flushedMoves(() => noteGenresChange("artist", s.artist, { was: { genres: ["a"], userGenres: ["mine"] }, now: { genres: ["b"], userGenres: ["mine"] } }))).toBe(false);
+    });
+
+    it.each(["discover", "missing", "corrupt"] as const)("leaves the marker when no client lists the artist or album (%s)", async (kind) => {
+        const s = await seed(`gu${kind}`, kind);
+        expect(await flushedMoves(() => noteGenresChange("artist", s.artist, { was: { genres: null }, now: { genres: ["rock"] } }))).toBe(false);
+        expect(await flushedMoves(() => noteGenresChange("album", s.album, { was: { genres: null }, now: { genres: ["rock"] } }))).toBe(false);
     });
 });
 

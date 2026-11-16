@@ -40,7 +40,7 @@ import { enrichmentFailureService } from "../../services/enrichmentFailureServic
 import { artistQueue, createWorkerConnection, QUEUE_NAMES } from "../enrichmentQueues";
 import { entityGoneError, isEntityGone } from "../entityGone";
 import { getSystemSettings } from "../../utils/systemSettings";
-import { notePictureChange } from "../../services/shownPictureChanges";
+import { noteGenresChange, notePictureChange } from "../../services/shownPictureChanges";
 
 /** One MusicBrainz genre with its vote count. */
 type GenreVote = { name: string; count?: number };
@@ -82,6 +82,7 @@ async function dropMbidOfAnotherArtist(artist: Artist, logPrefix: string): Promi
     ]);
     forgetOwnedIndex();
     notePictureChange("artist", artist.id, { was: artist.heroUrl, now: localImage, own: artist.userHeroUrl });
+    noteGenresChange("artist", artist.id, { was: artist, now: { ...artist, genres: null } });
     artist.mbid = null;
     artist.summary = null;
     artist.heroUrl = localImage;
@@ -310,7 +311,7 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
         // But only if the file actually exists on disk
         const currentArtist = await prisma.artist.findUnique({
             where: { id: artist.id },
-            select: { heroUrl: true, userHeroUrl: true },
+            select: { heroUrl: true, userHeroUrl: true, genres: true, userGenres: true },
         });
         const finalHeroUrl = (currentArtist?.heroUrl && isNativePath(currentArtist.heroUrl) && nativeFileExists(currentArtist.heroUrl))
             ? currentArtist.heroUrl
@@ -333,6 +334,9 @@ export async function enrichSimilarArtist(artist: Artist): Promise<void> {
             },
         });
         notePictureChange("artist", artist.id, { was: currentArtist?.heroUrl, now: finalHeroUrl, own: currentArtist?.userHeroUrl });
+        if (currentArtist && genres.length > 0) {
+            noteGenresChange("artist", artist.id, { was: currentArtist, now: { ...currentArtist, genres } });
+        }
         if (!(similarFetchFailed || wikidataFailed || musicbrainzFailed || musicbrainzWaiting)) {
             // An earlier failure of this artist is answered now; the failures list stops counting it.
             await enrichmentFailureService.resolveByEntity("artist", artist.id);

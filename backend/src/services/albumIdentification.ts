@@ -16,7 +16,7 @@ import { albumIdentityKey, editionlessKey, isGenericAlbumTitle } from "./albumId
 import { NameIndex } from "./discovery/discoverEvidence";
 import { findAlbumArtwork } from "./artwork";
 import { LIBRARY_LOCATION } from "./libraryFilters";
-import { flushShownPictureChanges, notePictureChange } from "./shownPictureChanges";
+import { flushShownPictureChanges, noteGenresChange, notePictureChange, noteYearChange } from "./shownPictureChanges";
 import { DuplicateMbidError, reassignAlbumRgMbid } from "./mbidReassign";
 import { musicBrainzService, type AlbumCatalogue } from "./musicbrainz";
 import { sourcePauseController } from "./sourcePauseController";
@@ -94,12 +94,22 @@ export function albumFactsOf(catalogue: AlbumCatalogue): AlbumFacts {
     return { albumGenres: catalogue.genres, originalYear: catalogue.originalYear, label: catalogue.label };
 }
 
+/** The album columns `fillAlbumFromCatalogue` reads: what is stored, so it fills only blanks and notes what a client would see change. */
+export type AlbumToFill = {
+    id: string;
+    year: number | null;
+    originalYear: number | null;
+    displayYear: number | null;
+    label: string | null;
+    genres: Prisma.JsonValue;
+    userGenres: Prisma.JsonValue;
+};
+
 /** Fill the album's original year, label and top five genres, each only where
- * still blank, so scan tags and manual edits are never overwritten. */
-export async function fillAlbumFromCatalogue(
-    album: { id: string; year: number | null; label: string | null; genres: Prisma.JsonValue },
-    answer: AlbumFacts,
-): Promise<void> {
+ * still blank, so scan tags and manual edits are never overwritten. A year or genre list
+ * that changes what a client shows is noted for the library-changed marker
+ * (services/shownPictureChanges.ts); the caller flushes at the end of its run. */
+export async function fillAlbumFromCatalogue(album: AlbumToFill, answer: AlbumFacts): Promise<void> {
     const data: { year?: number; label?: string; genres?: string[] } = {};
     if (album.year == null && answer.originalYear != null) data.year = answer.originalYear;
     if (!album.label && answer.label) data.label = answer.label;
@@ -109,6 +119,8 @@ export async function fillAlbumFromCatalogue(
     }
     if (Object.keys(data).length > 0) {
         await prisma.album.update({ where: { id: album.id }, data });
+        if (data.year !== undefined) noteYearChange(album.id, { was: album, now: { ...album, year: data.year } });
+        if (data.genres) noteGenresChange("album", album.id, { was: album, now: { ...album, genres: data.genres } });
     }
 }
 
@@ -145,8 +157,11 @@ interface CandidateAlbum {
     artist: string;
     artistMbid: string | null;
     year: number | null;
+    originalYear: number | null;
+    displayYear: number | null;
     label: string | null;
     genres: Prisma.JsonValue;
+    userGenres: Prisma.JsonValue;
     coverUrl: string | null;
 }
 
@@ -156,7 +171,7 @@ interface CandidateAlbum {
  */
 function candidateAlbums(filter: Prisma.Sql, order: Prisma.Sql, limit: number): Promise<CandidateAlbum[]> {
     return prisma.$queryRaw<CandidateAlbum[]>`
-        SELECT a.id, a.title, a."rgMbid", a."artistId", ar.name AS artist, ar.mbid AS "artistMbid", a.year, a.label, a.genres, a."coverUrl",
+        SELECT a.id, a.title, a."rgMbid", a."artistId", ar.name AS artist, ar.mbid AS "artistMbid", a.year, a."originalYear", a."displayYear", a.label, a.genres, a."userGenres", a."coverUrl",
                (SELECT encode(sha256(convert_to(string_agg(
                            t.id || ':' || COALESCE(encode(sha256(convert_to(t."acoustidFingerprint", 'UTF8')), 'hex'), '-')
                                || ':' || (extract(epoch from t."fileModified") * 1000)::bigint::text,

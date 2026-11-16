@@ -2,6 +2,7 @@
  * Year filters. Precedence: displayYear (user override), then originalYear
  * (MusicBrainz first release), then year (file tags, may be a remaster).
  */
+import { Prisma } from "@prisma/client";
 
 /**
  * Get the effective year for an album, respecting override hierarchy.
@@ -35,3 +36,7 @@ export function getEffectiveDecadeWhereClause(decade: number) {
 export function getDecadeFromYear(year: number): number {
     return Math.floor(year / 10) * 10;
 }
+
+/** The effective year as a SQL expression, for an album table known as `alias` (a fixed name in the query, never input). */
+export const effectiveYearSql = (alias: string) =>
+    Prisma.sql`COALESCE(${Prisma.raw(`${alias}."displayYear"`)}, ${Prisma.raw(`${alias}."originalYear"`)}, ${Prisma.raw(`${alias}.year`)})`;

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { mapArtist, mapAlbum, mapAlbumChild, mapSong, coverArtId, artistPicture, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
+import { effectiveYearSql, getEffectiveYear } from "../../utils/dateFilters";
 import { LEADING_ARTICLES, unaccent } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
@@ -73,6 +74,14 @@ libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res
 
 // ===================== FOLDER BROWSING =====================
 
+/** An artist's albums by the year a client sees, newest first (no year last); a tie keeps the order the database gave. */
+function newestShownYearFirst<T extends { year: number | null; originalYear: number | null; displayYear: number | null }>(albums: T[]): T[] {
+    return albums
+        .map((album, order) => ({ album, order, year: getEffectiveYear(album) ?? -Infinity }))
+        .sort((a, b) => b.year - a.year || a.order - b.order)
+        .map((x) => x.album);
+}
+
 libraryRouter.all("/getArtist.view", wrap(async (req, res) => {
     const id = one(req, "id");
     if (!id) {
@@ -84,7 +93,7 @@ libraryRouter.all("/getArtist.view", wrap(async (req, res) => {
         include: {
             albums: {
                 where: { tracks: { some: PLAYABLE_SONG } },
-                orderBy: { year: "desc" },
+                orderBy: [{ sortName: "asc" }, { id: "asc" }],
                 include: {
                     _count: { select: { tracks: { where: PLAYABLE_SONG } } },
                 },
@@ -100,7 +109,7 @@ libraryRouter.all("/getArtist.view", wrap(async (req, res) => {
     subsonicOk(req, res, {
         artist: {
             ...mapArtist({ ...artist, albumCount: artist.albums.length }),
-            album: artist.albums.map((al) =>
+            album: newestShownYearFirst(artist.albums).map((al) =>
                 mapAlbum({ ...al, songCount: al._count.tracks, genre }, artistName)
             ),
         },
@@ -155,13 +164,14 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
         include: {
             albums: {
                 where: { tracks: { some: PLAYABLE_SONG } },
-                orderBy: { year: "desc" },
+                orderBy: [{ sortName: "asc" }, { id: "asc" }],
             },
         },
     });
 
     if (artist) {
         const artistName = artist.displayName || artist.name;
+        const genre = firstArtistGenre(artist.genres, artist.userGenres);
         return subsonicOk(req, res, {
             directory: {
                 "@_id": artist.id,
@@ -169,7 +179,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
                 "@_name": artistName,
                 ...(artist.albums.length > 0
                     ? {
-                          child: artist.albums.map((album) => mapAlbumChild(album, artistName)),
+                          child: newestShownYearFirst(artist.albums).map((album) => mapAlbumChild({ ...album, genre }, artistName)),
                       }
                     : {}),
             },
@@ -291,6 +301,10 @@ type AlbumWithArtist = {
     title: string;
     displayTitle: string | null;
     year: number | null;
+    originalYear: number | null;
+    displayYear: number | null;
+    genres: unknown;
+    userGenres: unknown;
     coverUrl: string | null;
     userCoverUrl: string | null;
     artistId: string;
@@ -311,7 +325,7 @@ type AlbumWithArtist = {
 // The four raw album-list queries read the same columns in the same row
 // shape; only the joins, filter and ordering differ.
 const ALBUM_LIST_SELECT = Prisma.sql`
-    SELECT a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
+    SELECT a.id, a.title, a."displayTitle", a.year, a."originalYear", a."displayYear", a.genres, a."userGenres", a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
            json_build_object('id', ar.id, 'name', ar.name, 'displayName', ar."displayName",
                'genres', ar.genres, 'userGenres', ar."userGenres") as artist,
            (SELECT COUNT(*)::int FROM "Track" t2 WHERE t2."albumId" = a.id AND ${playableSongSql("t2", "a")}) as "songCount",
@@ -373,19 +387,15 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
             if (isNaN(fromYear) || isNaN(toYear)) {
                 return subsonicError(req, res, SubsonicError.MISSING_PARAM, "byYear requires fromYear and toYear");
             }
-            albums = await prisma.album.findMany({
-                where: {
-                    year: {
-                        gte: Math.min(fromYear, toYear),
-                        lte: Math.max(fromYear, toYear),
-                    },
-                    tracks: { some: PLAYABLE_SONG },
-                },
-                orderBy: { year: fromYear <= toYear ? "asc" : "desc" },
-                take: size,
-                skip: offset,
-                include: albumInclude,
-            });
+            // The year a client sees, as the web shows it: displayYear, else originalYear, else year.
+            const shownYear = effectiveYearSql("a");
+            albums = await prisma.$queryRaw<AlbumWithArtist[]>(Prisma.sql`
+                ${ALBUM_LIST_SELECT}
+                WHERE ${shownYear} BETWEEN ${Math.min(fromYear, toYear)} AND ${Math.max(fromYear, toYear)}
+                  AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND ${playableSongSql("t", "a")})
+                ORDER BY ${shownYear} ${fromYear <= toYear ? Prisma.sql`ASC` : Prisma.sql`DESC`}, a."sortName" ASC, a.id ASC
+                LIMIT ${size} OFFSET ${offset}
+            `);
             break;
         }
 
@@ -444,7 +454,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                 JOIN "Track" t ON t."albumId" = a.id
                 JOIN p ON p."trackId" = t.id
                 WHERE EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
-                GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
+                GROUP BY a.id, a.title, a."displayTitle", a.year, a."originalYear", a."displayYear", a.genres, a."userGenres", a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
                          ar.id, ar.name, ar."displayName", ar.genres, ar."userGenres"
                 ORDER BY MAX(p."playedAt") DESC, a.id
                 LIMIT ${size} OFFSET ${offset}
@@ -460,7 +470,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                 JOIN "Track" t ON t."albumId" = a.id
                 JOIN p ON p."trackId" = t.id
                 WHERE EXISTS (SELECT 1 FROM "Track" t3 WHERE t3."albumId" = a.id AND ${playableSongSql("t3", "a")})
-                GROUP BY a.id, a.title, a."displayTitle", a.year, a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
+                GROUP BY a.id, a.title, a."displayTitle", a.year, a."originalYear", a."displayYear", a.genres, a."userGenres", a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
                          ar.id, ar.name, ar."displayName", ar.genres, ar."userGenres"
                 ORDER BY COUNT(p.id) DESC, a.id
                 LIMIT ${size} OFFSET ${offset}

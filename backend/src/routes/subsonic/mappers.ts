@@ -5,6 +5,7 @@ import { subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { parseStoredCover } from "../../services/imageStorage";
 import { isLosslessCodec } from "../../utils/audioCodec";
 import { isWebAddress } from "../../utils/webAddress";
+import { getEffectiveYear } from "../../utils/dateFilters";
 
 export type ArtistRow = {
     id: string;
@@ -20,7 +21,13 @@ export type AlbumRow = {
     id: string;
     title: string;
     displayTitle: string | null;
+    /** The three year columns are all required: the year a client sees is the one the web shows, `displayYear ?? originalYear ?? year`. */
     year: number | null;
+    originalYear: number | null;
+    displayYear: number | null;
+    /** The album's own genres: the person's list when set, else the enriched one. */
+    genres: unknown;
+    userGenres: unknown;
     coverUrl: string | null;
     userCoverUrl?: string | null;
     artistId: string;
@@ -28,8 +35,16 @@ export type AlbumRow = {
     createdAt: Date;
     songCount?: number;
     duration?: number;
+    /** The artist's genre: what an album with no genre of its own shows. */
     genre?: string | null;
 };
+
+/** The year a client sees for an album: what the web shows. Zero or none is no year. */
+export const shownAlbumYear = (album: { year: number | null; originalYear: number | null; displayYear: number | null }): number | undefined =>
+    getEffectiveYear(album) || undefined;
+
+/** The genre an album shows: the first of its own genres, else its artist's (`album.genre`). */
+const shownAlbumGenre = (album: AlbumRow): string | undefined => firstArtistGenre(album.genres, album.userGenres) ?? (album.genre || undefined);
 
 export type TrackRow = {
     id: string;
@@ -105,8 +120,8 @@ export function mapAlbum(album: AlbumRow, artistName: string) {
         "@_coverArt": albumCoverArtId(album),
         "@_songCount": album.songCount ?? 0,
         "@_duration": album.duration !== undefined ? Math.round(album.duration) : 0,
-        "@_year": album.year || undefined,
-        "@_genre": album.genre || undefined,
+        "@_year": shownAlbumYear(album),
+        "@_genre": shownAlbumGenre(album),
         "@_created": album.createdAt.toISOString(),
     };
 }
@@ -126,15 +141,15 @@ export function mapAlbumChild(album: AlbumRow, artistName: string) {
         "@_artist": artistName,
         "@_artistId": album.artistId,
         "@_coverArt": albumCoverArtId(album),
-        "@_year": album.year || undefined,
-        "@_genre": album.genre || undefined,
+        "@_year": shownAlbumYear(album),
+        "@_genre": shownAlbumGenre(album),
         "@_created": album.createdAt.toISOString(),
     };
 }
 
 export function mapSong(
     track: TrackRow,
-    album: { id: string; title: string; displayTitle: string | null; year: number | null; coverUrl?: string | null; userCoverUrl?: string | null },
+    album: { id: string; title: string; displayTitle: string | null; year: number | null; originalYear: number | null; displayYear: number | null; coverUrl?: string | null; userCoverUrl?: string | null },
     artistName: string,
     artistId: string,
     genre?: string | null
@@ -151,7 +166,7 @@ export function mapSong(
         "@_bitRate": track.bitrate ?? estimateBitrateFromMime(track.mime),
         "@_track": track.trackNo || undefined,
         "@_discNumber": track.discNumber ?? undefined,
-        "@_year": album.year || undefined,
+        "@_year": shownAlbumYear(album),
         "@_size": track.fileSize ?? undefined,
         "@_contentType": normalizeMime(track.mime) || "audio/mpeg",
         "@_suffix": mimeToSuffix(track.mime),

@@ -1,19 +1,23 @@
 /**
- * Tells Subsonic clients when a picture they show changed through no person's edit: a worker found an artist's picture, a
- * scan extracted an album's cover, a repair moved a stored picture to a new version. The shown picture is the one a person
- * set when they set one, else the found one (`userHeroUrl || heroUrl`, `userCoverUrl || coverUrl`), so a found picture that
- * lands under a person's own changes nothing a client shows. A person's own edit moves the marker in routes/enrichment.ts.
+ * Tells Subsonic clients when something they show changed through no person's edit: a worker found an artist's picture, a
+ * scan extracted an album's cover, a repair moved a stored picture to a new version, an enrichment filled an album's year or
+ * an artist's genres. What is shown is the person's own value when they set one, else the found one (`userHeroUrl ||
+ * heroUrl`, `userCoverUrl || coverUrl`, an album's `displayYear ?? originalYear ?? year`, the genres of `getMergedGenres`),
+ * so a found value that lands under a person's own changes nothing a client shows. A person's own edit moves the marker in
+ * routes/enrichment.ts.
  *
- * A writer calls `notePictureChange` with the picture it replaced and the one it stored. Notes gather for a quiet window
- * (`PICTURE_CHANGE_WINDOW_MS`, from the first note of a run) and then move the library-changed marker once, and only when
- * at least one noted picture really changed what is shown and belongs to an artist or album a client lists
- * (services/libraryChanged.ts). A run that touches a thousand pictures costs one marker, not a thousand; a run longer than
- * the window costs one per window. A note is held in memory: a process that stops inside the window forgets it, and a
- * marker write that fails (logged) drops the notes it was for; either way the client sees the new picture at the next
- * change of the library.
+ * A writer calls `notePictureChange`, `noteYearChange` or `noteGenresChange` with what it replaced and what it stored. Notes
+ * gather for a quiet window (`PICTURE_CHANGE_WINDOW_MS`, from the first note of a run) and then move the library-changed
+ * marker once, and only when at least one noted value really changed what is shown and belongs to an artist or album a
+ * client lists (services/libraryChanged.ts). A run that touches a thousand rows costs one marker, not a thousand; a run
+ * longer than the window costs one per window. A batch writer, and each enrichment cycle, flushes at its end. A note is held
+ * in memory: a process that stops inside the window forgets it, and a marker write that fails (logged) drops the notes it was
+ * for; either way the client sees the new value at the next change of the library.
  */
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
+import { getEffectiveYear } from "../utils/dateFilters";
+import { getMergedGenres } from "../utils/metadataOverrides";
 import { anyAlbumIsListed, anyArtistIsListed, markLibraryChangedIfListed } from "./libraryChanged";
 
 export const PICTURE_CHANGE_WINDOW_MS = 15_000;
@@ -26,8 +30,12 @@ export type PictureKind = "artist" | "album";
 /** The picture an artist or album shows: the person's own when set, else the found one; null for none. */
 export const shownPicture = (found: string | null | undefined, own: string | null | undefined): string | null => own || found || null;
 
+/** What one note is about: a row's shown picture, an album's shown year, or the genres a row shows. */
+type Field = "picture" | "year" | "genres";
+
 interface Noted {
     kind: PictureKind;
+    field: Field;
     id: string;
     was: string | null;
     now: string | null;
@@ -35,6 +43,23 @@ interface Noted {
 
 let pending = new Map<string, Noted>();
 let timer: NodeJS.Timeout | null = null;
+
+function note(kind: PictureKind, field: Field, id: string, was: string | null, now: string | null): void {
+    const key = `${kind}:${field}:${id}`;
+    const earlier = pending.get(key);
+    // Two changes of one value in a window are judged as one: from what it showed before the first to what it shows now.
+    const noted: Noted = { kind, field, id, was: earlier ? earlier.was : was, now };
+    if (!earlier && was === now) return;
+    pending.set(key, noted);
+    if (!timer) {
+        timer = setTimeout(() => {
+            timer = null;
+            void flushShownPictureChanges();
+        }, PICTURE_CHANGE_WINDOW_MS);
+        // A pending note never keeps a process alive: shutdown does not wait for the window.
+        timer.unref();
+    }
+}
 
 /**
  * A found picture was stored for an artist (`kind` "artist": `heroUrl`) or album (`coverUrl`): `was` is the found one it
@@ -46,22 +71,25 @@ export function notePictureChange(
     id: string,
     change: { was: string | null | undefined; now: string | null | undefined; own?: string | null },
 ): void {
-    const was = shownPicture(change.was, change.own);
-    const now = shownPicture(change.now, change.own);
-    const key = `${kind}:${id}`;
-    const earlier = pending.get(key);
-    // Two changes of one picture in a window are judged as one: from what it showed before the first to what it shows now.
-    const noted: Noted = { kind, id, was: earlier ? earlier.was : was, now };
-    if (!earlier && was === now) return;
-    pending.set(key, noted);
-    if (!timer) {
-        timer = setTimeout(() => {
-            timer = null;
-            void flushShownPictureChanges();
-        }, PICTURE_CHANGE_WINDOW_MS);
-        // A pending note never keeps a process alive: shutdown does not wait for the window.
-        timer.unref();
-    }
+    note(kind, "picture", id, shownPicture(change.was, change.own), shownPicture(change.now, change.own));
+}
+
+/** The three year columns of an album, as stored. */
+export type AlbumYears = { displayYear?: number | null; originalYear?: number | null; year?: number | null };
+
+/** An album's year columns changed (an enrichment filled one): noted when the year shown, `displayYear ?? originalYear ?? year`, differs. */
+export function noteYearChange(albumId: string, change: { was: AlbumYears; now: AlbumYears }): void {
+    const shown = (years: AlbumYears) => (getEffectiveYear(years) || null)?.toString() ?? null;
+    note("album", "year", albumId, shown(change.was), shown(change.now));
+}
+
+/** The two genre lists of an artist or album, as stored. */
+export type GenreLists = { genres?: unknown; userGenres?: unknown };
+
+/** An artist's or album's genre lists changed: noted when the merged list shown (the person's, else the enriched), compared whole and in order, differs. */
+export function noteGenresChange(kind: PictureKind, id: string, change: { was: GenreLists; now: GenreLists }): void {
+    const shown = (lists: GenreLists) => JSON.stringify(getMergedGenres(lists));
+    note(kind, "genres", id, shown(change.was), shown(change.now));
 }
 
 /** Moves the marker now for the notes held, when any of them shows a client something new. Waits for the marker. */
@@ -75,18 +103,18 @@ export async function flushShownPictureChanges(): Promise<void> {
     if (noted.length === 0) return;
 
     const listed = async (kind: PictureKind, anyListed: (ids: string[]) => Promise<boolean>) => {
-        const ids = noted.filter((n) => n.kind === kind).map((n) => n.id);
+        const ids = [...new Set(noted.filter((n) => n.kind === kind).map((n) => n.id))];
         for (let i = 0; i < ids.length; i += CHECK_SIZE) if (await anyListed(ids.slice(i, i + CHECK_SIZE))) return true;
         return false;
     };
     try {
         await markLibraryChangedIfListed(
             async () => (await listed("artist", anyArtistIsListed)) || (await listed("album", anyAlbumIsListed)),
-            "found pictures changed",
+            "shown details found",
         );
     } catch (e) {
         // markLibraryChangedIfListed logs its own failures; this only keeps a run from failing over a marker.
-        logger.error("Failed to record found pictures changed:", e);
+        logger.error("Failed to record shown details found:", e);
     }
 }
 

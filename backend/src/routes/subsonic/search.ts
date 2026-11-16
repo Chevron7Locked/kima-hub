@@ -11,6 +11,7 @@ import { popularSongs } from "../../services/popularSongs";
 import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong, mapAlbum, mapAlbumChild, mapArtist } from "./mappers";
 import { libraryArtistIdsForGenre } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
+import { effectiveYearSql } from "../../utils/dateFilters";
 
 export const searchRouter = Router();
 
@@ -18,6 +19,7 @@ export const searchRouter = Router();
 const SONG_COLUMNS = Prisma.sql`
     t.id, t.title, t."displayTitle", t."trackNo", t."discNumber", t.duration, t.mime, t.bitrate, t."fileSize",
     al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
+    al."originalYear" AS "albumOriginalYear", al."displayYear" AS "albumDisplayYear",
     al."coverUrl" AS "albumCoverUrl", al."userCoverUrl" AS "albumUserCoverUrl",
     ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
     ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"`;
@@ -39,6 +41,8 @@ type SongRow = {
     albumTitle: string;
     albumDisplayTitle: string | null;
     albumYear: number | null;
+    albumOriginalYear: number | null;
+    albumDisplayYear: number | null;
     albumCoverUrl: string | null;
     albumUserCoverUrl: string | null;
     artistId: string;
@@ -67,6 +71,8 @@ function songOf(row: SongRow) {
             title: row.albumTitle,
             displayTitle: row.albumDisplayTitle,
             year: row.albumYear,
+            originalYear: row.albumOriginalYear,
+            displayYear: row.albumDisplayYear,
             coverUrl: row.albumCoverUrl,
             userCoverUrl: row.albumUserCoverUrl,
         },
@@ -91,6 +97,10 @@ type AlbumHit = {
     title: string;
     displayTitle: string | null;
     year: number | null;
+    originalYear: number | null;
+    displayYear: number | null;
+    genres: unknown;
+    userGenres: unknown;
     coverUrl: string | null;
     userCoverUrl: string | null;
     artistId: string;
@@ -107,7 +117,7 @@ type AlbumHit = {
 async function playableAlbumsInOrder(ids: string[]): Promise<AlbumHit[]> {
     if (ids.length === 0) return [];
     const rows = await prisma.$queryRaw<AlbumHit[]>`
-        SELECT al.id, al.title, al."displayTitle", al.year, al."coverUrl", al."userCoverUrl", al."artistId", al."createdAt",
+        SELECT al.id, al.title, al."displayTitle", al.year, al."originalYear", al."displayYear", al.genres, al."userGenres", al."coverUrl", al."userCoverUrl", al."artistId", al."createdAt",
                ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
                ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres",
                COUNT(t.id)::int AS "songCount", COALESCE(SUM(t.duration), 0)::float8 AS duration
@@ -273,15 +283,17 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
     const toYear = toYearRaw ? parseInt(toYearRaw, 10) : undefined;
 
     const whereConditions: Prisma.Sql[] = [PLAYABLE_SQL];
+    // The year a client sees, as the web shows it: displayYear, else originalYear, else year.
+    const shownYear = effectiveYearSql("al");
 
     if (fromYear !== undefined && !isNaN(fromYear) && toYear !== undefined && !isNaN(toYear)) {
         const lo = Math.min(fromYear, toYear);
         const hi = Math.max(fromYear, toYear);
-        whereConditions.push(Prisma.sql`al.year BETWEEN ${lo} AND ${hi}`);
+        whereConditions.push(Prisma.sql`${shownYear} BETWEEN ${lo} AND ${hi}`);
     } else if (fromYear !== undefined && !isNaN(fromYear)) {
-        whereConditions.push(Prisma.sql`al.year >= ${fromYear}`);
+        whereConditions.push(Prisma.sql`${shownYear} >= ${fromYear}`);
     } else if (toYear !== undefined && !isNaN(toYear)) {
-        whereConditions.push(Prisma.sql`al.year <= ${toYear}`);
+        whereConditions.push(Prisma.sql`${shownYear} <= ${toYear}`);
     }
 
     if (genre) {
