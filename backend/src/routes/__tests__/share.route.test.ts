@@ -687,18 +687,20 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
         new Promise<number | undefined>((resolve, reject) => {
             reply.on('error', reject).on('end', () => resolve(reply.statusCode)).resume();
         });
-    /** Holds the statement that counts a play until `release`, and says when it is held. */
+    /** Holds the statement that counts a play until `release`, and says when it is held (`stalled`) and when it has answered (`counted`). */
     const stallCounting = () => {
         const realExecute: any = prisma.$executeRaw.bind(prisma);
         let release!: () => void;
         let markStalled!: () => void;
+        let markCounted!: () => void;
         const held = new Promise<void>((resolve) => (release = resolve));
         const stalled = new Promise<void>((resolve) => (markStalled = resolve));
+        const counted = new Promise<void>((resolve) => (markCounted = resolve));
         const spy = jest.spyOn(prisma, '$executeRaw').mockImplementation(((...args: unknown[]) =>
             String((args[0] as TemplateStringsArray)?.join?.(' ')).includes('+ 1')
-                ? (markStalled(), held.then(() => realExecute(...args)))
+                ? (markStalled(), held.then(() => realExecute(...args)).then((n: number) => (markCounted(), n)))
                 : realExecute(...args)) as never);
-        return { release, stalled, restore: () => spy.mockRestore() };
+        return { release, stalled, counted, restore: () => spy.mockRestore() };
     };
     const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -1348,17 +1350,28 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
 
         it('does not count a play whose listener left while the count was being taken', async () => {
             const { token, id } = await own({ maxPlays: 1 });
-            const count = prisma.$executeRaw.bind(prisma);
-            const slow = jest.spyOn(prisma, '$executeRaw').mockImplementation(((...args: Parameters<typeof count>) =>
-                new Promise((resolve) => setTimeout(resolve, 150)).then(() => count(...args))) as typeof prisma.$executeRaw);
+            const stall = stallCounting();
+            const server = http.createServer(app).listen(0);
+            const closed: Promise<void>[] = [];
+            server.on('connection', (socket) => closed.push(new Promise((resolve) => socket.once('close', () => resolve()))));
             try {
-                const asking = request(app).get(`/share/${token}/stream/${songs.playable}`);
-                asking.end(() => undefined);
-                await new Promise((resolve) => setTimeout(resolve, 40));
-                asking.abort();
-                await new Promise((resolve) => setTimeout(resolve, 700));
+                const { port } = server.address() as AddressInfo;
+                // Not `over`: the listener's request itself is needed, to hang up on it.
+                const asking = http.get({ host: '127.0.0.1', port, path: `/share/${token}/stream/${songs.playable}`, headers: { 'User-Agent': 'one-listener' } });
+                asking.on('error', () => undefined);
+                await stall.stalled;
+                asking.destroy();
+                // The count is let through only once the server has seen the listener go: nothing here waits on a clock.
+                await Promise.all(closed);
+                stall.release();
+                await stall.counted;
+                // The rest of the request ran in the turn the count answered in; what it left running is tracked.
+                await new Promise((resolve) => setImmediate(resolve));
+                await settleShareBackgroundWork();
             } finally {
-                slow.mockRestore();
+                stall.release();
+                stall.restore();
+                await new Promise((resolve) => server.close(resolve));
             }
 
             expect(await playsOf(token)).toBe(0);
