@@ -3,7 +3,7 @@
  * (Audiobookshelf is off), the person is told in the notification tray, and a clean save says nothing.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import React, { act } from "react";
+import React, { act, useEffect } from "react";
 import { mountHost } from "./helpers/dom";
 
 const { api, notify } = vi.hoisted(() => ({
@@ -21,7 +21,10 @@ const dom = mountHost();
 
 let hook: ReturnType<typeof useSystemSettings>;
 function Probe() {
-    hook = useSystemSettings();
+    const current = useSystemSettings();
+    useEffect(() => {
+        hook = current;
+    });
     return null;
 }
 
