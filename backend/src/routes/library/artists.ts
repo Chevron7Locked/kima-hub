@@ -755,6 +755,10 @@ router.delete("/artists/:id", async (req, res) => {
       return res.status(409).json({ error: LINKED_OUT_REFUSAL });
     }
 
+    // The database first: files removed before a delete that then fails would leave rows with no files. A file that
+    // will not go is logged below and never undoes the delete.
+    await deleteArtists([artist.id]);
+
     let deletedFiles = 0;
     const deletedPaths: string[] = [];
 
@@ -801,8 +805,6 @@ router.delete("/artists/:id", async (req, res) => {
         lidarrError = err?.message || "Unknown error";
       }
     }
-
-    await deleteArtists([artist.id]);
 
     res.json({
       message: "Artist deleted successfully",

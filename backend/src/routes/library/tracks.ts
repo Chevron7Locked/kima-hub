@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { announcePlaylistsChanged, playlistsHoldingTracks } from "../../services/playlistEvents";
+import { deleteSongs } from "../../services/library/albumDelete";
 import { prisma, Prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { lrclibService } from "../../services/lrclib";
@@ -24,7 +24,6 @@ import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { toAudioFeaturesDTO, AUDIO_FEATURE_SELECT } from "../../utils/audioFeatures";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "./trackPath";
 import { parseLimit, parseOffset } from "./paging";
-import { markLibraryChangedQuietly, songIsListed } from "../../services/libraryChanged";
 import { refuseRequest } from "../../utils/errors";
 import fs from "fs";
 
@@ -508,6 +507,10 @@ router.delete("/tracks/:id", async (req, res) => {
       return res.status(409).json({ error: LINKED_OUT_REFUSAL });
     }
 
+    // The database first, with what points at the song and the album it leaves empty: a file removed before a delete
+    // that then fails would leave a row with no file. A file that will not go is logged, and never undoes the delete.
+    await deleteSongs([track.id]);
+
     if (track.filePath) {
       try {
         const absolutePath = resolveWithinMusicRoot(track.filePath);
@@ -524,17 +527,6 @@ router.delete("/tracks/:id", async (req, res) => {
         logger.warn("[DELETE] Could not delete file:", err);
       }
     }
-
-    // Asked before the delete, for the row is gone after it.
-    const wasListed = await songIsListed(track.id);
-    // The song's playlist entries go with it: tell those playlists once it is gone.
-    const playlists = await playlistsHoldingTracks(prisma, { id: track.id });
-    await prisma.track.delete({
-      where: { id: track.id },
-    });
-    announcePlaylistsChanged(playlists);
-    // A playable song gone is a change to what a client lists; a Discover, missing or corrupt song was never listed.
-    if (wasListed) await markLibraryChangedQuietly("song deleted");
 
     logger.debug(`[DELETE] Deleted track: ${track.title}`);
 

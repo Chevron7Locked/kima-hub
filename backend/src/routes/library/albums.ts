@@ -185,6 +185,10 @@ router.delete("/albums/:id", async (req, res) => {
       return res.status(409).json({ error: LINKED_OUT_REFUSAL });
     }
 
+    // The database first: files removed before a delete that then fails would leave rows with no files. A file that
+    // will not go is logged below and never undoes the delete.
+    await deleteAlbums([album.id]);
+
     let deletedFiles = 0;
     for (const track of album.tracks) {
       if (track.filePath) {
@@ -228,8 +232,6 @@ router.delete("/albums/:id", async (req, res) => {
     } catch (err) {
       logger.warn("[DELETE] Could not delete album folder:", err);
     }
-
-    await deleteAlbums([album.id]);
 
     logger.debug(
       `[DELETE] Deleted album: ${album.title} (${deletedFiles} files)`,
