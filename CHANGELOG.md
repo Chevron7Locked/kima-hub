@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deleting an album or artist cleans up everything that went with it.** The artist's album and song counts update at once, and Discover's leftover records for those songs go too.
+- **Discover knows what you own after a cleanup.** Clearing Discover albums now updates its list of albums you own, so it doesn't suggest them wrongly afterwards.
+- **Merging a placeholder artist into the real one keeps Discover's record of that artist's albums**, so they aren't suggested or downloaded again.
 - **A share's visit count counts each time the share is opened.** Subsonic apps show it as the share's visit count; playing or seeking a shared song doesn't change it.
 - **Subsonic song genre filters follow each song's own tags:** filtering songs by genre and the genre list's song counts use a song's own tags, falling back to its album's genres. Album lists by genre and album counts are unchanged.
 - **A song's genres show its most-voted tag first** in Subsonic apps.
