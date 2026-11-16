@@ -24,7 +24,7 @@ jest.mock("../../lidarr", () => ({
 
 import { prisma } from "../../../utils/db";
 import { lidarrService } from "../../lidarr";
-import { discoveryArtistVerdict, removeDiscoveryAlbum, removeDiscoveryArtist } from "../lidarrRemoval";
+import { discoveryArtistVerdict, ensureDiscoverTag, removeDiscoveryAlbum, removeDiscoveryArtist } from "../lidarrRemoval";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import { artistIdentityKey } from "../../artistIdentity";
 
@@ -242,6 +242,17 @@ describe("removeDiscoveryAlbum", () => {
         expect(lidarr.addTagsToArtist).toHaveBeenCalledWith(5, [TAG]);
         expect(outcome).toEqual({ removed: true, reason: null });
         expect(lidarr.deleteAlbumById).toHaveBeenCalledWith(31, true);
+    });
+
+    it("leaves the artist it was given untouched when it puts the tag back", async () => {
+        await discovered("temp-a", "ACTIVE", 31);
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-a", 10, 31)]);
+        const artist = lidarrArtist([]);
+
+        expect(await ensureDiscoverTag(artist, TAG)).toBe("tagged");
+
+        expect(lidarr.addTagsToArtist).toHaveBeenCalledWith(5, [TAG]);
+        expect(artist.tags).toEqual([]);
     });
 
     it("leaves the tag off an artist a listener liked an album of", async () => {

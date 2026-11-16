@@ -8,6 +8,7 @@
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { lidarrService } from "../lidarr";
+import * as downloadJobs from "../downloads/jobs";
 import { LIBRARY_LOCATION } from "../libraryFilters";
 import { artistNamed } from "../artistIdentity";
 import { RUNNING_BATCH, couldBeArtist, sameArtist, sameName } from "./discoverEvidence";
@@ -234,7 +235,7 @@ async function artistOwner(
             // Discover albums are no one's, so any ownership record under the artist is a listener's.
             prisma.ownedAlbum.findFirst({ where: { artist: { mbid } }, select: { rgMbid: true } }),
             prisma.downloadJob.findFirst({
-                where: { artistMbid: mbid, discoveryBatchId: null, status: { in: ["pending", "processing"] } },
+                where: { artistMbid: mbid, discoveryBatchId: null, status: { in: downloadJobs.ACTIVE_STATUSES } },
                 select: { id: true },
             }),
         ]);
@@ -254,7 +255,8 @@ async function artistOwner(
 /**
  * Makes sure an artist carries Discover's tag, putting it back when an earlier cleanup took it off and Kima's records
  * show the artist is Discover's (`artistOwner`). Only Kima tags artists, so a missing tag on such an artist is Kima's
- * own mistake. "refused" when the artist is Discover's but Lidarr would not take the tag.
+ * own mistake. The artist passed in is never changed; the outcome is the answer. "refused" when the artist is
+ * Discover's but Lidarr would not take the tag.
  */
 export async function ensureDiscoverTag(
     artist: LidarrArtist,
@@ -263,7 +265,6 @@ export async function ensureDiscoverTag(
     if (artist.tags?.includes(tagId)) return "tagged";
     if ((await artistOwner(artist)).owner !== "discover") return "not Discover's";
     if (!(await lidarrService.addTagsToArtist(artist.id, [tagId]))) return "refused";
-    artist.tags = [...(artist.tags ?? []), tagId];
     logger.info(`[Discover] Put Discover's tag back on ${artist.artistName} in Lidarr`);
     return "tagged";
 }
