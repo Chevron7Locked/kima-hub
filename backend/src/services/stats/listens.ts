@@ -44,6 +44,8 @@ import { Prisma, type Artist, type ListenSource } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { assertSqlName, bestCopyFirst } from "../../utils/playableSong";
 import { artistHasPlayableSongSql } from "../libraryFilters";
+import { VARIOUS_ARTISTS_CANONICAL } from "../../utils/artistNormalization";
+import { nameKey } from "../nameFold";
 
 /** A table alias written in code, checked before it goes into SQL text. */
 function alias(name: string, fn: string): Prisma.Sql {
@@ -99,16 +101,37 @@ export interface ListenScope {
 }
 
 /**
+ * `nameKey` (nameFold.ts) as SQL, for a column or expression: trimmed, unaccented, lowercased, with everything
+ * but letters and digits removed. A name with no letters or digits keeps itself, so "!!!" still finds "!!!" rather than
+ * every other name made of symbols. The argument is a fixed column expression written here, never a value. Unlike
+ * `nameKey` it does not compose decomposed text first: Postgres can only do that on a UTF8 database, and this must run
+ * on any.
+ */
+function nameKeySql(expr: string): Prisma.Sql {
+    return Prisma.raw(
+        `coalesce(nullif(regexp_replace(lower(unaccent(kima_text_trim(${expr}))), '[^[:alnum:]]', '', 'g'), ''), ${expr})`,
+    );
+}
+
+/**
  * The CTEs that attribute a person's kept plays: each to the one present song it is found by, first by its recording id,
- * else by its title, album and artist names, the best copy winning (`bestCopyFirst`), as `kept_resolved` with the
- * kept play's columns and `matched`, that song's id (null when no present song is found).
- * Set-based on purpose: the recording id has no index, so each distinct id is looked for in one pass over the songs.
+ * else by its title, album and artist names (compared as `nameKey` folds them, so a name that returns in another case,
+ * accent or punctuation is still the name), the best copy winning (`bestCopyFirst`), as `kept_resolved` with the
+ * kept play's columns and `matched`, that song's id (null when no present song is found). A kept play from a Various
+ * Artists album is found by its album and title alone: a compilation is filed under whoever the scanner or a refile
+ * names, so its artist says nothing about which song it was.
+ * Set-based on purpose: the recording id has no index, so each distinct id is looked for in one pass over the songs, and
+ * the names are folded once per row of each table, not once per kept play.
  */
 function keptCtes(userId: string): Prisma.Sql {
     return Prisma.sql`
         kept_plays AS MATERIALIZED (
             SELECT p.id, p."playedAt", p.source, p."keptTitle", p."keptArtistName", p."keptAlbumTitle",
-                   p."keptRecordingMbid", p."keptDuration"
+                   p."keptRecordingMbid", p."keptDuration",
+                   ${nameKeySql('p."keptArtistName"')} AS artist_key,
+                   ${nameKeySql('p."keptAlbumTitle"')} AS album_key,
+                   ${nameKeySql('p."keptTitle"')} AS title_key,
+                   ${nameKeySql('p."keptArtistName"')} = ${nameKey(VARIOUS_ARTISTS_CANONICAL)} AS various
             FROM "Play" p
             WHERE p."userId" = ${userId} AND p."trackId" IS NULL AND p."keptTitle" IS NOT NULL
         ),
@@ -123,11 +146,28 @@ function keptCtes(userId: string): Prisma.Sql {
         kept_by_names AS (
             SELECT DISTINCT ON (kp.id) kp.id AS play_id, k.id
             FROM kept_plays kp
-            JOIN "Artist" a ON a.name = kp."keptArtistName"
-            JOIN "Album" ka ON ka."artistId" = a.id AND ka.title = kp."keptAlbumTitle" AND ka.location = 'LIBRARY'
-            JOIN "Track" k ON k."albumId" = ka.id AND k.title = kp."keptTitle"
+            JOIN "Album" ka ON ka.location = 'LIBRARY' AND ${nameKeySql('coalesce(ka."displayTitle", ka.title)')} = kp.album_key
+            JOIN "Track" k ON k."albumId" = ka.id AND ${nameKeySql('coalesce(k."displayTitle", k.title)')} = kp.title_key
             WHERE k."missingSince" IS NULL
+              AND (kp.various OR EXISTS (SELECT 1 FROM "Artist" a WHERE a.id = ka."artistId" AND ${nameKeySql("a.name")} = kp.artist_key))
             ORDER BY kp.id, ${bestCopyFirst()}
+        ),
+        -- The artist and album the library lists now under a kept play's names, for a play no present song is found for.
+        -- A Discover-only artist is not one. Resolved here once per distinct name rather than once per kept play.
+        kept_artist_ids AS (
+            SELECT DISTINCT ON (kn.artist_key) kn.artist_key, a.id
+            FROM (SELECT DISTINCT artist_key FROM kept_plays) kn
+            JOIN "Artist" a ON ${nameKeySql("a.name")} = kn.artist_key
+            WHERE ${artistHasPlayableSongSql("a")}
+            ORDER BY kn.artist_key, a.id
+        ),
+        kept_album_ids AS (
+            SELECT DISTINCT ON (kn.artist_key, kn.album_key) kn.artist_key, kn.album_key, b.id
+            FROM (SELECT DISTINCT artist_key, album_key FROM kept_plays) kn
+            JOIN kept_artist_ids kai ON kai.artist_key = kn.artist_key
+            JOIN "Album" b ON b."artistId" = kai.id AND b.location = 'LIBRARY'
+                          AND ${nameKeySql('coalesce(b."displayTitle", b.title)')} = kn.album_key
+            ORDER BY kn.artist_key, kn.album_key, b.id
         ),
         kept_resolved AS (
             SELECT kp.*, coalesce(br.id, bn.id) AS matched
@@ -189,17 +229,14 @@ export function listenRows(userId: string, scope: ListenScope = {}): Prisma.Sql 
           UNION ALL
             SELECT kr.id, NULL, 'kept:' || coalesce(kr."keptRecordingMbid",
                        concat_ws(chr(31), kr."keptArtistName", kr."keptAlbumTitle", kr."keptTitle")),
-                   kr."playedAt", kr.source, kr."keptDuration", kb.id, NULL,
+                   kr."playedAt", kr.source, kr."keptDuration", kbi.id, NULL,
                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                   coalesce(ka.id, 'kept:' || kr."keptArtistName"),
-                   coalesce(kb.id, 'kept:' || concat_ws(chr(31), kr."keptArtistName", kr."keptAlbumTitle")),
+                   coalesce(kai.id, 'kept:' || kr."keptArtistName"),
+                   coalesce(kbi.id, 'kept:' || concat_ws(chr(31), kr."keptArtistName", kr."keptAlbumTitle")),
                    kr."keptTitle", kr."keptArtistName"
             FROM kept_resolved kr
-            LEFT JOIN LATERAL (SELECT a.id FROM "Artist" a WHERE a.name = kr."keptArtistName" AND ${artistHasPlayableSongSql("a")}
-                                ORDER BY a.id LIMIT 1) ka ON TRUE
-            LEFT JOIN LATERAL (SELECT b.id FROM "Album" b
-                                WHERE b."artistId" = ka.id AND b.title = kr."keptAlbumTitle" AND b.location = 'LIBRARY'
-                                ORDER BY b.id LIMIT 1) kb ON TRUE
+            LEFT JOIN kept_artist_ids kai ON kai.artist_key = kr.artist_key
+            LEFT JOIN kept_album_ids kbi ON kbi.artist_key = kr.artist_key AND kbi.album_key = kr.album_key
             WHERE kr.matched IS NULL`;
     return Prisma.sql`
         WITH RECURSIVE ${keptCtes(userId)},

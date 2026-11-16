@@ -222,6 +222,64 @@ describe("the readers that need a song", () => {
     });
 });
 
+describe("the readers that find a kept play's song by its stored names", () => {
+    const rule = playableSongSql("t", "al");
+
+    /** A library song with its own artist and album, for a song that returns under other spellings of the same names. */
+    async function copy(key: string, names: { artist: string; album: string; title: string }): Promise<string> {
+        await prisma.artist.create({ data: { id: id(`art_${key}`), name: names.artist, identityKey: id(`ak_${key}`) } });
+        await prisma.album.create({
+            data: { id: id(`alb_${key}`), rgMbid: id(`rg_${key}`), artistId: id(`art_${key}`), identityKey: id(`ik_${key}`), title: names.album, primaryType: "Album", location: "LIBRARY" },
+        });
+        await prisma.track.create({
+            data: { id: id(`s_${key}`), albumId: id(`alb_${key}`), title: names.title, trackNo: 1, duration: 200, filePath: `/${P}outside/${key}.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+        return id(`s_${key}`);
+    }
+    const listensOf = async (song: string) => (await listenCounts(USER, { song: rule })).find((c) => c.trackId === song)?.listens;
+    const gone = async () => {
+        await deleteAlbums([id("alb_x")]);
+        await deleteArtists([id("art_x")]);
+    };
+
+    it("finds the song when its names come back in another case, accent or punctuation", async () => {
+        await gone();
+        const song = await copy("n1", { artist: "ZZ Kept \u2014 Art\u00edst x", album: "ZZ-Kept ALB_X", title: "Zz Kept: S\u00f6ng x2" });
+
+        expect(await listensOf(song)).toBe(1);
+    });
+
+    it("does not find a song whose names differ by more than folding", async () => {
+        await gone();
+        const song = await copy("n2", { artist: `${P}Another Artist`, album: `${P}alb_x`, title: `${P}Song x2` });
+
+        expect(await listensOf(song)).toBeUndefined();
+    });
+
+    it("finds a compilation's song by its album and title, whoever the album is filed under now", async () => {
+        await prisma.artist.create({ data: { id: id("art_va"), name: "Various Artists", identityKey: id("ak_va") } });
+        await prisma.album.create({
+            data: { id: id("alb_va"), rgMbid: id("rg_va"), artistId: id("art_va"), identityKey: id("ik_va"), title: `${P}Now 99`, primaryType: "Album", location: "LIBRARY" },
+        });
+        await prisma.track.create({
+            data: { id: id("va1"), albumId: id("alb_va"), title: `${P}Hit A`, trackNo: 1, duration: 200, filePath: `/${P}outside/va1.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+        await play("va1", new Date(Date.now() - DAY));
+        await deleteAlbums([id("alb_va")]);
+        await deleteArtists([id("art_va")]);
+        const song = await copy("n3", { artist: `${P}Refiled Artist`, album: `${P}NOW 99`, title: `${P}hit a` });
+
+        expect(await listensOf(song)).toBe(1);
+    });
+
+    it("does not give a single artist's kept play to the same album and title under another artist", async () => {
+        await gone();
+        const song = await copy("n4", { artist: `${P}Someone Else`, album: `${P}ALB_X`, title: `${P}SONG X2` });
+
+        expect(await listensOf(song)).toBeUndefined();
+    });
+});
+
 describe("the play-history audit's pages", () => {
     it("carry kept plays in order, as plays that are not library plays", async () => {
         await deleteSongs([id("x1")]);
