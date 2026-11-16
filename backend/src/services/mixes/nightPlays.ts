@@ -11,7 +11,7 @@ import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { matchingContext, rankMatches } from "../matching/rank";
 import { safeZone } from "../stats/listening";
-import { playRowsSql } from "../stats/listens";
+import { listenRows } from "../stats/listens";
 import type { ProgrammaticMix } from "./helpers";
 import { mixFromTracks, type RecipeMixSpec } from "./recipeMix";
 import {
@@ -100,8 +100,8 @@ async function energyBand(): Promise<[number, number] | null> {
 }
 
 /**
- * This listener's night songs from the last NIGHT_LOOKBACK_DAYS, one copy per title and artist (plays summed, the
- * most-played copy kept), most played first. Only owned, playable songs. `energy` is read (the library's middle half)
+ * This listener's night songs from the last NIGHT_LOOKBACK_DAYS, one copy per title and artist (listens summed, the
+ * most-listened copy kept), most listened first. Only owned, playable songs. `energy` is read (the library's middle half)
  * only when asked for, since only Midnight Drive ranks by it; otherwise every song carries 0.5.
  */
 export async function nightSongs(
@@ -112,11 +112,12 @@ export async function nightSongs(
     const since = new Date(now.getTime() - NIGHT_LOOKBACK_DAYS * 86_400_000);
     const rows = await prisma.$queryRaw<
         Array<{ id: string; artist_key: string; title_key: string; plays: number; pace: number; arousal: number | null }>
-    >`
-        WITH night AS (
+    >(Prisma.sql`
+        ${listenRows(userId, { since })},
+        night AS (
             SELECT t.id, ${artistSql()} AS artist_key, lower(t.title) AS title_key,
                    ${Prisma.raw(PACE_SQL)} AS pace, t.arousal
-            FROM (${playRowsSql(userId, { since, heard: true })}) p
+            FROM p
             JOIN "Track" t ON t.id = p."trackId"
             JOIN "Album" a ON a.id = t."albumId"
             JOIN "Artist" ar ON ar.id = a."artistId"
@@ -126,7 +127,7 @@ export async function nightSongs(
         )
         SELECT id, artist_key, title_key, pace, arousal, count(*)::int AS plays
         FROM night GROUP BY id, artist_key, title_key, pace, arousal
-    `;
+    `);
     // The band is looked up only for a listener who has night songs to place in it.
     const band = energy && rows.length > 0 ? await energyBand() : null;
     const energyOf = (arousal: number | null) =>

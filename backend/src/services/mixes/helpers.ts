@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { shuffleArray } from "../../utils/shuffle";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
-import { neverPlayedSql } from "../stats/listens";
+import { neverListenedSql } from "../stats/listens";
 import { ARTIST_CAPS, MIN_MIX_TRACKS, artistSql, capByArtist, songArtistKey } from "./artistCap";
 
 export interface ProgrammaticMix {
@@ -379,7 +379,7 @@ export async function seededTracks<I extends Prisma.TrackInclude>(args: {
 }
 
 /**
- * Ids of every playable song this listener has not played, in id order, as an anti-join: Prisma's `plays: { none: {} }` becomes
+ * Ids of every playable song this listener has never listened to, in id order, as an anti-join: Prisma's `plays: { none: {} }` becomes
  * `NOT IN (SELECT ...)`, which Postgres rescans per track once Play is too large to hash (1.5 minutes at 105,000 plays).
  */
 export async function unplayedTrackIds(args: { userId: string }): Promise<string[]> {
@@ -387,7 +387,7 @@ export async function unplayedTrackIds(args: { userId: string }): Promise<string
         SELECT t.id
         FROM "Track" t
         JOIN "Album" a ON a.id = t."albumId"
-        WHERE ${neverPlayedSql(args.userId)}
+        WHERE ${neverListenedSql(args.userId)}
           AND ${PLAYABLE_SONG_SQL}
         ORDER BY t.id
     `;

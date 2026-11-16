@@ -8,7 +8,7 @@
 
 import { prisma } from "../../utils/db";
 import { playableSongSql } from "../../utils/playableSong";
-import { playRowsSql } from "./listens";
+import { hasListenedSql } from "./listens";
 
 const PLAYABLE_SQL = playableSongSql("t", "al");
 
@@ -38,10 +38,9 @@ export async function shelfStats(userId: string): Promise<ShelfStats> {
         SELECT count(DISTINCT t.id)::int             AS tracks,
                count(DISTINCT al.id)::int            AS albums,
                count(DISTINCT al."artistId")::int    AS artists
-        FROM (${playRowsSql(userId)}) p
-        JOIN "Track" t  ON t.id  = p."trackId"
-        JOIN "Album" al ON al.id = t."albumId"
-        WHERE ${PLAYABLE_SQL}`,
+        FROM "Album" al
+        JOIN "Track" t ON t."albumId" = al.id
+        WHERE ${PLAYABLE_SQL} AND ${hasListenedSql(userId, "t")}`,
 
         prisma.$queryRaw<Array<{ status: string; n: number }>>`
         SELECT t."analysisStatus" AS status, count(*)::int AS n
@@ -53,10 +52,9 @@ export async function shelfStats(userId: string): Promise<ShelfStats> {
         prisma.$queryRaw<Array<{ decade: number; albums: number; heard: number }>>`
         SELECT (coalesce(al."displayYear", al.year) / 10 * 10)::int AS decade,
                count(DISTINCT al.id)::int                            AS albums,
-               count(DISTINCT al.id) FILTER (WHERE pl.id IS NOT NULL)::int AS heard
+               count(DISTINCT al.id) FILTER (WHERE ${hasListenedSql(userId, "t")})::int AS heard
         FROM "Album" al
         JOIN "Track" t ON t."albumId" = al.id
-        LEFT JOIN (${playRowsSql(userId)}) pl ON pl."trackId" = t.id
         WHERE ${PLAYABLE_SQL} AND coalesce(al."displayYear", al.year) IS NOT NULL
         GROUP BY 1 ORDER BY 1`,
     ]);

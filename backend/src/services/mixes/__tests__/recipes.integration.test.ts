@@ -801,10 +801,12 @@ describe("familiarity: songs that sound like what the listener plays most", () =
     ];
     const SIMILAR = ["bg0", "near"];
 
+    /** `times` listens, five minutes apart (further than a song is long, so each is a listen of its own), the newest at `playedAt`. */
     const heard = (name: string, times: number, extra: { heard?: boolean; playedAt?: Date } = {}) =>
         prisma.play.createMany({
-            data: Array.from({ length: times }, () => ({
-                userId: USER_ID, trackId: id(name), heard: extra.heard ?? true, ...(extra.playedAt ? { playedAt: extra.playedAt } : {}),
+            data: Array.from({ length: times }, (_, k) => ({
+                userId: USER_ID, trackId: id(name), heard: extra.heard ?? true,
+                playedAt: new Date((extra.playedAt ?? new Date()).getTime() - k * 300_000),
             })),
         });
     const zScores = async (userId?: string, recipeUnderTest: Recipe = FAMILIAR) => {
@@ -885,10 +887,22 @@ describe("familiarity: songs that sound like what the listener plays most", () =
         for (const name of plain) expect(boosted.has(name)).toBe(true);
     });
 
-    it("counts only plays marked as heard, and only those of the last 365 days", async () => {
-        await heard("bg0", 20, { heard: false });
+    it("counts only listens of the last 365 days", async () => {
         await heard("bg0", 20, { playedAt: new Date(Date.now() - 400 * 86_400_000) });
         expect(await zScores(USER_ID)).toEqual(await zScores());
+    });
+
+    it("counts a listen whether or not its row was recorded as heard", async () => {
+        await heard("bg0", 20, { heard: false });
+        expect(await members(USER_ID)).toEqual(new Set(["top", "near"]));
+    });
+
+    it("counts listens, not rows: rows ten seconds apart are one listen, so twenty of them seed no more than one", async () => {
+        const at = Date.now();
+        await prisma.play.createMany({
+            data: Array.from({ length: 20 }, (_, k) => ({ userId: USER_ID, trackId: id("bg0"), playedAt: new Date(at - k * 10_000) })),
+        });
+        expect((await seedsOf(USER_ID, new Date())).map((x) => [x.id, x.plays])).toEqual([[id("bg0"), 1]]);
     });
 
     it("does nothing for a recipe without a familiarity share", async () => {
@@ -917,9 +931,12 @@ describe("familiarity: the kept result, the scan shared between callers, ties an
     const USER_ID = `${P}famuser2`;
     const LIB: Song[] = [...background(10), { name: "near", moods: { calm: 2.45 } }, { name: "top", moods: { calm: 5 } }];
     const lockKey = `lock:mixes:familiar-lock:${USER_ID}`;
+    /** `times` listens, five minutes apart, the newest at `playedAt`. */
     const heard = (name: string, times: number, playedAt?: Date) =>
         prisma.play.createMany({
-            data: Array.from({ length: times }, () => ({ userId: USER_ID, trackId: id(name), heard: true, ...(playedAt ? { playedAt } : {}) })),
+            data: Array.from({ length: times }, (_, k) => ({
+                userId: USER_ID, trackId: id(name), heard: true, playedAt: new Date((playedAt ?? new Date()).getTime() - k * 300_000),
+            })),
         });
     const clearKeys = () => Promise.all([redisClient.del(familiarCacheKey(USER_ID)), redisClient.del(lockKey)]);
     const timing = { ...familiarTiming };

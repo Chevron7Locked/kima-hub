@@ -25,10 +25,10 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { retryOnDeadlock } from "../utils/dbConflict";
 import { nodeClock } from "../utils/nodeClock";
-import { playableSongSql } from "../utils/playableSong";
+import { bestCopyFirst, playableSongSql } from "../utils/playableSong";
 import { playlistsHoldingTrackIds, type HeldPlaylist } from "./playlistEvents";
 import { deleteSongs } from "./library/albumDelete";
-import { bestCopyFirst, carryHistory, holdCopies, pairsOf, recordingCopies, type Replacement } from "./library/songHistory";
+import { carryHistory, holdCopies, pairsOf, recordingCopies, type Replacement } from "./library/songHistory";
 import { songsWithBusyPlayHistory } from "./playRecording";
 import { entriesOf, hydrateQueue, ON_LIBRARY_ALBUM_LOCATION, type QueueEntry } from "./savedQueue";
 

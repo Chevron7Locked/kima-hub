@@ -6,7 +6,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { playableSongSql } from "../../utils/playableSong";
-import { listenRows, neverPlayedSql, type Period } from "./listens";
+import { listenRows, neverListenedSql, type Period } from "./listens";
 
 /** The shape the player wants. Matches what the library routes hand back. */
 export interface PlayableTrack {
@@ -95,7 +95,7 @@ export async function playableSlice(params: {
             // "core" is the handful that make up half the listening, so it is
             // the same ordering — the page has already said how many.
             const rows = await prisma.$queryRaw<Row[]>(Prisma.sql`
-                ${listenRows(userId, period)}
+                ${listenRows(userId, { period })}
                 SELECT ${SELECT}, count(*)::int AS n
                 FROM p JOIN "Track" t ON t.id = p."trackId" ${JOINS}
                 WHERE ${PLAYABLE_SQL}
@@ -112,7 +112,7 @@ export async function playableSlice(params: {
                 SELECT ${SELECT}
                 FROM "Track" t ${JOINS}
                 WHERE ${PLAYABLE_SQL}
-                  AND ${neverPlayedSql(userId, "t")}
+                  AND ${neverListenedSql(userId, "t")}
                 ORDER BY random() LIMIT ${limit}`);
             return shape(rows);
         }
@@ -123,7 +123,7 @@ export async function playableSlice(params: {
             // The wheel draws one wedge for both spellings, so match both.
             const pitches = spellingsOf(pitch);
             const rows = await prisma.$queryRaw<Row[]>(Prisma.sql`
-                ${listenRows(userId, period)}
+                ${listenRows(userId, { period })}
                 SELECT ${SELECT}, count(*)::int AS n
                 FROM p JOIN "Track" t ON t.id = p."trackId" ${JOINS}
                 WHERE ${PLAYABLE_SQL} AND t.key IN (${Prisma.join(pitches)}) AND t."keyScale" = ${scale}

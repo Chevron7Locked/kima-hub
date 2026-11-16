@@ -82,8 +82,9 @@ async function cleanup() {
 }
 
 let n = 0;
+// Ten minutes apart, further than a song is long, so each play is a listen of its own.
 const play = (userId: string, song: string, times = 1) =>
-    Array.from({ length: times }, () => ({ id: id(`play_${n++}`), userId, trackId: id(song), playedAt: new Date(Date.now() - n * 60_000) }));
+    Array.from({ length: times }, () => ({ id: id(`play_${n++}`), userId, trackId: id(song), playedAt: new Date(Date.now() - n * 600_000) }));
 
 beforeAll(async () => {
     await waitForRedisReady();

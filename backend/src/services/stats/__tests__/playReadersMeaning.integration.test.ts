@@ -1,7 +1,8 @@
 /**
- * What each play reader answers on one seeded history: the shelf's heard counts, the familiar-song seeds, the stats page's
- * never-played slice, the Subsonic recent and frequent album lists, and the web artist page's own-plays fallback. These
- * readers ask the listens module; this file pins what they say, so moving them behind it changes nothing. Real database.
+ * What each reader that counts plays answers on one seeded history: the shelf's heard counts, the familiar-song seeds, the
+ * stats page's never-listened slice, the Subsonic recent and frequent album lists, and the web artist page's own-listens
+ * fallback. All of them count listens, so two rows of one song a few seconds apart are one, and a row the listen rule
+ * did not record as heard counts the same as one it did. Real database.
  */
 import express from "express";
 import request from "supertest";
@@ -33,6 +34,8 @@ const ALBUMS: Array<{ key: string; artist: string; year: number; songs: string[]
 let n = 0;
 const row = (user: string, s: string, days: number, heard: boolean) =>
     ({ id: `${P}-play-${String(n++).padStart(3, "0")}`, userId: user, trackId: song(s), playedAt: ago(days), heard });
+/** Two rows ten seconds apart: one listen. */
+const repeat = (user: string, s: string, days: number) => [row(user, s, days, true), { ...row(user, s, days - 10 / 86_400, true) }];
 
 const app = express()
     .use((req: any, _res, next) => { req.user = { id: U, username: U, role: "user" }; next(); })
@@ -57,9 +60,9 @@ beforeAll(async () => {
     }
     await prisma.play.createMany({
         data: [
-            // s1: three recorded listens; s3: two legacy rows (not recorded by the listen rule); s5: one recent listen;
-            // s2: one older listen; s6: one play an hour ago, album 3.
-            row(U, "s1", 1, true), row(U, "s1", 2, true), row(U, "s1", 3, true),
+            // s1: three listens, the newest written as two rows ten seconds apart; s3: two listens whose rows the listen
+            // rule did not record as heard; s5: one recent listen; s2: one older listen; s6: one play an hour ago, album 3.
+            ...repeat(U, "s1", 1), row(U, "s1", 2, true), row(U, "s1", 3, true),
             row(U, "s3", 4, false), row(U, "s3", 8, false),
             row(U, "s5", 1.5, true),
             row(U, "s2", 5, true),
@@ -79,24 +82,25 @@ afterAll(async () => {
     await redisClient.del(`similar-artists-list:${P}-ar-a`);
 });
 
-it("the shelf counts a song, album and artist heard once any play of it exists, legacy rows included", async () => {
+it("the shelf counts a song, album and artist heard once any listen of it exists, whether or not the rows were recorded as heard", async () => {
     const shelf = await shelfStats(U);
     expect(shelf.tracks.heard).toBe(5);
     expect(shelf.albums.heard).toBe(2);
     expect(shelf.artists.heard).toBe(2);
     const heardIn = (decade: number) => shelf.decades.find((d) => d.decade === decade)?.heard;
     expect([heardIn(1910), heardIn(1920), heardIn(1930)]).toEqual([1, 0, 1]);
-    // Someone else's plays are no one's but theirs.
+    // Someone else's listens are no one's but theirs.
     expect((await shelfStats(`${P}-nobody`)).tracks.heard).toBe(0);
 });
 
-it("the familiar seeds are the songs the listen rule recorded, most heard first and then the most recent", async () => {
+it("the familiar seeds are the songs listened to, most listens first and then the most recent, s1's two rows one listen", async () => {
     const seeds = (await seedsOf(U, new Date())).filter((s) => s.id.startsWith(P));
-    // s3's legacy rows are not heard rows; s5 was heard more recently than s2.
-    expect(seeds.map((s) => [s.id, s.plays])).toEqual([[song("s1"), 3], [song("s6"), 1], [song("s5"), 1], [song("s2"), 1]]);
+    expect(seeds.map((s) => [s.id, s.plays])).toEqual([
+        [song("s1"), 3], [song("s3"), 2], [song("s6"), 1], [song("s5"), 1], [song("s2"), 1],
+    ]);
 });
 
-it("the never-played slice holds no song this listener has a play of, whoever else played it", async () => {
+it("the never-listened slice holds no song this listener has a listen of, whoever else listened to it", async () => {
     const ids = (await playableSlice({ userId: U, slice: "never", limit: 100 })).map((t) => t.id);
     for (const played of ["s1", "s2", "s3", "s5", "s6"]) expect(ids).not.toContain(song(played));
     if (ids.length < 100) expect(ids).toContain(song("s4"));
@@ -112,13 +116,13 @@ describe("Subsonic album lists", () => {
         expect(await list("recent")).toEqual([`${P}-al-3`, `${P}-al-1`]);
     });
 
-    it("frequent: the albums by raw play rows, legacy included, most played first", async () => {
-        // album 1: s1 x3, s3 x2, s5, s2 = 7 rows; album 3: 1. Someone else's plays of s1 and s4 do not count.
+    it("frequent: the albums by listens, most listened to first", async () => {
+        // album 1: s1 x3, s3 x2, s5, s2 = 7 listens (s1's ten-second pair is one); album 3: 1. Someone else's plays of s1 and s4 do not count.
         expect(await list("frequent")).toEqual([`${P}-al-1`, `${P}-al-3`]);
     });
 });
 
-it("the artist page, with no global list, falls back to this listener's own plays by raw rows then recency", async () => {
+it("the artist page, with no global list, falls back to this listener's own listens, most first and then the most recent", async () => {
     const top = jest.spyOn(deezerService, "getArtistTopTracks").mockResolvedValue([] as never);
     const image = jest.spyOn(dataCacheService, "getArtistImage").mockResolvedValue(null);
     const similar = jest.spyOn(artistSimilarity, "getSimilarArtists").mockResolvedValue([]);

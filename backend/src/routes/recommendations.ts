@@ -2,8 +2,8 @@ import { Router } from "express";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
-import { PLAYABLE_SONG } from "../utils/playableSong";
-import { recentPlayArtists } from "../services/stats/listens";
+import { playableSongSql } from "../utils/playableSong";
+import { listenedArtists } from "../services/stats/listens";
 import { parseLimit } from "./library/paging";
 import type { Artist } from "@prisma/client";
 
@@ -16,12 +16,12 @@ router.get("/for-you", async (req, res) => {
         // Default 10, at least 1, at most 50: a value that is not a number is the default, not NaN.
         const limitNum = parseLimit(req.query.limit, 10, 50);
 
-        // Get user's most played artists
-        // Plays of playable songs only: a Discover song feeds nothing until its album is liked into the library, and a
+        // Get the artists of the user's newest listens
+        // Listens of playable songs only: a Discover song feeds nothing until its album is liked into the library, and a
         // missing or corrupt one nothing until it is back.
-        const playArtists = await recentPlayArtists(userId, { song: PLAYABLE_SONG, take: 50 });
+        const playArtists = await listenedArtists(userId, { song: playableSongSql("t", "al"), take: 50 });
 
-        // Count plays per artist
+        // Count listens per artist (one entry per listen)
         const artistPlayCounts = new Map<
             string,
             { artist: Artist; count: number }
@@ -35,7 +35,7 @@ router.get("/for-you", async (req, res) => {
             }
         }
 
-        // Sort by play count and get top 3 seed artists
+        // Sort by listen count and get top 3 seed artists
         const topArtists = Array.from(artistPlayCounts.values())
             .sort((a, b) => b.count - a.count)
             .slice(0, 3);

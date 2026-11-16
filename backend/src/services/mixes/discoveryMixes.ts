@@ -5,7 +5,7 @@ import { normalizeArtistName } from "../artistIdentity";
 import { MIN_MIX_TRACKS, albumArtistSql, capByArtist } from "./artistCap";
 import { getSimilarArtists } from "../artistSimilarity";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
-import { mostPlayedTrackIds, playedMoreThanSql, recentPlayArtists } from "../stats/listens";
+import { listenCounts, listenedArtists, listenedMoreThanSql } from "../stats/listens";
 import {
     ProgrammaticMix,
     albumCoverUrls,
@@ -23,8 +23,10 @@ import {
 export async function generateTopTracksMix(
     userId: string
 ): Promise<ProgrammaticMix | null> {
-    // Counted over plays of playable songs only; tracksByIds keeps their most-played order.
-    const mostPlayed = await mostPlayedTrackIds(userId, { song: PLAYABLE_SONG, take: TRACK_LIMIT });
+    // Counted over listens of playable songs only; tracksByIds keeps their most-listened order.
+    const mostPlayed = (
+        await listenCounts(userId, { song: playableSongSql("t", "al"), take: TRACK_LIMIT })
+    ).map((c) => c.trackId);
 
     if (mostPlayed.length < 5) return null;
 
@@ -51,10 +53,10 @@ export async function generateRediscoverMix(
     userId: string,
     today: string
 ): Promise<ProgrammaticMix | null> {
-    // The library's songs this listener has played two times or fewer: every song but the few played more, looked up
-    // in one hashed list (counting each song's plays instead took 2.2 s at 500,000 songs).
+    // The library's songs this listener has listened to two times or fewer: every song but the few listened to more,
+    // looked up in one hashed list (counting each song's listens instead took 2.2 s at 500,000 songs).
     const underplayedIds = await seededTrackIds(
-        Prisma.sql`t.id NOT IN (${playedMoreThanSql(userId, 2)})`,
+        Prisma.sql`t.id NOT IN (${listenedMoreThanSql(userId, 2)})`,
         200,
         getSeededRandom(`rediscover-${today}`)
     );
@@ -80,9 +82,8 @@ export async function generateRediscoverMix(
 export async function generateArtistSimilarMix(
     userId: string
 ): Promise<ProgrammaticMix | null> {
-    const playArtists = await recentPlayArtists(userId, {
-        // Plays of songs on a library album, missing or corrupt ones included: this mix reads plays by the album's location only, so it names that half of the rule on purpose.
-        song: { album: PLAYABLE_SONG.album },
+    const playArtists = await listenedArtists(userId, {
+        song: playableSongSql("t", "al"),
         since: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
     });
 

@@ -1,19 +1,20 @@
 /**
  * What the listens module does with kept plays: the plays of songs that left the library with no copy to take them.
- * The stats page's totals are the same before and after a delete; the readers that offer songs, or need a song, leave
- * kept plays out; the audit still sees them in order. Real database; no mocks.
+ * The stats page's totals are the same before and after a delete; the readers that need a song count a kept play only
+ * toward a present song it is found by; the audit still sees them in order. Real database; no mocks.
  */
 import { prisma } from "../../../utils/db";
 import { deleteAlbums, deleteArtists, deleteSongs } from "../../library/albumDelete";
-import { PLAYABLE_SONG } from "../../../utils/playableSong";
+import { Prisma } from "@prisma/client";
+import { playableSongSql } from "../../../utils/playableSong";
 import {
     countPlaysBefore,
-    neverPlayedSql,
-    playCounts,
+    listenCounts,
+    listenedArtists,
+    listenedMoreThanSql,
+    neverListenedSql,
     playHistoryPages,
-    playedMoreThanSql,
     recentListenArtists,
-    recentPlayArtists,
     withListens,
 } from "../listens";
 import { hourDetail, listeningStats } from "../listening";
@@ -173,24 +174,43 @@ describe("the stats page's totals", () => {
 });
 
 describe("the readers that need a song", () => {
-    it("leave kept plays out of per-song counts and never see a null song", async () => {
-        const counted = await playCounts(USER);
-        expect(counted.map((c) => c.trackId).sort()).toEqual([id("x1"), id("x2"), id("y1"), id("z1")].sort());
+    const rule = playableSongSql("t", "al");
+    const never = () => prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT t.id FROM "Track" t WHERE t.id LIKE ${P + "%"} AND ${neverListenedSql(USER)}`;
+
+    it("leave a kept play no present song matches out of per-song counts and never see a null song", async () => {
+        const counted = await listenCounts(USER, { song: Prisma.sql`TRUE` });
+        // The Discover song z1 is no library listen, so it is in no count.
+        expect(counted.map((c) => c.trackId).sort()).toEqual([id("x1"), id("x2"), id("y1")].sort());
 
         await deleteSongs([id("x1")]);
 
-        const after = await playCounts(USER);
-        expect(after.map((c) => c.trackId).sort()).toEqual([id("x2"), id("y1"), id("z1")].sort());
+        const after = await listenCounts(USER, { song: Prisma.sql`TRUE` });
+        expect(after.map((c) => c.trackId).sort()).toEqual([id("x2"), id("y1")].sort());
         const over = await prisma.$queryRaw<Array<{ id: string }>>`
-            SELECT t.id FROM "Track" t WHERE t.id LIKE ${P + "%"} AND t.id NOT IN (${playedMoreThanSql(USER, 0)})`;
-        expect(over).toEqual([]);
-        expect((await prisma.$queryRaw<Array<{ id: string }>>`
-            SELECT t.id FROM "Track" t WHERE t.id LIKE ${P + "%"} AND ${neverPlayedSql(USER)}`)).toEqual([]);
+            SELECT t.id FROM "Track" t WHERE t.id LIKE ${P + "%"} AND t.id NOT IN (${listenedMoreThanSql(USER, 0)})`;
+        expect(over.map((r) => r.id).sort()).toEqual([id("z1")]);
+        expect((await never()).map((r) => r.id)).toEqual([id("z1")]);
     });
 
-    it("read no artist for a kept play", async () => {
+    it("give the kept plays back to a song with the same recording id when it returns", async () => {
         await deleteSongs([id("x1")]);
-        const artists = await recentPlayArtists(USER, { song: PLAYABLE_SONG });
+        await prisma.track.create({
+            data: {
+                id: id("x9"), albumId: id("alb_y"), title: `${P}Song x9`, trackNo: 5, duration: 200, filePath: `/${P}outside/x9.flac`,
+                fileModified: new Date(), fileSize: 1, recordingMbid: REC,
+            },
+        });
+
+        const counted = await listenCounts(USER, { song: rule });
+        // Two listens: the first two rows fold into one, the Subsonic scrobble three days on is the other.
+        expect(counted.find((c) => c.trackId === id("x9"))?.listens).toBe(2);
+        expect((await never()).map((r) => r.id)).not.toContain(id("x9"));
+    });
+
+    it("read no artist for a kept play no present song matches", async () => {
+        await deleteSongs([id("x1")]);
+        const artists = await listenedArtists(USER, { song: rule });
         expect(artists.map((a) => a.id).sort()).toEqual([id("art_x"), id("art_y"), id("art_y")]);
         expect((await recentListenArtists(USER, { take: 10 })).map((a) => a.artistId).sort()).toEqual([id("art_x"), id("art_y")]);
     });

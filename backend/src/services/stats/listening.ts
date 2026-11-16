@@ -179,12 +179,16 @@ export async function listeningStats(
     };
 }
 
-/** Listens of one track, folded like the stats page's but with Discover plays kept: the player bar counts what was heard of the song playing, wherever it lives. */
+/** Listens of one track, folded like the stats page's but wherever the song lives: the player bar counts what was heard of the song playing, and the Discover page plays through it too. */
 export async function trackPlayCount(userId: string, trackId: string): Promise<number> {
-    const rows = await prisma.$queryRaw<Array<{ n: number }>>(Prisma.sql`
-        ${listenRows(userId, "all", trackId)}
-        SELECT count(*)::int AS n FROM p`);
-    return rows[0]?.n ?? 0;
+    const count = async (discover?: true) => {
+        const rows = await prisma.$queryRaw<Array<{ n: number }>>(Prisma.sql`
+            ${listenRows(userId, { trackId, discover })}
+            SELECT count(*)::int AS n FROM p`);
+        return rows[0]?.n ?? 0;
+    };
+    // A song is on one album, so one of the two is always zero.
+    return (await count()) + (await count(true));
 }
 
 export interface HourDetail {

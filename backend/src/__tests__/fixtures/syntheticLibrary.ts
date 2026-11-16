@@ -21,7 +21,7 @@
  *     has 1-2 in Album.genres.
  *   - album years 1960-2024 (originalYear missing on 30% of albums); 4% of
  *     albums are DISCOVER, not LIBRARY.
- *   - two users. user1 plays 25 tracks (none with a missing file) 40..16 times
+ *   - two users. user1 listens to 25 tracks (none with a missing file) 40..16 times
  *     (distinct counts, so the top 20 is unambiguous), 3 plays on 5% of tracks, 1-2 plays on 25%. user2
  *     plays 35% of tracks 1-8 times.
  *
@@ -220,10 +220,12 @@ export async function seedSyntheticLibrary(prefix: string, tracks = TRACK_COUNT)
     }
     await inChunks(trackGenres, (data) => prisma.trackGenre.createMany({ data }));
 
-    // Plays.
-    const plays: { userId: string; trackId: string }[] = [];
+    // Plays. A song's plays sit ten minutes apart, further than a song is long, so each one is a listen of its own
+    // and the counts below are counts of listens.
+    const plays: { userId: string; trackId: string; playedAt: Date }[] = [];
+    const now = Date.now();
     const addPlays = (userId: string, id: string, n: number) => {
-        for (let k = 0; k < n; k++) plays.push({ userId, trackId: id });
+        for (let k = 0; k < n; k++) plays.push({ userId, trackId: id, playedAt: new Date(now - (k + 1) * 600_000) });
     };
     const top = new Set<number>();
     while (top.size < 25) {

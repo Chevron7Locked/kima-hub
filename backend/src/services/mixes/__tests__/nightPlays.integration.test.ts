@@ -46,9 +46,10 @@ const at = (hh: number, mm = 0) => new Date(BASE.getTime() + (hh * 60 + mm) * 60
 const NIGHT = at(23);
 const DAY = at(12);
 
+/** `times` listens, five minutes apart: past a song's length, so each is a listen of its own. The rows' heard flag is not read. */
 async function play(userId: string, trackId: string, times: number, at = NIGHT, heard = true) {
     await prisma.play.createMany({
-        data: Array.from({ length: times }, () => ({ userId, trackId, playedAt: at, heard })),
+        data: Array.from({ length: times }, (_, i) => ({ userId, trackId, playedAt: new Date(at.getTime() + i * 300_000), heard })),
     });
 }
 const clearPlays = () => prisma.play.deleteMany({ where: { userId: { startsWith: PREFIX } } });
@@ -103,7 +104,7 @@ const daysOf = async (s: typeof spec | typeof driveSpec, days: number, limit = 2
 };
 
 describe("night songs", () => {
-    it("are this listener's heard plays between 22:00 and 03:59 in the zone read, and nobody else's", async () => {
+    it("are this listener's listens between 22:00 and 03:59 in the zone read, and nobody else's, whether or not the rows were recorded as heard", async () => {
         await play(lib.user1, songs[0], 3);
         await play(lib.user1, songs[1], 1, at(3, 59));
         await play(lib.user1, songs[2], 1, at(4));
@@ -111,7 +112,7 @@ describe("night songs", () => {
         await play(lib.user1, songs[4], 2, NIGHT, false);
         await play(lib.user2, songs[5], 4);
         const found = await nightSongs(lib.user1, "UTC");
-        expect(found.map((s) => [s.id, s.plays])).toEqual([[songs[0], 3], [songs[1], 1]]);
+        expect(found.map((s) => [s.id, s.plays])).toEqual([[songs[0], 3], [songs[4], 2], [songs[1], 1]]);
     });
 
     it("move with the zone: 23:00 UTC is 08:00 in Tokyo and 19:00 in New York, but 00:00 in Lagos", async () => {

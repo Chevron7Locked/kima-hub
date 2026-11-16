@@ -15,20 +15,20 @@
  * so every process agrees). A refusal of this person's token is theirs alone and marks nothing. The sources' own caches
  * (ListenBrainz 6 hours, Deezer 24 hours) serve as this module's cache.
  *
- * Playable songs only, by the playable-song rule; plays of anything else rank nothing.
+ * Playable songs only, by the playable-song rule; listens of anything else rank nothing.
  */
 
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
-import type { Prisma } from "@prisma/client";
-import { PLAYABLE_SONG } from "../utils/playableSong";
+import { Prisma } from "@prisma/client";
+import { PLAYABLE_SONG, playableSongSql } from "../utils/playableSong";
 import { isMbid } from "./artistIdentity";
 import { nameKey } from "./nameFold";
 import { listenBrainzService } from "./listenBrainz";
 import { deezerService } from "./deezer";
 import { musicBrainzService } from "./musicbrainz";
-import { playCounts } from "./stats/listens";
+import { listenCounts } from "./stats/listens";
 
 /** How many songs each source is asked for, whatever the caller's limit. */
 const SOURCE_DEPTH = 50;
@@ -217,10 +217,10 @@ export async function popularSongs(args: PopularSongsArgs): Promise<PopularSong[
             },
             orderBy: [{ album: { year: { sort: "desc", nulls: "last" } } }, { albumId: "asc" }, { discNumber: "asc" }, { trackNo: "asc" }, { id: "asc" }],
         }),
-        playCounts(args.userId, { song: playable }),
+        listenCounts(args.userId, { song: Prisma.sql`${playableSongSql("t", "al")} AND al."artistId" = ${args.artist.id}` }),
         globalRanking(args, deadlineMs),
     ]);
-    const plays = new Map(listens.map((l) => [l.trackId, l.plays]));
+    const plays = new Map(listens.map((l) => [l.trackId, l.listens]));
     const byId = new Map<string, OwnedSong>(owned.map((t) => [t.id, t]));
     const byMbid = new Map<string, OwnedSong>();
     const byTitle = new Map<string, OwnedSong>();
@@ -274,12 +274,12 @@ export async function popularSongs(args: PopularSongsArgs): Promise<PopularSong[
         }
     }
 
-    // 2. This person's own plays.
+    // 2. This person's own listens.
     for (const l of listens) {
         const song = byId.get(l.trackId);
         if (!song || listed.has(song.id)) continue;
         listed.add(song.id);
-        list.push(ownedSong(song, "own", { playCount: l.plays }));
+        list.push(ownedSong(song, "own", { playCount: l.listens }));
     }
 
     // 3. First-release date, only asked for when the first two tiers left room.

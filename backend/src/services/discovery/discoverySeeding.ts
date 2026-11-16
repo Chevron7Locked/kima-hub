@@ -1,5 +1,6 @@
 /** Seed artists for discovery (recent plays, else the library) and album ownership checks. */
 
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/db';
 import { logger } from '../../utils/logger';
 import { lidarrService } from '../lidarr';
@@ -7,7 +8,7 @@ import { subWeeks } from 'date-fns';
 import { normalizeForMatching, stringSimilarity } from '../../utils/normalization';
 import { LIBRARY_LOCATION } from '../libraryFilters';
 import { hasRealArtistId, sameArtist } from './discoverEvidence';
-import { playCounts } from '../stats/listens';
+import { listenCounts } from '../stats/listens';
 import { ownedIndexVersion } from './ownedIndexVersion';
 import { ACTIVE_STATUSES } from '../downloads/jobStatuses';
 
@@ -37,28 +38,29 @@ export class DiscoverySeeding {
     private ownedIndexCache: (OwnedAlbumIndex & { builtAt: number; version: number }) | null = null;
     private ownedIndexLoad: { version: number; promise: Promise<OwnedAlbumIndex> } | null = null;
 
-    /** Seed artists from the user's last four weeks of plays, a play in the last two weeks counting double; the library's most engaged artists when there are too few plays. */
+    /** Seed artists from the user's last four weeks of listens, a listen in the last two weeks counting double; the library's most engaged artists when there are too few listens. */
     async getSeedArtists(userId: string, seedCount?: number): Promise<SeedArtist[]> {
         const limit = seedCount ?? this.DEFAULT_SEED_COUNT;
         const twoWeeksAgo = subWeeks(new Date(), 2);
         const fourWeeksAgo = subWeeks(new Date(), 4);
 
-        const recentPlays = await playCounts(userId, {
+        const recentListens = await listenCounts(userId, {
             since: fourWeeksAgo,
-            song: { album: { location: LIBRARY_LOCATION } },
+            // A seed is about taste: a song whose file has gone still says what this person likes, so every library song counts.
+            song: Prisma.sql`TRUE`,
             sources: ['LIBRARY'],
         });
 
-        const weightedPlays = recentPlays
-            .map(play => {
-                const weight = play.lastPlayedAt >= twoWeeksAgo ? 2 : 1;
+        const weightedPlays = recentListens
+            .map(listen => {
+                const weight = listen.lastListenedAt >= twoWeeksAgo ? 2 : 1;
                 return {
-                    trackId: play.trackId,
-                    weightedCount: play.plays * weight,
-                    rawCount: play.plays,
+                    trackId: listen.trackId,
+                    weightedCount: listen.listens * weight,
+                    rawCount: listen.listens,
                 };
             })
-            .filter(p => p.rawCount >= this.MIN_PLAYS_THRESHOLD) // Filter <5 plays
+            .filter(p => p.rawCount >= this.MIN_PLAYS_THRESHOLD) // Filter <5 listens
             .sort((a, b) => b.weightedCount - a.weightedCount)
             .slice(0, this.RECENT_PLAYS_LIMIT);
 

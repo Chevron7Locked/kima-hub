@@ -28,8 +28,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
-import { losslessCodecSql } from "../../utils/audioCodec";
-import { playableSongSql } from "../../utils/playableSong";
+import { bestCopyFirst, playableSongSql } from "../../utils/playableSong";
 import { listenersWithBusyPlayHistory, lockPlayHistory, songsWithBusyPlayHistory } from "../playRecording";
 import { keptRecordings, listenersOf } from "../stats/listens";
 
@@ -44,14 +43,6 @@ export interface Replacement {
     gone: string;
     history: string;
     queue: string | null;
-}
-
-/** The order that chooses among copies, for a query that names the copy `k` and its album `ka`. */
-export function bestCopyFirst(): Prisma.Sql {
-    return Prisma.sql`(${playableSongSql("k", "ka")}) DESC,
-                  (${losslessCodecSql(Prisma.sql`k.mime`)}) DESC,
-                  COALESCE(k.bitrate::float8, k."fileSize"::float8 * 8 / 1000 / NULLIF(k.duration, 0)) DESC NULLS LAST,
-                  k.id`;
 }
 
 /**

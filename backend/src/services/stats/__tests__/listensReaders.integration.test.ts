@@ -1,21 +1,15 @@
 /**
- * The listens module's questions that the other play readers ask (the shelf, the mixes' heard plays, the Subsonic album
- * lists, Discover seeding and its one-time sort, history repair, the public export, recording, recently listened), on the
- * real suite database. Each keeps the meaning its reader had: "played" counts raw Play rows, "listened" the listens
- * `listenRows` folds them into.
+ * The listens module's questions that read raw play rows on purpose: the play-history audit's pages, plays before a
+ * moment, a play between two moments (history repair), and who played these songs (an existence check for the
+ * library's deletes). Every count lives in `listenCounting.integration.test.ts`. Real suite database.
  */
-import { ListenSource, Prisma } from "@prisma/client";
+import { ListenSource } from "@prisma/client";
 import { prisma } from "../../../utils/db";
-import { PLAYABLE_SONG } from "../../../utils/playableSong";
 import {
-    albumsPlayedAtLeast,
     countPlaysBefore,
     hasPlayBetween,
     listenersOf,
-    playCounts,
     playHistoryPages,
-    playRowsSql,
-    recentListenArtists,
 } from "../listens";
 
 jest.setTimeout(60_000);
@@ -87,72 +81,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
     await cleanup();
-});
-
-const rowsOf = (user: string, args: Parameters<typeof playRowsSql>[1] = {}) =>
-    prisma.$queryRaw<{ id: string; trackId: string }[]>(
-        Prisma.sql`SELECT p.id, p."trackId" FROM (${playRowsSql(user, args)}) p ORDER BY p."playedAt", p.id`,
-    );
-
-describe("play rows", () => {
-    it("are this listener's Play rows, one per row, and nobody else's", async () => {
-        const a = await rowsOf(A);
-        expect(a).toHaveLength(8);
-        expect(a.every((r) => r.id.startsWith(`${P}play_`))).toBe(true);
-        expect((await rowsOf(B)).map((r) => r.trackId).sort()).toEqual([id("p1"), id("q1")]);
-    });
-
-    it("only go back as far as since", async () => {
-        const week = await rowsOf(A, { since: ago(7 * DAY) });
-        expect(week).toHaveLength(7);
-    });
-
-    it("keep only the rows the listen rule recorded when asked for heard rows", async () => {
-        const heard = await rowsOf(A, { heard: true });
-        expect(heard.map((r) => r.trackId)).toEqual([id("r2"), id("p1"), id("p1"), id("p1")]);
-        expect(await rowsOf(A, { heard: true, since: ago(7 * DAY) })).toHaveLength(3);
-    });
-});
-
-describe("play counts", () => {
-    it("are per song, raw rows, most played first and then the most recently played", async () => {
-        const counts = await playCounts(A, { song: {} });
-        expect(counts.map((c) => [c.trackId, c.plays])).toEqual([
-            [id("p1"), 3], [id("p2"), 2], [id("q1"), 1], [id("r1"), 1], [id("r2"), 1],
-        ]);
-        expect(counts[0].lastPlayedAt.getTime()).toBeGreaterThan(ago(1 * DAY + HOUR).getTime());
-    });
-
-    it("lets through only the songs the filter does", async () => {
-        const counts = await playCounts(A, { song: PLAYABLE_SONG });
-        expect(counts.map((c) => c.trackId)).not.toContain(id("q1"));
-    });
-
-    it("goes back only as far as since, stops at take, and keeps only the sources asked for", async () => {
-        expect((await playCounts(A, { since: ago(7 * DAY) })).map((c) => c.trackId)).not.toContain(id("r2"));
-        expect(await playCounts(A, { take: 2 })).toHaveLength(2);
-        const library = await playCounts(A, { sources: ["LIBRARY"] });
-        expect(library.map((c) => c.trackId).sort()).toEqual([id("p1"), id("q1"), id("p2"), id("r2")].sort());
-    });
-
-    it("counts only this listener", async () => {
-        expect((await playCounts(B, {})).map((c) => [c.trackId, c.plays]).sort()).toEqual([[id("p1"), 1], [id("q1"), 1]]);
-    });
-});
-
-describe("albums played at least", () => {
-    it("holds the albums with at least that many plays across at least that many songs, whoever played them", async () => {
-        const albums = [id("alb_p"), id("alb_q"), id("alb_r")];
-        // alb_p: 3 + 2 + 1 (B) = 6 plays over 2 songs; alb_q: 2 plays of 1 song; alb_r: 2 plays over 2 songs.
-        expect([...(await albumsPlayedAtLeast(albums, { plays: 3, songs: 2 }))].sort()).toEqual([id("alb_p")]);
-        expect([...(await albumsPlayedAtLeast(albums, { plays: 2, songs: 2 }))].sort()).toEqual([id("alb_p"), id("alb_r")]);
-        expect([...(await albumsPlayedAtLeast(albums, { plays: 2, songs: 1 }))].sort()).toEqual(albums);
-    });
-
-    it("looks only at the albums it is given", async () => {
-        expect([...(await albumsPlayedAtLeast([id("alb_r")], { plays: 1, songs: 1 }))]).toEqual([id("alb_r")]);
-        expect(await albumsPlayedAtLeast([], { plays: 1, songs: 1 })).toEqual(new Set());
-    });
 });
 
 /** The whole history, read in pages of the given size. */
@@ -250,47 +178,5 @@ describe("who played these songs", () => {
     it("reads through a transaction, and takes a list longer than a statement's bind parameters", async () => {
         const many = [id("r1"), ...Array.from({ length: 40_000 }, (_, i) => `${P}nosuch${i}`)];
         expect(await prisma.$transaction((tx) => listenersOf(tx, many))).toEqual([{ userId: A, trackId: id("r1") }]);
-    });
-});
-
-describe("artists of recent listens", () => {
-    const LIBRARY_ONLY = Prisma.sql`al.location = 'LIBRARY'`;
-
-    it("is one artist once, by their newest listen, newest first", async () => {
-        const rows = await recentListenArtists(A, { take: 10 });
-        // q1 an hour ago, r1 two hours ago, p2's one listen six hours ago, r2 thirty days ago: p1's three listens fold into p.
-        expect(rows.map((r) => r.artistId)).toEqual([id("art_q"), id("art_r"), id("art_p")]);
-    });
-
-    it("stamps each artist with the start of their newest listen: two rows ten seconds apart are one listen", async () => {
-        const rows = await recentListenArtists(A, { take: 10, where: LIBRARY_ONLY });
-        const p = rows.find((r) => r.artistId === id("art_p"))!;
-        expect(Math.abs(p.lastListenedAt.getTime() - ago(6 * HOUR).getTime())).toBeLessThan(5000);
-    });
-
-    it("fills the page: take distinct artists, however many listens one artist has", async () => {
-        expect((await recentListenArtists(A, { take: 2 })).map((r) => r.artistId)).toEqual([id("art_q"), id("art_r")]);
-        expect(await recentListenArtists(A, { take: 3 })).toHaveLength(3);
-    });
-
-    it("answers the same from the recent walk and from the whole history", async () => {
-        // take 1 is filled from the last weeks alone; take 2 needs r2's listen thirty days back, so the whole history is walked.
-        const options = { sources: ["LIBRARY" as const], where: LIBRARY_ONLY };
-        expect((await recentListenArtists(A, { take: 1, ...options })).map((r) => r.artistId)).toEqual([id("art_p")]);
-        expect((await recentListenArtists(A, { take: 2, ...options })).map((r) => r.artistId)).toEqual([id("art_p"), id("art_r")]);
-    });
-
-    it("lets through only the sources and songs asked for", async () => {
-        const rows = await recentListenArtists(A, { take: 10, sources: ["LIBRARY"], where: LIBRARY_ONLY });
-        // The Subsonic scrobble and the Discover song (by its album) are out: r2's old library play is r's only listen left.
-        expect(rows.map((r) => r.artistId)).toEqual([id("art_p"), id("art_r")]);
-    });
-
-    it("is this listener's own", async () => {
-        expect((await recentListenArtists(B, { take: 10 })).map((r) => r.artistId)).toEqual([id("art_p"), id("art_q")]);
-    });
-
-    it("refuses a take that is not a whole number", async () => {
-        await expect(recentListenArtists(A, { take: 1.5 })).rejects.toThrow();
     });
 });

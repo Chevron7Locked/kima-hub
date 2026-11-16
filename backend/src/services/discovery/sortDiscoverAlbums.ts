@@ -1,7 +1,7 @@
 /**
  * The one-time sort of albums the old scanner filed by guesswork. An album stays Discover only on a Discover download
  * record (discoverEvidence); a library album a download asked for goes back unless the listener made it theirs: a liked or
- * playlisted song, edits, KEEP_PLAYS plays across KEEP_SONGS songs, another own album by the artist, or a second copy.
+ * playlisted song, edits, KEEP_PLAYS listens across KEEP_SONGS songs, another own album by the artist, or a second copy.
  * Lidarr's Discover tag marks an artist and is no evidence.
  */
 import { prisma } from "../../utils/db";
@@ -17,10 +17,10 @@ import {
 } from "./discoverEvidence";
 import { nameKey } from "../nameFold";
 import { markLibraryChangedQuietly } from "../libraryChanged";
-import { albumsPlayedAtLeast } from "../stats/listens";
+import { albumsListenedAtLeast } from "../stats/listens";
 import { forgetOwnedIndex } from "./ownedIndexVersion";
 
-/** A Discover download played this much is a listener's: KEEP_PLAYS plays across KEEP_SONGS different songs. */
+/** A Discover download listened to this much is a listener's: KEEP_PLAYS listens by one person across KEEP_SONGS different songs. */
 const KEEP_PLAYS = 3;
 const KEEP_SONGS = 3;
 
@@ -50,7 +50,7 @@ async function albumsListenersKept(ids: string[]): Promise<Set<string>> {
         GROUP BY t."albumId"
         HAVING bool_or(EXISTS (SELECT 1 FROM "LikedTrack" l WHERE l."trackId" = t.id))
             OR bool_or(EXISTS (SELECT 1 FROM "PlaylistItem" p WHERE p."trackId" = t.id))`;
-    const played = await albumsPlayedAtLeast(ids, { plays: KEEP_PLAYS, songs: KEEP_SONGS });
+    const played = await albumsListenedAtLeast(ids, { listens: KEEP_PLAYS, songs: KEEP_SONGS });
     return new Set([...rows.map((r) => r.albumId), ...played]);
 }
 

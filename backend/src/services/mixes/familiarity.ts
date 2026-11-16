@@ -5,17 +5,16 @@
  * callers; a failed scan gives no boost and never fails the mix.
  */
 import crypto from "crypto";
-import { prisma } from "../../utils/db";
 import { playableSongSql } from "../../utils/playableSong";
 import { logger } from "../../utils/logger";
 import { redisClient } from "../../utils/redis";
 import { distributedLock, type LockLease } from "../../utils/distributedLock";
 import { LockLostError } from "../../utils/lockErrors";
 import { matchingContext, topScores } from "../matching/rank";
-import { playRowsSql } from "../stats/listens";
+import { listenCounts } from "../stats/listens";
 import { FAMILIAR_KEY_PREFIX } from "./cacheKeys";
 
-/** Only plays this recent count: a taste is read from the recent past, and the bound lets the (user, play time) index serve the scan. */
+/** Only listens this recent count: a taste is read from the recent past, and the bound lets the (user, play time) index serve the scan. */
 const FAMILIAR_LOOKBACK_DAYS = 365;
 /**
  * The most seeds used. The vibe scan's sound term is a weighted sum of the seeds' vectors, so seeds beyond the most
@@ -54,21 +53,13 @@ interface SeedRow {
 }
 
 /**
- * The listener's most-heard library songs of the lookback, most heard first; songs heard equally often go by the most recent
- * listen, so a light listener's seeds are what they played lately, not whichever ids sort first.
+ * The listener's most-listened-to playable songs of the lookback, most listened first; songs listened to equally often go
+ * by the most recent listen, so a light listener's seeds are what they played lately, not whichever ids sort first.
  */
 export async function seedsOf(userId: string, now: Date): Promise<SeedRow[]> {
     const since = new Date(now.getTime() - FAMILIAR_LOOKBACK_DAYS * 86_400_000);
-    return prisma.$queryRaw<SeedRow[]>`
-        SELECT p."trackId" AS id, count(*)::int AS plays
-        FROM (${playRowsSql(userId, { since, heard: true })}) p
-        JOIN "Track" t ON t.id = p."trackId"
-        JOIN "Album" a ON a.id = t."albumId"
-        WHERE ${playableSongSql("t", "a")}
-        GROUP BY p."trackId"
-        ORDER BY plays DESC, max(p."playedAt") DESC, p."trackId"
-        LIMIT ${FAMILIAR_SEEDS}
-    `;
+    const counts = await listenCounts(userId, { song: playableSongSql("t", "al"), since, take: FAMILIAR_SEEDS });
+    return counts.map((c) => ({ id: c.trackId, plays: c.listens }));
 }
 
 /** Which songs are the seeds, whatever their weights. */

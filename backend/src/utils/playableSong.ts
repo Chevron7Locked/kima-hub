@@ -44,8 +44,11 @@
  *   collectionFilter and yourDiscoverRgMbids (the collection's "show" choice: library albums, this listener's own
  *   current Discover albums, or both), and LIBRARY_LOCATION (the `Album.location` value of an owned album, for
  *   location checks that are not the rule).
+ * - bestCopyFirst: the order that chooses among copies of one recording, playable first, so the library sweep, the
+ *   song-history module and the listens module pick the same copy.
  */
 import { Prisma } from "@prisma/client";
+import { losslessCodecSql } from "./audioCodec";
 
 /** The rule for a Prisma `where` on Track. */
 export const PLAYABLE_SONG = { missingSince: null, corrupt: false, album: { location: "LIBRARY" } } as const;
@@ -86,4 +89,16 @@ export function ownedSongSql(song: string): Prisma.Sql {
     return Prisma.raw(
         `"${song}"."missingSince" IS NULL AND EXISTS (SELECT 1 FROM "Album" owned_album WHERE owned_album.id = "${song}"."albumId" AND owned_album.location = 'LIBRARY')`,
     );
+}
+
+/**
+ * The order that chooses among copies of one recording, for a query that names the copy `k` and its album `ka`: a playable
+ * one, then lossless, then the higher bitrate, then the id. The library sweep and the song-history module choose a
+ * successor by it, and the listens module attributes a kept play by it, so all three pick the same copy.
+ */
+export function bestCopyFirst(): Prisma.Sql {
+    return Prisma.sql`(${playableSongSql("k", "ka")}) DESC,
+                  (${losslessCodecSql(Prisma.sql`k.mime`)}) DESC,
+                  COALESCE(k.bitrate::float8, k."fileSize"::float8 * 8 / 1000 / NULLIF(k.duration, 0)) DESC NULLS LAST,
+                  k.id`;
 }

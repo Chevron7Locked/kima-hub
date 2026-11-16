@@ -91,11 +91,12 @@ beforeAll(async () => {
             .filter((i) => u(i, 15) < 0.4)
             .map((i) => ({ trackId: tid(i), genreId: `${PREFIX}gen_${u(i, 16) < 0.6 ? 0 : 1}` })),
     });
-    // This listener: a third of the songs played 1 to 4 times; someone else plays another third.
-    const plays: { id: string; userId: string; trackId: string }[] = [];
+    // This listener: a third of the songs listened to 1 to 4 times, a day apart so each row is a listen of its own;
+    // someone else plays another third.
+    const plays: { id: string; userId: string; trackId: string; playedAt?: Date }[] = [];
     for (let i = 0; i < TRACKS; i++) {
         const n = u(i, 17) < 0.33 ? 1 + Math.floor(u(i, 18) * 4) : 0;
-        for (let k = 0; k < n; k++) plays.push({ id: `${PREFIX}p_${i}_${k}`, userId: USER, trackId: tid(i) });
+        for (let k = 0; k < n; k++) plays.push({ id: `${PREFIX}p_${i}_${k}`, userId: USER, trackId: tid(i), playedAt: new Date(Date.now() - (k + 1) * 86_400_000) });
         if (u(i, 19) < 0.33) plays.push({ id: `${PREFIX}q_${i}`, userId: OTHER, trackId: tid(i) });
     }
     await prisma.play.createMany({ data: plays });
@@ -176,7 +177,7 @@ describe("the database draw and the in-memory draw", () => {
 describe("each mix that draws in the database picks what its Prisma filter picks in memory", () => {
     const seedOf = (name: string) => getSeededRandom(name);
 
-    it("Rediscover: this listener's songs played two times or fewer, in the library", async () => {
+    it("Rediscover: this listener's songs listened to two times or fewer, in the library", async () => {
         const counts = await prisma.track.findMany({
             where: { ...PLAYABLE_SONG, id: { startsWith: PREFIX } },
             select: { id: true, _count: { select: { plays: { where: { userId: USER } } } } },
@@ -198,12 +199,6 @@ describe("each mix that draws in the database picks what its Prisma filter picks
         ).map((t) => t.id);
         expect((await generateDeepCuts(USER, DAY))?.trackIds).toEqual(await capped(drawIds(unplayed, unplayed.length, seed)));
 
-        // The fixture writes a song's plays at one instant, which the listen rule counts as one listen: spread USER's
-        // plays a day apart so the rows counted below are that many listens.
-        await prisma.$executeRaw`
-            UPDATE "Play" p SET "playedAt" = now() - n.k * interval '1 day'
-            FROM (SELECT id, row_number() OVER (PARTITION BY "trackId" ORDER BY id) AS k FROM "Play" WHERE "userId" = ${USER}) n
-            WHERE p.id = n.id`;
         // USER has now played every song once more: none is unplayed for them, the low-play songs are drawn.
         await prisma.play.createMany({ data: unplayed.map((id) => ({ id: `${PREFIX}x_${id}`, userId: USER, trackId: id })) });
         try {

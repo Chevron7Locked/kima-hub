@@ -15,7 +15,7 @@ import { recipeMixGenerator } from "./recipeMix";
 import { weekdayOf } from "./mixDay";
 import { STEADY_BEAT } from "./recipes";
 import { spellingsOf } from "../stats/playable";
-import { listenedMoreThanSql, neverPlayedSql } from "../stats/listens";
+import { listenedMoreThanSql, neverListenedSql } from "../stats/listens";
 
 const WEEKLY_TRACK_LIMIT = 20;
 
@@ -171,12 +171,12 @@ export async function generateDeepCuts(
         minTracks: 15,
         limit: WEEKLY_TRACK_LIMIT,
     };
-    // Songs this listener has not played; when fewer than 15 are, songs they have listened to three times or fewer
+    // Songs this listener has never listened to; when fewer than 15 are, songs they have listened to three times or fewer
     // (listens as stats/listens.ts counts them, as the favorites station does).
     return (
         (await sampledMix({
             ...spec,
-            where: neverPlayedSql(userId),
+            where: neverListenedSql(userId),
         })) ??
         sampledMix({
             ...spec,

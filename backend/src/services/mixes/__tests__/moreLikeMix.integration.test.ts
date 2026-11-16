@@ -1,8 +1,7 @@
 /**
- * The More Like mix and Your Top 20 and Rediscover read plays through the listens module, each with the meaning it
- * had: More Like names the artist with the most plays in the last 7 days, counting every Play row of any library song
- * (a missing file's plays count, a Discover song's do not); Top 20 counts Play rows of playable songs; Rediscover
- * keeps songs played two times or fewer by this listener. Real test database; the similar-artist lookup is faked.
+ * The More Like mix and Your Top 20 and Rediscover count through the listens module: listens, not rows, of this
+ * listener's playable songs. More Like names the artist with the most listens in the last 7 days; Top 20 ranks songs by
+ * listens; Rediscover keeps songs listened to two times or fewer. Real test database; the similar-artist lookup is faked.
  */
 const similarOf = jest.fn();
 jest.mock("../../artistSimilarity", () => ({ getSimilarArtists: (...args: unknown[]) => similarOf(...args) }));
@@ -48,8 +47,9 @@ async function seedArtist(a: string, opts: { location?: "LIBRARY" | "DISCOVER"; 
 
 let n = 0;
 const play = (user: string, song: string, playedAt: Date) => ({ id: id(`play_${n++}`), userId: user, trackId: id(song), playedAt });
+/** `count` listens, five minutes apart: further apart than a song is long, so none folds into another. */
 const times = (user: string, song: string, count: number, from = 1) =>
-    Array.from({ length: count }, (_, k) => play(user, song, ago((from + k) * 60_000)));
+    Array.from({ length: count }, (_, k) => play(user, song, ago((from + k * 5) * 60_000)));
 
 beforeAll(async () => {
     await cleanup();
@@ -90,9 +90,19 @@ describe("More Like", () => {
         expect((await generateArtistSimilarMix(ME))?.name).toBe("More Like More y");
     });
 
-    it("counts a missing song's plays, as it always has", async () => {
+    it("leaves a missing song's listens out", async () => {
         await prisma.play.createMany({ data: [...times(ME, "x0", 1), ...times(ME, "m0", 3)] });
-        expect((await generateArtistSimilarMix(ME))?.name).toBe("More Like More m");
+        expect((await generateArtistSimilarMix(ME))?.name).toBe("More Like More x");
+    });
+
+    it("counts a repeat ten seconds after a listen as the same listen", async () => {
+        await prisma.play.createMany({
+            data: [
+                ...times(ME, "y0", 2),
+                play(ME, "x0", ago(30 * 60_000)), play(ME, "x0", ago(30 * 60_000 - 10_000)), play(ME, "x0", ago(30 * 60_000 - 20_000)),
+            ],
+        });
+        expect((await generateArtistSimilarMix(ME))?.name).toBe("More Like More y");
     });
 
     it("is none for a listener with no plays this week", async () => {
