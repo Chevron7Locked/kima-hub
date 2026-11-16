@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One genre for an album everywhere:** Subsonic apps and the web show the same genre for an album and its songs, and genre filters and genre lists agree with it. An album's own genres come first, and its artist's only when the album has none.
+- **Songs in playlists and shares show their genre in Subsonic apps.**
+- **Subsonic genre and starred lists keep a stable order** when items tie, so paging never repeats or skips one.
+- **Subsonic apps pick up changes made just before a restart,** and an artist re-run that removes shown genres.
+- **Re-running enrichment no longer overwrites a year or genres you set while it ran.**
 - **A song that can't be read answers a clean error** instead of a broken half-reply, and an empty file answers "not found" however a player asks for it.
 - **A shared link's play isn't given back while the same listener is still streaming it** from a second request.
 - **A shared link's play counts only once audio reaches the listener.** A listener who disconnects before the audio starts, or an app that only checks the song, no longer uses up one of the link's plays.
