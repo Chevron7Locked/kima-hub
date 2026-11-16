@@ -18,6 +18,7 @@ import { updateArtistCounts } from "./artistCountsService";
 import { findLocalArtistImage, parseStoredCover, storedCoverValue, versionOfFile } from "./imageStorage";
 import * as stageRecords from "./stages/stageRecords";
 import { runReconcile } from "./libraryReconcile";
+import { adoptKeptPlays } from "./library/songHistory";
 import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 import { discoverEvidence, isDiscoverEvidence, loadDiscoverRecords } from "./discovery/discoverEvidence";
@@ -451,6 +452,9 @@ export class MusicScannerService {
         }
         const reconcile = await runReconcile(new Date(startTime));
         result.tracksRemoved = reconcile.removed;
+        // A recording that is back on a library album takes back the plays kept when it left (the identification stage does
+        // the same as it names a song's recording; this catches the songs whose recording was already known).
+        await adoptKeptPlays();
 
         // Albums with no songs, then artists with no albums, go.
         // Neither the retirement nor this pruning moves the library marker: the songs went off the client's list when

@@ -92,7 +92,7 @@ describe("reconcileDeletedTracks", () => {
             data: { id: `${P}flac`, albumId: `${P}alb`, title: "SCHEMA", trackNo: 1, duration: 200, filePath: `/tmp/${P}flac.flac`,
                 fileModified: new Date(), fileSize: 1 },
         });
-        // A different song on the same album, also gone, with no copy: retired with its history.
+        // A different song on the same album, also gone, with no copy: retired; its like and playlist place go, its play stays.
         await prisma.track.create({
             data: { id: `${P}solo`, albumId: `${P}alb`, title: "Other", trackNo: 2, duration: 200, filePath: `/tmp/${P}solo.mp3`,
                 fileModified: new Date(), fileSize: 1, missingSince: new Date(Date.now() - 5 * MIN) },
@@ -114,7 +114,9 @@ describe("reconcileDeletedTracks", () => {
         expect(res.playlists.map((p) => p.playlistId)).toContain(`${P}pl`);
         expect(await prisma.track.findUnique({ where: { id: `${P}mp3` } })).toBeNull();
         expect(await prisma.play.count({ where: { trackId: `${P}flac` } })).toBe(2);
-        expect(await prisma.play.count({ where: { userId: `${P}user` } })).toBe(2);
+        // The retired song's play is kept, with what is needed to count it.
+        const kept = await prisma.play.findMany({ where: { userId: `${P}user`, trackId: null } });
+        expect(kept.map((k) => k.keptTitle)).toEqual(["Other"]);
         expect(await prisma.likedTrack.findUnique({ where: { userId_trackId: { userId: `${P}user`, trackId: `${P}flac` } } })).not.toBeNull();
         expect((await prisma.playlistItem.findMany({ where: { playlistId: `${P}pl` } })).map((i) => i.trackId)).toEqual([`${P}flac`]);
         const log = await prisma.removalLog.findMany({ where: { filePath: { in: [`/tmp/${P}mp3.mp3`, `/tmp/${P}solo.mp3`] } }, orderBy: { filePath: "asc" } });

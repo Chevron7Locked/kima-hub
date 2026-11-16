@@ -24,8 +24,12 @@
  *   `keepsTo`); the more protective source stands on a clash (`ownershipRank`). A person deleting an artist on purpose
  *   releases its keeps too.
  *
- * Out of this module: the song files and folders (their callers know the music root and what they may touch), and
- * what a deleted album's plays and likes become (the plays go with the songs, as the database does it). Every delete
+ * What becomes of a deleted song's history is `songHistory`'s, called here before the songs go: a copy of its recording
+ * on another library album takes its plays, like, playlist places and share links; with no copy its plays stay as kept
+ * plays and the rest goes with it. A delete that takes several songs of one recording (an album, an artist) lets none
+ * of them be the copy, and a delete of albums in several batches has already removed the earlier batches' songs.
+ *
+ * Out of this module: the song files and folders (their callers know the music root and what they may touch). Every delete
  * of albums or artists locks the rows it removes before it reads them (an artist's row, then its albums', each batch in
  * id order), so a scan filing a song into an album or an album under an artist waits for the commit and then files
  * fresh. `deleteSongs` locks its songs' albums before it deletes the songs. Where a
@@ -45,6 +49,7 @@ import { forgetOwnedIndex } from "../discovery/ownedIndexVersion";
 import { updateArtistCounts } from "../artistCountsService";
 import { markLibraryChangedQuietly } from "../libraryChanged";
 import { moveOwnerArtist } from "../mbidReassign";
+import { settleHistoryOfLeavingSongs } from "./songHistory";
 
 type Tx = Prisma.TransactionClient;
 
@@ -134,11 +139,12 @@ async function removeAlbums(
         // An album with no songs counted for nothing, so its artist's counts do not move.
         for (const row of rows) if (row._count.tracks > 0) owed.recount.add(row.artistId);
         await tx.$executeRaw`DELETE FROM "DiscoveryTrack" WHERE "trackId" IN (SELECT id FROM "Track" WHERE "albumId" = ANY(${albumIds}::text[]))`;
-        // A share link names its album or song with no foreign key, so it would outlive both.
-        await tx.$executeRaw`
-            DELETE FROM share_links
-             WHERE ("entityType" = 'album' AND "entityId" = ANY(${albumIds}::text[]))
-                OR ("entityType" = 'track' AND "entityId" IN (SELECT id FROM "Track" WHERE "albumId" = ANY(${albumIds}::text[])))`;
+        // A share link names its album or song with no foreign key, so it would outlive both. A song's link first goes
+        // to a copy of its recording when there is one (the settle below), and what is left of it goes with the song.
+        await tx.$executeRaw`DELETE FROM share_links WHERE "entityType" = 'album' AND "entityId" = ANY(${albumIds}::text[])`;
+        const leaving = await tx.track.findMany({ where: { albumId: { in: albumIds } }, select: { id: true } });
+        await settleHistoryOfLeavingSongs(tx, leaving.map((t) => t.id));
+        await tx.$executeRaw`DELETE FROM share_links WHERE "entityType" = 'track' AND "entityId" = ANY(${leaving.map((t) => t.id)}::text[])`;
         await tx.album.deleteMany({ where: { id: { in: albumIds } } });
         owed.albums += albumIds.length;
     }
@@ -201,6 +207,9 @@ export async function deleteSongs(
             } else {
                 await tx.$executeRaw`DELETE FROM "DiscoveryTrack" WHERE "trackId" = ANY(${songIds}::text[])`;
             }
+            // History follows a copy of the recording, else the plays stay (see `songHistory`); a share link not handed
+            // to a copy goes with its song, and then the songs go.
+            await settleHistoryOfLeavingSongs(tx, songIds);
             await tx.$executeRaw`DELETE FROM share_links WHERE "entityType" = 'track' AND "entityId" = ANY(${songIds}::text[])`;
             await tx.$executeRaw`DELETE FROM "Track" WHERE id = ANY(${songIds}::text[])`;
             owed.songs += songIds.length;

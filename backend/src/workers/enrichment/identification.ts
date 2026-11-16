@@ -39,6 +39,7 @@ import type { Outcome } from "../../utils/outcome";
 import { sourcePauseController } from "../../services/sourcePauseController";
 import { normalizeIsrc, pickRecording, recordingAgrees, type ExpectedRecording } from "../../services/recordingMatch";
 import { ACOUSTID_NOT_ASKED } from "./fingerprint";
+import { adoptKeptPlays } from "../../services/library/songHistory";
 import { trackQueue } from "../enrichmentQueues";
 import type { StageOffer, StageWork } from "./stageOffer";
 
@@ -397,6 +398,8 @@ export async function identifyTrack(
         where: { id: track.id },
         data: { recordingMbid: mbid },
     });
+    // A recording that comes back to the library (a re-added or re-filed album) takes back the plays kept when it left.
+    await adoptKeptPlays(prisma, [mbid]);
 
     // The track's ISRC comes from its file or an import, or from the recording it
     // was identified as. Only an absent one, or one MusicBrainz gave for an earlier

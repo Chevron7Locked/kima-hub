@@ -4,8 +4,9 @@
  * artifacts) before the delete, and a mass disappearance stands the sweep down. A song whose plays would move while a
  * listener's play history is being repaired is left for the next sweep, never waited for; so is a song whose stage
  * records or row another job holds at that moment. A retired song hands its history (plays, likes, playlist places,
- * share links, bookmarks) to the best copy of the same song on a library album, a corrupt one included and a Discover
- * one never; it leaves every saved queue, or is replaced there by the best copy a person can play (a queue is never pointed at a file
+ * share links, bookmarks) to the best copy of the same song on its album or, failing that, of the same recording on another
+ * library album, a corrupt one included and a Discover one never (the plays of a song nothing takes over are kept, see
+ * `library/songHistory`); it leaves every saved queue, or is replaced there by the best copy a person can play (a queue is never pointed at a file
  * that cannot play). A saved mood mix (and the songs it was last served) follows the history copy the same way, and
  * loses a song that has none.
  *
@@ -22,12 +23,12 @@ import { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { losslessCodecSql } from "../utils/audioCodec";
 import { retryOnDeadlock } from "../utils/dbConflict";
 import { nodeClock } from "../utils/nodeClock";
 import { playableSongSql } from "../utils/playableSong";
 import { playlistsHoldingTrackIds, type HeldPlaylist } from "./playlistEvents";
 import { deleteSongs } from "./library/albumDelete";
+import { bestCopyFirst, carryHistory, holdCopies, recordingCopies, type Replacement } from "./library/songHistory";
 import { songsWithBusyPlayHistory } from "./playRecording";
 import { entriesOf, hydrateQueue, ON_LIBRARY_ALBUM, type QueueEntry } from "./savedQueue";
 
@@ -58,17 +59,6 @@ export function transcodeArtifactPath(cachePath: string): string {
  */
 const MASS_MISSING_ABORT = 0.10;
 const MASS_MISSING_FLOOR = 10;
-
-/**
- * A missing song and the copies of the same song that take over from it: `history` is the best copy on a library album
- * (a corrupt one counts: its history waits there for a fixed file), `queue` the best of those a person can play, or
- * null when none can be played. They are the same copy whenever a playable one exists.
- */
-interface Replacement {
-    gone: string;
-    history: string;
-    queue: string | null;
-}
 
 export async function reconcileDeletedTracks(
     tx: Prisma.TransactionClient,
@@ -137,7 +127,7 @@ export async function reconcileDeletedTracks(
 
     // A file replaced by another copy of the same song (an album upgraded from mp3 to flac, say) hands its history
     // to the copy before it goes: plays, likes, playlist places, bookmarks and audit choices.
-    const replacedBy = await carryHistoryToReplacements(tx, pairs);
+    const replacedBy = await carryHistory(tx, pairs);
     const queueCopy = new Map(pairs.flatMap((p) => (p.queue ? [[p.gone, p.queue] as const] : [])));
 
     await tx.removalLog.createMany({
@@ -338,7 +328,8 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
  *
  * Best means: playable, then a lossless codec, then the higher bitrate (the file's own, `Track.bitrate`, when the scan
  * has read it; else its size over its duration, in kbps, which also counts tags and art; a copy with neither ranks last),
- * then the lower id, so every sweep chooses the same.
+ * then the lower id, so every sweep chooses the same. A song with no such copy follows its recording (`recordingMbid`) to the
+ * best library copy on another album (`songHistory`); with no recording id, or no copy, it has no entry.
  */
 async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Replacement[]> {
     // Titles are compared here, not in SQL: the database lower-cases ASCII only.
@@ -353,11 +344,7 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
           JOIN "Album" ka ON ka.id = k."albumId" AND ka.location = 'LIBRARY'
          WHERE g.id = ANY(${ids}::text[])
            AND k."missingSince" IS NULL
-         ORDER BY g.id,
-                  (${playableSongSql("k", "ka")}) DESC,
-                  (${losslessCodecSql(Prisma.sql`k.mime`)}) DESC,
-                  COALESCE(k.bitrate::float8, k."fileSize"::float8 * 8 / 1000 / NULLIF(k.duration, 0)) DESC NULLS LAST,
-                  k.id
+         ORDER BY g.id, ${bestCopyFirst()}
     `;
     const pairs: Replacement[] = [];
     for (const row of sameSlot) {
@@ -366,66 +353,11 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
         if (last?.gone !== row.gone) pairs.push({ gone: row.gone, history: row.kept, queue: row.playable ? row.kept : null });
         else if (last.queue === null && row.playable) last.queue = row.kept;
     }
+    // A song with no copy on its own album follows its recording to a library copy on another album (match by
+    // MusicBrainz recording id only; a song with no id follows nothing).
+    const found = new Set(pairs.map((p) => p.gone));
+    pairs.push(...(await recordingCopies(tx, ids.filter((id) => !found.has(id)), ids)));
     return pairs;
-}
-
-/**
- * Holds the copies chosen to take over, and answers the pairs whose copies are still there. A key share lock: it stops
- * a delete or key change of the copy until the sweep commits, and nothing a stage move or a scan writes to an ordinary
- * column. Taken after the retiring songs' own rows (a copy is never a retiring song, so the two never meet), in id
- * order, and never waited for in earnest: only a delete holds it up, and a deleted copy is no copy.
- */
-async function holdCopies(tx: Prisma.TransactionClient, pairs: Replacement[]): Promise<Replacement[]> {
-    if (pairs.length === 0) return pairs;
-    const wanted = [...new Set(pairs.flatMap((p) => (p.queue ? [p.history, p.queue] : [p.history])))].sort();
-    // What the copy is now, not what the candidate query saw: a copy whose file went missing or corrupt, or whose album
-    // left the library, in between is judged on the row as the lock finds it.
-    const held = await tx.$queryRaw<Array<{ id: string; playable: boolean; usable: boolean }>>`
-        SELECT t.id, (${playableSongSql("t", "al")}) AS playable,
-               (t."missingSince" IS NULL AND al.location = 'LIBRARY') AS usable
-          FROM "Track" t
-          JOIN "Album" al ON al.id = t."albumId"
-         WHERE t.id = ANY(${wanted}::text[])
-         ORDER BY t.id
-           FOR KEY SHARE OF t`;
-    const usable = new Set(held.filter((r) => r.usable).map((r) => r.id));
-    const playable = new Set(held.filter((r) => r.playable).map((r) => r.id));
-    return pairs
-        .filter((p) => usable.has(p.history))
-        .map((p) => ({ ...p, queue: p.queue !== null && playable.has(p.queue) ? p.queue : null }));
-}
-
-/**
- * Moves the history of each replaced song onto its copy. A user's like, bookmark or audit choice already on the
- * copy stays as it is, and the retiring row's duplicate goes with it. Every playlist entry moves, a playlist holding
- * the copy as well now holding it twice. The caller holds the shared play-history lock of every listener whose plays
- * move, so a repair of that history (which reads, judges and deletes under the exclusive one) never sees it change in
- * the middle.
- */
-async function carryHistoryToReplacements(tx: Prisma.TransactionClient, pairs: Replacement[]): Promise<Map<string, string>> {
-    for (const { gone, history: kept } of pairs) {
-        await tx.play.updateMany({ where: { trackId: gone }, data: { trackId: kept } });
-        await tx.$executeRaw`
-            UPDATE "LikedTrack" l SET "trackId" = ${kept}
-             WHERE l."trackId" = ${gone}
-               AND NOT EXISTS (SELECT 1 FROM "LikedTrack" o WHERE o."userId" = l."userId" AND o."trackId" = ${kept})`;
-        await tx.$executeRaw`
-            UPDATE "PlaylistItem" SET "trackId" = ${kept} WHERE "trackId" = ${gone}`;
-        // A share link names its song with no foreign key, so it follows the song to the copy; only a song nothing
-        // takes over loses its links (the delete module removes them).
-        await tx.$executeRaw`
-            UPDATE share_links SET "entityId" = ${kept} WHERE "entityType" = 'track' AND "entityId" = ${gone}`;
-        await tx.$executeRaw`
-            UPDATE subsonic_bookmarks b SET "trackId" = ${kept}
-             WHERE b."trackId" = ${gone}
-               AND NOT EXISTS (SELECT 1 FROM subsonic_bookmarks o WHERE o."userId" = b."userId" AND o."trackId" = ${kept})`;
-        await tx.$executeRaw`
-            UPDATE "PlayAuditIgnore" a SET "trackId" = ${kept}
-             WHERE a."trackId" = ${gone}
-               AND NOT EXISTS (SELECT 1 FROM "PlayAuditIgnore" o WHERE o."userId" = a."userId" AND o."trackId" = ${kept})`;
-    }
-    if (pairs.length > 0) logger.info(`[RECONCILE] ${pairs.length} retiring track(s) handed their history to another copy of the same song`);
-    return new Map(pairs.map((p) => [p.gone, p.history]));
 }
 
 /** Best-effort artifact unlinking after the transaction commits; failures never block a scan. */
