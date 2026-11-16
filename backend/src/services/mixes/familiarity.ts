@@ -1,7 +1,7 @@
 /**
  * "More like what this listener already plays", for recipes with a familiarity share: the matching engine's closest songs
- * to the listener's most-heard recent songs get a boost from 1 down to just above 0, added after the recipe standardises,
- * so it only lifts. The scan is cached in Redis (`mixes:` key) while the seeds are unchanged, shared by overlapping
+ * to the listener's most-listened-to recent songs (their listens, kept plays included: stats/listens.ts) get a boost from
+ * 1 down to just above 0, added after the recipe standardises, so it only lifts. The scan is cached in Redis (`mixes:` key) while the seeds are unchanged, shared by overlapping
  * callers; a failed scan gives no boost and never fails the mix.
  */
 import crypto from "crypto";
@@ -38,7 +38,10 @@ const FAMILIAR_EMPTY_CACHE_SECONDS = 60;
  */
 export const familiarTiming = { lockSeconds: 60, waitMs: 20_000, pollMs: 100 };
 
-/** Song ids and their boosts, 0 to 1, in matching order. */
+/**
+ * Song ids and their boosts, above 0 up to 1, as parallel arrays: `boosts[i]` is the boost of `ids[i]`. That pairing is
+ * all the order means (the recipe reads them as pairs): the closest songs come first by rank, then the seeds, each at 1.
+ */
 export interface FamiliarBoost {
     ids: string[];
     boosts: number[];
