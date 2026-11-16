@@ -48,7 +48,7 @@ export function bestCopyFirst(): Prisma.Sql {
 }
 
 /**
- * For each of `ids` with a recording id, the copies of that recording on library albums, as `Replacement`s. A copy that
+ * For each of `ids` that is on a library album and has a recording id (a Discover song hands its history to no one), the copies of that recording on library albums, as `Replacement`s. A copy that
  * is one of `leaving` (the songs going in the same delete) is no copy, and neither is one flagged missing. Songs with
  * no recording id, or no copy, have no entry.
  */
@@ -57,12 +57,18 @@ export async function recordingCopies(tx: Tx, ids: string[], leaving: string[] =
     const rows = await tx.$queryRaw<Array<{ gone: string; kept: string; playable: boolean }>>`
         SELECT g.id AS gone, k.id AS kept, (${playableSongSql("k", "ka")}) AS playable
           FROM "Track" g
+          JOIN "Album" ga ON ga.id = g."albumId" AND ga.location = 'LIBRARY'
           JOIN "Track" k ON k."recordingMbid" = g."recordingMbid" AND k.id <> ALL(${leaving}::text[])
           JOIN "Album" ka ON ka.id = k."albumId" AND ka.location = 'LIBRARY'
          WHERE g.id = ANY(${ids}::text[])
            AND g."recordingMbid" IS NOT NULL
            AND k."missingSince" IS NULL
          ORDER BY g.id, ${bestCopyFirst()}`;
+    return pairsOf(rows);
+}
+
+/** Folds candidate copies, best first within each leaving song, into one `Replacement` per song. */
+export function pairsOf(rows: Array<{ gone: string; kept: string; playable: boolean }>): Replacement[] {
     const pairs: Replacement[] = [];
     for (const row of rows) {
         const last = pairs.at(-1);
@@ -182,7 +188,8 @@ export async function settleHistoryOfLeavingSongs(tx: Tx, ids: string[]): Promis
 export async function adoptKeptPlays(db: Tx | typeof prisma = prisma, mbids?: string[]): Promise<number> {
     if (mbids && mbids.length === 0) return 0;
     const only = mbids ? Prisma.sql`AND x."keptRecordingMbid" = ANY(${mbids}::text[])` : Prisma.empty;
-    return db.$executeRaw`
+    try {
+        return await db.$executeRaw`
         UPDATE "Play" p
            SET "trackId" = c.id, "keptTitle" = NULL, "keptArtistName" = NULL, "keptAlbumTitle" = NULL,
                "keptRecordingMbid" = NULL, "keptDuration" = NULL, "keptLibrary" = NULL
@@ -192,8 +199,14 @@ export async function adoptKeptPlays(db: Tx | typeof prisma = prisma, mbids?: st
                   JOIN "Album" ka ON ka.id = k."albumId" AND ka.location = 'LIBRARY'
                  WHERE k."missingSince" IS NULL
                    AND k."recordingMbid" IN (SELECT x."keptRecordingMbid" FROM "Play" x
-                                              WHERE x."trackId" IS NULL AND x."keptLibrary" ${only})
+                                              WHERE x."keptRecordingMbid" IS NOT NULL AND x."trackId" IS NULL AND x."keptLibrary" ${only})
                  ORDER BY k."recordingMbid", ${bestCopyFirst()}
           ) c
          WHERE p."trackId" IS NULL AND p."keptLibrary" AND p."keptRecordingMbid" = c."recordingMbid"`;
+    } catch (error) {
+        // The chosen song was deleted between the question and the write (the foreign key says so): the plays stay kept,
+        // and the next scan or identification asks again. Inside a caller's transaction the failure belongs to the caller.
+        if (db === prisma && (error as { meta?: { code?: unknown } }).meta?.code === "23503") return 0;
+        throw error;
+    }
 }

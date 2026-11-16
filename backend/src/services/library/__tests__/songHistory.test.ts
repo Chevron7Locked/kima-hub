@@ -136,6 +136,20 @@ describe("a song that leaves the library, its recording still on another library
         expect(await prisma.likedTrack.count({ where: { trackId: id("copy") } })).toBe(0);
     });
 
+    it("hands nothing on when the leaving song is a Discover song, whatever library copy of its recording there is", async () => {
+        const a = await artist("a");
+        await album("disc", a, "DISCOVER", { gone: {} });
+        await album("lib", a, "LIBRARY", { copy: {} });
+        await play("gone");
+        await prisma.likedTrack.create({ data: { userId: id("user"), trackId: id("gone") } });
+
+        await deleteAlbums([id("disc")]);
+
+        expect(await playsOf("copy")).toBe(0);
+        expect(await prisma.likedTrack.count({ where: { trackId: id("copy") } })).toBe(0);
+        expect((await kept()).map((k) => k.keptLibrary)).toEqual([false]);
+    });
+
     it("matches by recording id alone: a song with none, or another recording, is no copy", async () => {
         const a = await artist("a");
         await album("old", a, "LIBRARY", { gone: {}, bare: { recording: null } });

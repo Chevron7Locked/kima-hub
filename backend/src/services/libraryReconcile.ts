@@ -28,7 +28,7 @@ import { nodeClock } from "../utils/nodeClock";
 import { playableSongSql } from "../utils/playableSong";
 import { playlistsHoldingTrackIds, type HeldPlaylist } from "./playlistEvents";
 import { deleteSongs } from "./library/albumDelete";
-import { bestCopyFirst, carryHistory, holdCopies, recordingCopies, type Replacement } from "./library/songHistory";
+import { bestCopyFirst, carryHistory, holdCopies, pairsOf, recordingCopies, type Replacement } from "./library/songHistory";
 import { songsWithBusyPlayHistory } from "./playRecording";
 import { entriesOf, hydrateQueue, ON_LIBRARY_ALBUM, type QueueEntry } from "./savedQueue";
 
@@ -346,13 +346,7 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
            AND k."missingSince" IS NULL
          ORDER BY g.id, ${bestCopyFirst()}
     `;
-    const pairs: Replacement[] = [];
-    for (const row of sameSlot) {
-        if (row.goneTitle.toLowerCase() !== row.keptTitle.toLowerCase()) continue;
-        const last = pairs.at(-1);
-        if (last?.gone !== row.gone) pairs.push({ gone: row.gone, history: row.kept, queue: row.playable ? row.kept : null });
-        else if (last.queue === null && row.playable) last.queue = row.kept;
-    }
+    const pairs = pairsOf(sameSlot.filter((row) => row.goneTitle.toLowerCase() === row.keptTitle.toLowerCase()));
     // A song with no copy on its own album follows its recording to a library copy on another album (match by
     // MusicBrainz recording id only; a song with no id follows nothing).
     const found = new Set(pairs.map((p) => p.gone));

@@ -49,6 +49,7 @@ import { forgetOwnedIndex } from "../discovery/ownedIndexVersion";
 import { updateArtistCounts } from "../artistCountsService";
 import { markLibraryChangedQuietly } from "../libraryChanged";
 import { moveOwnerArtist } from "../mbidReassign";
+import { retryOnDeadlock } from "../../utils/dbConflict";
 import { settleHistoryOfLeavingSongs } from "./songHistory";
 
 type Tx = Prisma.TransactionClient;
@@ -96,7 +97,9 @@ async function run(within: Tx | undefined, work: (tx: Tx) => Promise<Owed>): Pro
         const owed = await work(within);
         return { songs: owed.songs, albums: owed.albums, artists: owed.artists, settle: () => settle(owed) };
     }
-    const owed = await prisma.$transaction(work, { timeout: TRANSACTION_MS });
+    // Two deletes whose songs are copies of each other's recordings can each wait on the other's copy: the one Postgres
+    // ends runs again, from the start, as the whole delete is one transaction.
+    const owed = await retryOnDeadlock("a library delete", () => prisma.$transaction(work, { timeout: TRANSACTION_MS }));
     await settle(owed);
     return { songs: owed.songs, albums: owed.albums, artists: owed.artists, settle: async () => {} };
 }

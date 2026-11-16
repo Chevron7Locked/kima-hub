@@ -36,7 +36,7 @@
  * - every reader that offers, seeds or ranks songs (`playCounts`, `mostPlayedTrackIds`, `recentPlayArtists`,
  *   `recentListenArtists`, `neverPlayedSql`, `playedMoreThanSql`, `listenedMoreThanSql`, `playRowsSql`, `albumsPlayedAtLeast`,
  *   `listenersOf`) reads plays of songs that are there, and so never sees a kept play;
- * - a Discover play is never kept (a Discover song's plays are Discover's, and a kept one stays out of every statistic).
+ * - a kept Discover play (`keptLibrary` false) is in no reader here: it was a Discover play, and stays one.
  */
 
 import { Prisma, type Artist, type ListenSource } from "@prisma/client";
