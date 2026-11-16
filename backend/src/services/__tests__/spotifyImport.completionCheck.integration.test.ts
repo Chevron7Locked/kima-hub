@@ -13,6 +13,7 @@ import { prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { spotifyImportService } from "../spotifyImport";
 import { notificationService } from "../notificationService";
+import { requestScan } from "../../workers/scanRequest";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(60_000);
@@ -86,5 +87,26 @@ describe("checking an import's downloads", () => {
         const id = await downloading(["completed", "failed"]);
         await spotifyImportService.checkImportCompletion(id);
         expect(await row(id)).toMatchObject({ status: "scanning", progress: 75 });
+    });
+
+    it("requests no scan for an import another process settled while the check was counting", async () => {
+        const id = await downloading(["completed"]);
+        (requestScan as jest.Mock).mockClear();
+        // The import is read from its cache; the other process writes the row, not the cache.
+        const real = prisma.downloadJob.findMany.bind(prisma.downloadJob);
+        const spy = jest.spyOn(prisma.downloadJob, "findMany").mockImplementation((async (args: { select?: unknown }) => {
+            const found = await real(args as never);
+            if (args.select) await prisma.spotifyImportJob.update({ where: { id }, data: { status: "completed", progress: 100 } });
+            return found;
+        }) as never);
+
+        try {
+            await spotifyImportService.checkImportCompletion(id);
+        } finally {
+            spy.mockRestore();
+        }
+
+        expect(requestScan).not.toHaveBeenCalled();
+        expect(await row(id)).toMatchObject({ status: "completed", progress: 100 });
     });
 });

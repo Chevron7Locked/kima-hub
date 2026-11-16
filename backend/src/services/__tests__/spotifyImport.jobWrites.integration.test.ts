@@ -20,6 +20,8 @@ import { distributedLock } from "../../utils/distributedLock";
 import { LockLostError } from "../../utils/lockErrors";
 import { logger } from "../../utils/logger";
 import { dismissWaitingEntry } from "../playlistService";
+import { eventBus, type SSEEvent } from "../eventBus";
+import { notificationService } from "../notificationService";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 const P = "zz-import-writes";
@@ -190,6 +192,78 @@ describe("failing an import", () => {
         const saved = await row();
         expect(saved).toMatchObject({ status: "failed", error: "Worker crashed", tracksTotal: 2, tracksMatched: 1 });
         expect(titles(saved)).toEqual([entries[0].title, entries[2].title]);
+    });
+});
+
+describe("an import that ends in an error", () => {
+    const preview = { summary: { total: 1, inLibrary: 1 }, albumsToDownload: [], matchedTracks: [] } as never;
+    const crash = (job: ReturnType<typeof importJob>) => {
+        jest.spyOn(spotifyImportService as any, "buildPlaylist").mockRejectedValue(new Error("Disk full"));
+        return (spotifyImportService as any).processImport(job, [], preview);
+    };
+    const withRow = (status: string) =>
+        prisma.spotifyImportJob.create({
+            data: { id: JOB, userId: USER, spotifyPlaylistId: "pl", playlistName: `${P} list`, status, albumsTotal: 0, tracksTotal: 1, pendingTracks: [matched()] as any },
+        });
+
+    beforeEach(() => (notificationService.notifyImportFailed as jest.Mock).mockClear());
+
+    it("is marked failed in its row and its owner told", async () => {
+        await withRow("scanning");
+
+        await expect(crash(importJob([matched()]))).rejects.toThrow("Disk full");
+
+        expect(await row()).toMatchObject({ status: "failed", error: "Disk full" });
+        expect(notificationService.notifyImportFailed).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves an import a person cancelled meanwhile cancelled, and tells no one it failed", async () => {
+        await withRow("cancelled");
+
+        await expect(crash(importJob([matched()]))).rejects.toThrow("Disk full");
+
+        expect((await row()).status).toBe("cancelled");
+        expect(notificationService.notifyImportFailed).not.toHaveBeenCalled();
+    });
+
+    it("keeps the reason an import already failed with, and tells its owner only once", async () => {
+        await withRow("failed");
+        await prisma.spotifyImportJob.update({ where: { id: JOB }, data: { error: "No download jobs were created" } });
+
+        await expect(crash(importJob([matched()]))).rejects.toThrow("Disk full");
+
+        expect(await row()).toMatchObject({ status: "failed", error: "No download jobs were created" });
+        expect(notificationService.notifyImportFailed).not.toHaveBeenCalled();
+    });
+
+    it("throws the error that ended the import when recording it fails too", async () => {
+        await withRow("scanning");
+        jest.spyOn(prisma.spotifyImportJob, "updateMany").mockRejectedValueOnce(new Error("connection lost"));
+
+        await expect(crash(importJob([matched()]))).rejects.toThrow("Disk full");
+    });
+});
+
+describe("telling the import page", () => {
+    it("announces a change that was written, and nothing for one that was refused", async () => {
+        const heard: SSEEvent[] = [];
+        const stop = eventBus.subscribe(USER, { send: (event) => (heard.push(event), true) });
+        try {
+            await prisma.spotifyImportJob.create({
+                data: { id: JOB, userId: USER, spotifyPlaylistId: "pl", playlistName: `${P} list`, status: "scanning", albumsTotal: 0, tracksTotal: 1, pendingTracks: [matched()] as any },
+            });
+            await spotifyImportService.markJobFailed(JOB, "Worker crashed");
+            expect(heard.filter((e) => e.type === "import:progress").map((e) => e.payload.status)).toEqual(["failed"]);
+
+            heard.length = 0;
+            await prisma.spotifyImportJob.update({ where: { id: JOB }, data: { status: "completed" } });
+            await spotifyImportService.markJobFailed(JOB, "Worker crashed again");
+
+            expect((await row()).status).toBe("completed");
+            expect(heard.filter((e) => e.type === "import:progress")).toEqual([]);
+        } finally {
+            stop();
+        }
     });
 });
 

@@ -215,7 +215,8 @@ async function cacheAndAnnounceImportJob(job: ImportJob): Promise<void> {
 /**
  * Change only the fields given on an import's row, then cache and announce the row as the database holds it. A write
  * that closes an import (it failed) uses this instead of `saveImportJob`, so the counts and listing that a dismissal or
- * a scan changed since the job was read are not written back over.
+ * a scan changed since the job was read are not written back over. A write that finds the row in an excepted state, or
+ * gone, changes nothing and announces nothing: the page already heard of whatever put the row there. False then.
  */
 async function updateImportJobFields(
   importJobId: string,
@@ -227,8 +228,9 @@ async function updateImportJobFields(
     where: { id: importJobId, status: { notIn: exceptStatuses } },
     data: { ...data, updatedAt: new Date() },
   });
+  if (count === 0) return false;
   await publishImportJob(importJobId);
-  return count > 0;
+  return true;
 }
 
 const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed", "cancelled"];
@@ -1937,7 +1939,16 @@ class SpotifyImportService {
       job.status = "failed";
       job.error = error.message;
       job.updatedAt = new Date();
-      notifyImportFailed(job);
+      // The row is what the import page and the worker's failure handler read, so it is written here, and only the
+      // person whose import it still is hears of the failure: not one who cancelled it, whose import completed, or who
+      // was already told it failed. A write that itself fails is logged: the error that ended the import is the one thrown.
+      try {
+        if (await updateImportJobFields(job.id, { status: "failed", error: error.message }, CLOSED_IMPORT_STATES)) {
+          notifyImportFailed(job);
+        }
+      } catch (writeError) {
+        logger.error(`[Spotify Import] Job ${job.id}: could not record the failure: ${writeError}`);
+      }
       throw error;
     }
   }
@@ -2050,6 +2061,14 @@ class SpotifyImportService {
     jobLogger?.info(
       `All ${finalStatuses.length} download jobs finished (${finalCompleted} completed, ${finalFailed} failed)`,
     );
+
+    // The counting above took time, and the cache read at the top can be older still: a scan is not asked for an import
+    // that was cancelled, closed or handed on meanwhile.
+    const current = await prisma.spotifyImportJob.findUnique({ where: { id: importJobId }, select: { status: true } });
+    if (!current || NOT_WAITING_FOR_DOWNLOADS.includes(current.status as ImportJob["status"])) {
+      logger.debug(`   Job is ${current?.status ?? "gone"}, no scan requested`);
+      return;
+    }
 
     const { requestScan } = await import("../workers/scanRequest");
     const scanResult = await requestScan({
