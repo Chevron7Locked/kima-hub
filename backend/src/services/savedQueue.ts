@@ -559,6 +559,10 @@ async function changedSinceRead(current: PlaybackStateRow | null) {
 /** What a refused request is logged as (`reason`, which never carries a value the client sent) and, when it has one, what the client is told. */
 export type Refusal = { reason: string; answer?: string };
 
+/** A playback state as a client is shown it (null: none), and the answer to a save or clear that named a stale time. */
+export type ShownState = Awaited<ReturnType<typeof shownState>>;
+export type ChangedAnswer = Awaited<ReturnType<typeof changedSinceRead>>;
+
 /** A web save, read from a request body: every field is the shape the save needs, or left out. */
 export type WebSave = {
     playbackType: "track" | "audiobook" | "podcast";
@@ -646,8 +650,8 @@ export async function readPlaybackState(userId: string) {
 export async function saveWebState(
     userId: string,
     save: WebSave,
-): Promise<{ saved: Awaited<ReturnType<typeof shownState>> } | { changed: Awaited<ReturnType<typeof changedSinceRead>> }> {
-    const { playbackType, trackId, audiobookId, podcastId, queue, currentIndex, isShuffle, queueSource, seenAt: expectedAt } = save;
+): Promise<{ saved: ShownState } | { changed: ChangedAnswer }> {
+    const { playbackType, trackId, audiobookId, podcastId, queue, currentIndex, isShuffle, queueSource, seenAt } = save;
     const isTrack = playbackType === "track";
     const queueProvided = isTrack && queue !== undefined;
     const indexOnly = isTrack && !queueProvided && namesCurrentSong(currentIndex, trackId);
@@ -718,8 +722,8 @@ export async function saveWebState(
         };
         // One statement matches the time and writes, so two saves naming the same time cannot both write; a
         // state that is gone is never brought back by it.
-        if (expectedAt) {
-            const { count } = await db.playbackState.updateMany({ where: { userId, updatedAt: expectedAt }, data: update });
+        if (seenAt) {
+            const { count } = await db.playbackState.updateMany({ where: { userId, updatedAt: seenAt }, data: update });
             return count === 0 ? null : db.playbackState.findUnique({ where: { userId } });
         }
         return db.playbackState.upsert({
@@ -791,7 +795,7 @@ export async function saveWebState(
 export async function clearPlaybackState(
     userId: string,
     seen: unknown,
-): Promise<{ refused: Refusal } | { changed: Awaited<ReturnType<typeof changedSinceRead>> } | { cleared: number }> {
+): Promise<{ refused: Refusal } | { changed: ChangedAnswer } | { cleared: number }> {
     const at = seen === undefined ? null : seenTime(seen);
     if (seen !== undefined && !at) return { refused: { reason: SEEN_TIME_REQUIRED } };
     const { count, current } = await prisma.$transaction(async (tx) => {
