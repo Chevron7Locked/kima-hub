@@ -43,6 +43,7 @@
  * can see which of its jobs it was that settled.
  */
 
+import { randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
@@ -318,7 +319,7 @@ export function retryAlbum(
                 {
                     ...base,
                     type: "album",
-                    targetMbid: failed.targetMbid || `${NO_ALBUM_ID}${Date.now()}`,
+                    targetMbid: failed.targetMbid || `${NO_ALBUM_ID}${randomUUID()}`,
                     subject: `${plan.artistName} - ${plan.albumTitle}`,
                     status: "processing",
                     metadata: { ...metadata, retryAttempt: true },

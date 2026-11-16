@@ -809,6 +809,23 @@ describe("retryAlbum", () => {
         expect((made.metadata as any).notificationSent).toBeUndefined();
     });
 
+    it("gives each placeholder id of a Spotify import retry its own value, even within one millisecond", async () => {
+        const meta = { downloadType: "spotify_import", artistName: "Low", albumTitle: "Secret Name", spotifyImportJobId: "imp" };
+        const first = await job("dl_ra_ph1", { status: "failed", targetMbid: null, metadata: meta });
+        const second = await job("dl_ra_ph2", { status: "failed", targetMbid: null, metadata: { ...meta, albumTitle: "Other Name" } });
+        const now = jest.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+        try {
+            const a = await downloadJobs.retryAlbum(first, albumPlanOf(first));
+            const b = await downloadJobs.retryAlbum(second, albumPlanOf(second));
+            expect(a).toHaveProperty("replacement");
+            expect(b).toHaveProperty("replacement");
+            const ids = [a, b].map((o) => (o as { replacement: { targetMbid: string } }).replacement.targetMbid);
+            expect(new Set(ids).size).toBe(2);
+        } finally {
+            now.mockRestore();
+        }
+    });
+
     it("answers the job already downloading the album when a failed job is retried twice", async () => {
         const failed = await job("dl_ra_twice", { status: "failed", targetMbid: "rg-twice", metadata: {} });
         const plan = albumPlanOf(failed);
