@@ -91,6 +91,8 @@ export async function failRetryJob(jobId: string, error: string): Promise<void> 
 }
 
 export const NO_SOURCES = "No matching files found";
+/** What a retry's answer carries beside `NO_SOURCES` so a client tells "Soulseek has no files" without reading the words. */
+export const NO_SOURCES_CODE = "NO_SOURCES";
 
 /**
  * Soulseek's files for the job's pending song. With none, or when the search itself fails, the job is failed with the

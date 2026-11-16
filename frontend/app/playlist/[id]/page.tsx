@@ -17,6 +17,7 @@ import { useLeaveDeletedPlaylist } from "@/hooks/useLeaveDeletedPlaylist";
 import { useQueryClient } from "@tanstack/react-query";
 import { notify } from "@/lib/notify";
 import { announcePlaylistEvent } from "@/lib/playlist-events";
+import { retryNotice } from "@/lib/pending-retry";
 import { mosaicCovers } from "@/features/playlist/coverMosaic";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
@@ -220,14 +221,9 @@ export default function PlaylistDetailPage() {
             await api.retryPendingTrack(playlistId, pendingId);
             showRetryProgress(10000);
         } catch (error) {
-            // Soulseek has no files for the song: the server answers 404 with its message and NO_SOURCES as the error.
-            const { status, data } = error as { status?: number; data?: { message?: unknown; error?: unknown } };
-            if (status === 404 && data?.error === "No matching files found") {
-                notify.error("Track not found on Soulseek", { message: typeof data.message === "string" ? data.message : undefined });
-            } else {
-                console.error("Failed to retry download:", error);
-                notify.error("Failed to retry download");
-            }
+            console.error("Failed to retry download:", error);
+            const { title, message } = retryNotice(error, "Failed to retry download");
+            notify.error(title, { message });
         } finally {
             setRetryingTrackId(null);
         }
@@ -244,7 +240,8 @@ export default function PlaylistDetailPage() {
             }
         } catch (error) {
             console.error("Failed to retry all downloads:", error);
-            notify.error("Failed to retry downloads");
+            const { title, message } = retryNotice(error, "Failed to retry downloads");
+            notify.error(title, { message });
         } finally {
             setRetryingAll(false);
         }

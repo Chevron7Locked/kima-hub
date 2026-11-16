@@ -19,6 +19,7 @@ import {
     failRetryJob,
     findSources,
     NO_SOURCES,
+    NO_SOURCES_CODE,
     openRetryJob,
     soulseekTarget,
 } from "../services/pendingTrackRetry";
@@ -639,6 +640,7 @@ router.post("/:id/pending/:trackId/retry", requireAcquirePermission, async (req,
                 success: false,
                 message: "Track not found on Soulseek",
                 error: NO_SOURCES,
+                code: NO_SOURCES_CODE,
                 downloadJobId: job.id,
             });
         }

@@ -136,7 +136,7 @@ describe("POST /playlists/:id/pending/:trackId/retry", () => {
 
         const res = await retry(pt.id).expect(404);
 
-        expect(res.body).toMatchObject({ success: false, error: "No matching files found" });
+        expect(res.body).toMatchObject({ success: false, error: "No matching files found", code: "NO_SOURCES" });
         const [job] = await jobsFor(pt.id);
         expect(job).toMatchObject({ status: "failed", error: "No matching files found" });
         expect(mockDownload).not.toHaveBeenCalled();
