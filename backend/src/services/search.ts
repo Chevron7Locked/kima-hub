@@ -3,6 +3,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { assertSqlName, playableSongSql } from "../utils/playableSong";
+import { libraryChangedAt } from "./libraryChanged";
 import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
 import { genreKey, libraryAlbumIdsAnsweringToGenre } from "../utils/genreSql";
 import { searchRows, containsSql, hasNonAscii } from "./textMatch";
@@ -734,8 +735,9 @@ export class SearchService {
             };
         }
 
-        // Check Redis cache first. Per user: the answer includes the shows and episodes they follow.
-        const cacheKey = `search:all:${userId}:${normalizeCacheQuery(query)}:${limit}:${genre || ""}`;
+        // Check Redis cache first. Per user: the answer includes the shows and episodes they follow. The library-changed
+        // marker is part of the key, so an answer ends when a song stops or starts being playable.
+        const cacheKey = `search:all:${userId}:${await libraryChangedAt()}:${normalizeCacheQuery(query)}:${limit}:${genre || ""}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
@@ -805,9 +807,10 @@ export class SearchService {
         }
 
         // Check cache
-        // Shows and episodes depend on who is asking; the library's music does not.
+        // Shows and episodes depend on who is asking; the library's music does not. The library-changed marker is part of
+        // the key, so an answer ends when a song stops or starts being playable.
         const who = type === "podcasts" || type === "episodes" ? userId : "";
-        const cacheKey = `search:${type}:${who}:${normalizeCacheQuery(query)}:${limit}:${offset}:${genre || ""}`;
+        const cacheKey = `search:${type}:${who}:${await libraryChangedAt()}:${normalizeCacheQuery(query)}:${limit}:${offset}:${genre || ""}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
