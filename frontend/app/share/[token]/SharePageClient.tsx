@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { formatTime, formatDuration } from "@/lib/format";
 import { cascadeStyle } from "@/lib/motion";
-import { shareCoverPath, shareResolvePath, shareStreamPath } from "@/lib/shareAddresses";
+import { shareCoverPath, shareUncountedPath, shareResolvePath, shareStreamPath } from "@/lib/shareAddresses";
 import { CachedImage } from "@/components/ui/CachedImage";
 import { GradientSpinner } from "@/components/ui/GradientSpinner";
 
@@ -303,7 +303,7 @@ function SharePage({ token }: { token: string }) {
             const { title, hint } = failureText(failure);
             say(`${title}. ${hint}`);
         };
-        fetch(shareResolvePath(token), { signal: check.signal })
+        fetch(shareUncountedPath(token), { signal: check.signal })
             .then(async (res) => {
                 if (res.ok) return say("Playback error occurred.");
                 sayFailure({ status: res.status });

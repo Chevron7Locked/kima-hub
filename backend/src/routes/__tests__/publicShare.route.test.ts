@@ -213,6 +213,20 @@ describe("visits", () => {
         expect([await visits(expiredToken), await visits(goneToken)]).toEqual([0, 0]);
     });
 
+    it("a read asking count=0 (the page card, a check after a playback error) answers in full and counts none", async () => {
+        const token = await link("track", firstTrack);
+        const read = await request(app).get(`/share/${token}?count=0`);
+        expect(read.status).toBe(200);
+        expect(read.body.entityType).toBe("track");
+        expect(await visits(token)).toBe(0);
+
+        // A page open still adds exactly one, and any other value of the flag is an ordinary open.
+        await resolve(token);
+        expect(await visits(token)).toBe(1);
+        await request(app).get(`/share/${token}?count=1`);
+        expect(await visits(token)).toBe(2);
+    });
+
     it("counts none for a HEAD request, which opens nothing", async () => {
         const token = await link("track", firstTrack);
         expect((await request(app).head(`/share/${token}`)).status).toBe(200);

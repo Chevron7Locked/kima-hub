@@ -186,13 +186,13 @@ describe("SharePageClient", () => {
             answers = { tok: album };
         });
 
-        it("asks the share's resolve address once more, with a request that can be cancelled", async () => {
+        it("looks at the share once more, without counting a visit, with a request that can be cancelled", async () => {
             await open();
             expect(asked).toEqual(["/api/share/tok"]);
 
             await audioError();
 
-            expect(asked).toEqual(["/api/share/tok", "/api/share/tok"]);
+            expect(asked).toEqual(["/api/share/tok", "/api/share/tok?count=0"]);
             expect(signal).toBeDefined();
             await act(async () => root.unmount());
         });

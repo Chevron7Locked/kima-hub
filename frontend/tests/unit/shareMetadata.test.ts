@@ -26,8 +26,15 @@ describe("shareMetadata", () => {
         const fetchMock = backendReplies({ entityType: "album", entity: { title: "An Album", artist: { name: "Someone" } } });
         await shareMetadata("tok", incoming);
         const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-        expect(url).toMatch(/\/api\/share\/tok$/);
+        expect(url).toMatch(/\/api\/share\/tok\?count=0$/);
         expect(new Headers(init.headers).get("x-forwarded-for")).toBe("203.0.113.9");
+    });
+
+    it("reads the share without counting a visit", async () => {
+        const fetchMock = backendReplies({ entityType: "album", entity: { title: "An Album" } });
+        await shareMetadata("tok", incoming);
+        const [url] = fetchMock.mock.calls[0] as unknown as [string];
+        expect(new URL(url).searchParams.get("count")).toBe("0");
     });
 
     it("sends no forwarded address when the request had none", async () => {
@@ -63,6 +70,6 @@ describe("shareMetadata", () => {
     it("encodes the token in the backend address", async () => {
         const fetchMock = backendReplies({ entityType: "album", entity: { title: "x" } });
         await shareMetadata("a/b", incoming);
-        expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toMatch(/\/api\/share\/a%2Fb$/);
+        expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toMatch(/\/api\/share\/a%2Fb\?count=0$/);
     });
 });

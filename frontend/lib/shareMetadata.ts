@@ -1,10 +1,10 @@
 /* The metadata of a share page (title, Open Graph card), read from the backend by the web server on behalf of a visitor
  * or a chat app. The visitor's forwarded address goes along, so the backend's per-address limits see the visitor and
- * not the web server. */
+ * not the web server. The read is not a visit: a chat app unfurling the link opened nothing. */
 
 import type { Metadata } from "next";
 import { backendUrl } from "@/lib/backend-url";
-import { shareResolvePath } from "@/lib/shareAddresses";
+import { shareUncountedPath } from "@/lib/shareAddresses";
 import { sharePreviewImage } from "@/lib/sharePreviewImage";
 
 const plainTitle = (): Metadata => ({ title: "shared music - kima" });
@@ -20,7 +20,7 @@ export async function shareMetadata(token: string, requestHeaders: Headers): Pro
         const forwarded: Record<string, string> = {};
         const forwardedFor = requestHeaders.get("x-forwarded-for");
         if (forwardedFor) forwarded["x-forwarded-for"] = forwardedFor;
-        const res = await fetch(`${backendUrl}${shareResolvePath(token)}`, {
+        const res = await fetch(`${backendUrl}${shareUncountedPath(token)}`, {
             headers: forwarded,
             next: { revalidate: 0 },
         });

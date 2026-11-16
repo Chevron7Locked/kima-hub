@@ -168,8 +168,10 @@ router.get("/:token", shareResolveLimiter, async (req: Request, res: Response) =
             return res.status(404).json({ error: "Shared content no longer exists" });
         }
 
-        // A HEAD (a probe, a link checker) opens nothing: Express runs this handler for it, and it is not a visit.
-        if (req.method !== "HEAD") await countVisit(shareLink.id);
+        // Only a person opening the page is a visit. A HEAD (a probe, a link checker) opens nothing, and the web server's
+        // reads for the page card (a chat app unfurling the link) and for a check after a playback error ask `?count=0`.
+        // Anyone may send it: hiding a visit harms nobody.
+        if (req.method !== "HEAD" && req.query.count !== "0") await countVisit(shareLink.id);
 
         res.json({
             entityType: shareLink.entityType,
