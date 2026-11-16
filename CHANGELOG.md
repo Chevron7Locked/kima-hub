@@ -63,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Playback and the saved queue
 
+- **Seeking in a song a player has cached checks the file is the same one first.** If it changed, the whole song is sent instead of a piece of the new file, and a player that asks with a weak entity tag gets "not modified" when nothing changed.
 - **A saved queue shows the right song and place.** Reopening the web player, the iOS app or a Subsonic app names the queue's current song and its place, even when entries were dropped, replaced or can't play, and the place never points past the end. A save that names a song the queue lacks is ignored, and a place that is negative or not a whole number is refused. A queue holding the same song twice keeps its position only on the right copy and is no longer saved one song short when a song is removed at the same moment. A player that saves only the song it is on lands on that song's place.
 - **Songs that can't play stay in the saved queue, hidden.** A song whose file is missing or unreadable is kept and comes back when the file is fixed. When it is the current song, the song shown in its place starts from the beginning and your place in the hidden song is kept. Discover songs, and songs a library scan has removed or is removing, are never kept; when the current song is removed the queue moves on to the next one. A saved song or episode Kima no longer has is stored as none, and the queue shows each song's current title and details.
 - **Saving a queue behaves the same from every app.**
@@ -192,6 +193,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The split image no longer logs a Redis error at every start.**
 - **The playlists page, the podcast episodes header and the button labels on episode and album song lists are lowercase** like the rest of the app.
 - **A podcast refresh that finishes while the queue fails keeps its time,** and a podcast category id that is not a whole number is refused.
+- **Podcast episodes you already have pick up the show's later edits** to title, notes, audio link, length, size and date on refresh, and keep your progress. A field the feed leaves out keeps its stored value, a downloaded episode keeps its measured length, and an episode listed twice in a feed counts once. A refresh that fails partway reads the whole feed again next time, so new episodes are no longer missed, and an episode with an unreadable date no longer stops the refresh.
 
 ## [1.12.4] - 2026-11-07
 
