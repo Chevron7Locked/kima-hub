@@ -724,6 +724,23 @@ describe("askAgain", () => {
     });
 });
 
+describe("askAgain, which records it takes", () => {
+    it("takes the records in song order, so two moves that lock the same records lock them in the same order", async () => {
+        // Seeded last-song-first: a scan with no order would reach the later songs first.
+        const ids = [tid("o3"), tid("o2"), tid("o1")];
+        for (const id of ids) {
+            await seedTrack(id.slice(PREFIX.length + 1));
+            await put(id, "analysis", "failed");
+            await setColumns(id, "failed", "pending");
+        }
+        const reopened = await stageRecords.askAgain({ stages: ["analysis"], trackIds: ids, limit: 2 });
+        expect(reopened).toBe(2);
+        expect((await record(tid("o1"), "analysis"))?.status).toBe("pending");
+        expect((await record(tid("o2"), "analysis"))?.status).toBe("pending");
+        expect((await record(tid("o3"), "analysis"))?.status).toBe("failed");
+    });
+});
+
 describe("askAgain, as the writers around it use it", () => {
     it("keeps the evidence on the record when none is given", async () => {
         const id = await seedTrack("w1");

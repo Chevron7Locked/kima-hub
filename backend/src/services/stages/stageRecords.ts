@@ -127,7 +127,8 @@ const ASKED_AGAIN_SQL = `status = 'pending', failures = 0, redelivered = 0, retr
 /** What the analyzers and fpcalc say when a track's file is not on disk. */
 const FILE_GONE = /^File not found\b|ENOENT|No such file or directory/i;
 
-// ── Deadlocks ────────────────────────────────────────────────────────────
+/** A move over every song can run longer than an interactive transaction's default 5 s. */
+const BULK_TX = { timeout: 5 * 60_000, maxWait: 30_000 };
 
 // ── Claim ids ────────────────────────────────────────────────────────────
 
@@ -900,9 +901,6 @@ export async function failOutcome(
 
 // ── Whole-library moves ──────────────────────────────────────────────────
 
-/** A move over every song can run longer than an interactive transaction's default 5 s. */
-const BULK_TX = { timeout: 5 * 60_000, maxWait: 30_000 };
-
 /**
  * Closes the records whose prerequisite's output can never come: an embedding whose analysis closed (failed for good,
  * or parked by a person). Idempotent; runs every cycle, and never touches a `blocked` record or one already closed.
@@ -1054,7 +1052,7 @@ export async function flagMissingFiles(trackIds: readonly string[]): Promise<{ f
 
 /**
  * A scan found these songs' files again. Each song's flag clears and the questions the closure closed (FILE_MISSING,
- * undecided) open again at attempt 0; a record closed for another reason, or decided by a person, stays. The song's
+ * undecided) open again with their failures forgotten; a record closed for another reason, or decided by a person, stays. The song's
  * records are held before its row, the order of every move here, and a deadlock Postgres still picks it for runs once
  * more. Returns how many records it reopened.
  */
@@ -1148,8 +1146,9 @@ export async function askAgain(spec: AskAgainSpec, within?: Tx): Promise<number>
         ? ""
         : `, evidence = ${spec.evidence === null ? "NULL" : `${p(JSON.stringify(spec.evidence))}::jsonb`}`;
     const picked = `SELECT ts.id FROM "TrackStage" ts
-              WHERE ${where.join("\n                AND ")}${spec.limit !== undefined ? `\n              LIMIT ${Math.max(0, Math.floor(spec.limit))}` : ""}
-              FOR UPDATE OF ts`; // locks the picked rows and re-checks them, so a record claimed meanwhile is not reset
+              WHERE ${where.join("\n                AND ")}
+              ORDER BY ts."trackId", ts.stage${spec.limit !== undefined ? `\n              LIMIT ${Math.max(0, Math.floor(spec.limit))}` : ""}
+              FOR UPDATE OF ts`; // locks the picked rows in song order (the order every move takes them) and re-checks them, so a record claimed meanwhile is not reset
 
     const run = async (tx: Tx): Promise<number> => {
         const reopened = await tx.$queryRawUnsafe<Array<{ trackId: string; stage: string }>>(
