@@ -71,7 +71,7 @@ import libraryArtistsRouter, { resolveSimilarArtists } from "../../routes/librar
 import libraryAlbumsRouter from "../../routes/library/albums";
 import playlistsRouter from "../../routes/playlists";
 import { updateArtistCounts } from "../../services/artistCountsService";
-import { libraryAlbumIdsAnsweringToGenre } from "../genreSql";
+import { libraryAlbumIdsOfGenre } from "../genreSql";
 import recommendationsRouter from "../../routes/recommendations";
 import { deezerService } from "../../services/deezer";
 import { dataCacheService } from "../../services/dataCache";
@@ -1003,7 +1003,7 @@ describe("an artist with no playable song", () => {
     });
 
     it("has no album among a genre's library albums", async () => {
-        const ids = await libraryAlbumIdsAnsweringToGenre(GENRE);
+        const ids = await libraryAlbumIdsOfGenre(GENRE);
         expect(ids).toContain(`${SONG.playable}-al`);
         expect(ids).not.toContain(`${P}-vanished-al1`);
         expect(ids).not.toContain(`${P}-vanished-al2`);

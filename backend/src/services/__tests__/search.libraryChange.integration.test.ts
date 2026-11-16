@@ -6,6 +6,7 @@ import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { searchService } from "../search";
 import { libraryChangedAt, markLibraryChanged } from "../libraryChanged";
+import { getSystemSettings } from "../../utils/systemSettings";
 import { normalizeArtistName } from "../artistIdentity";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
@@ -73,4 +74,17 @@ it("offers an artist whose Discover album a like moved to the library once the m
     await libraryChanges();
 
     expect(await found("artists")).toBe(1);
+});
+
+it("reads the marker through the settings cache, so a search does not read the settings row itself", async () => {
+    await seed("LIBRARY");
+    await getSystemSettings();
+    const read = jest.spyOn(prisma.systemSettings, "findUnique");
+    try {
+        expect(await found("tracks")).toBe(1);
+        expect(await foundInAll()).toBe(1);
+        expect(read).not.toHaveBeenCalled();
+    } finally {
+        read.mockRestore();
+    }
 });

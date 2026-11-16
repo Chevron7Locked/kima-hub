@@ -22,7 +22,7 @@ import { playbackRouter } from "../playback";
 import { playlistRouter } from "../playlists";
 import { starredRouter } from "../starred";
 import { mapSong } from "../mappers";
-import { libraryAlbumIdsAnsweringToGenre, libraryAlbumIdsOfGenre, libraryGenreTotals } from "../../../utils/genreSql";
+import { libraryGenreTotals, songGenreFilterSql } from "../../../utils/genreSql";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(120_000);
@@ -203,9 +203,15 @@ describe("the genre filters of Subsonic match a genre exactly", () => {
         expect(idsOf(list<any>((await ask("getRandomSongs", { size: "500", genre: QUIET })).randomSongs.song))).toEqual([song(X)]);
     });
 
-    it("the broad filter, for radio and stations, still answers to genres that contain the one asked for", async () => {
-        expect((await libraryAlbumIdsOfGenre(FOLK)).filter((id) => id.startsWith(P))).toEqual([]);
-        expect((await libraryAlbumIdsAnsweringToGenre(FOLK)).filter((id) => id.startsWith(P))).toEqual([X]);
+    it("the broad song filter, for radio and stations, still answers to genres that contain the one asked for", async () => {
+        const songsOf = async (match: "exact" | "contains") => {
+            const filter = await songGenreFilterSql(FOLK, "t", "al", match);
+            const rows = await prisma.$queryRaw<{ id: string }[]>`
+                SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId" WHERE ${filter}`;
+            return rows.map((r) => r.id).filter((id) => id.startsWith(P));
+        };
+        expect(await songsOf("exact")).toEqual([]);
+        expect(await songsOf("contains")).toEqual([song(X)]);
     });
 });
 

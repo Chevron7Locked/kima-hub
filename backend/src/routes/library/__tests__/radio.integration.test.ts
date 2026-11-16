@@ -10,6 +10,7 @@
 import express from "express";
 import request from "supertest";
 import { prisma } from "../../../utils/db";
+import { genreKey } from "../../../utils/genreSql";
 import {
     LibraryHandle,
     Row,
@@ -109,14 +110,16 @@ const artistGenres = (r: Row) => {
     return personSet.length > 0 ? personSet : asGenreList(r.album.artist.genres);
 };
 
-// The genres a song shows, by hand (utils/genreSql.ts shownAlbumGenres): its album's merged genres, else its artist's,
-// with "_" markers and a tag equal to the artist's own name left out.
-const shownGenres = (r: Row) => {
+// The genres a song shows, by hand (utils/genreSql.ts shownSongGenres): its own tags when it has a usable one, else its
+// album's merged genres, else its artist's, with "_" markers and a tag equal to the artist's own name left out.
+const shownGenres = (r: Row, artistList: string[] = artistGenres(r)) => {
     const usable = (list: string[]) =>
         list.filter((g) => g !== "" && !g.startsWith("_") && g.toLowerCase() !== r.album.artist.name.toLowerCase());
+    const mine = usable(r.genreNames);
+    if (mine.length > 0) return mine;
     const own = asGenreList(r.album.userGenres).length > 0 ? asGenreList(r.album.userGenres) : asGenreList(r.album.genres);
     const ofAlbum = usable(own);
-    return ofAlbum.length > 0 ? ofAlbum : usable(artistGenres(r));
+    return ofAlbum.length > 0 ? ofAlbum : usable(artistList);
 };
 
 interface RadioTrack {
@@ -156,9 +159,9 @@ const branches: Branch[] = [
     { name: "decade 1970", query: { type: "decade", value: 1970 },
       clause: (r) => year(r) !== null && year(r)! >= 1970 && year(r)! < 1980 },
     { name: "genre rock", query: { type: "genre", value: "rock" },
-      clause: (r) => shownGenres(r).some((g) => g.toLowerCase().includes("rock")) },
+      clause: (r) => shownGenres(r).some((g) => genreKey(g).includes("rock")) },
     { name: "genre Pop (value is lower-cased)", query: { type: "genre", value: "Pop" },
-      clause: (r) => shownGenres(r).some((g) => g.toLowerCase().includes("pop")) },
+      clause: (r) => shownGenres(r).some((g) => genreKey(g).includes("pop")) },
     ...STATIONS.map(([query, recipe]) => ({
         name: `${Object.values(query).join(" ")} (recipe ${recipe})`,
         query,
@@ -597,22 +600,22 @@ describe("radio: favorites with no plays at all returns random tracks", () => {
 describe("radio: genre with an artist whose genres are not a JSON array", () => {
     let odd: string;
     beforeAll(async () => {
-        // An artist whose ENRICHED genres hold "rock" (no person-set list, so the enriched ones are
-        // what selects it). Non-array columns on it must read as no genres, not fail the request.
-        // None of its albums may answer to "rock" on their own either: the station also picks albums by their own genres,
-        // so an artist with such an album is legitimately in the answer, and the test would pass or fail by chance.
-        const hasRock = (list: unknown) => asGenreList(list).some((g) => g.toLowerCase().includes("rock"));
-        const albumsOf = (artistId: string) => rows.filter((r) => r.album.artist.id === artistId).map((r) => r.album);
-        odd = rows.find((r) => hasRock(r.album.artist.genres) && asGenreList(r.album.artist.userGenres).length === 0
-            && albumsOf(r.album.artist.id).every((a) => !hasRock(a.genres) && !hasRock(a.userGenres)))!.album.artist.id;
+        // An artist whose ENRICHED genres hold "rock" (no person-set list, so the enriched ones are what selects it).
+        // Non-array columns on it must read as no genres, not fail the request. A song shows its own tags first, so the
+        // artist's genres only matter for songs with none: the test checks what is played against the songs' own shown genres.
+        const hasRock = (list: unknown) => asGenreList(list).some((g) => genreKey(g).includes("rock"));
+        odd = rows.find((r) => hasRock(r.album.artist.genres) && asGenreList(r.album.artist.userGenres).length === 0)!.album.artist.id;
         await prisma.artist.update({ where: { id: odd }, data: { genres: "rock", userGenres: { rock: true } } });
     });
 
-    it("leaves that artist out instead of failing the request", async () => {
+    it("reads its genres as empty instead of failing the request", async () => {
         const res = await radio({ type: "genre", value: "rock", limit: LIMIT });
         expect(res.status).toBe(200);
         expect(res.body.tracks).toHaveLength(LIMIT);
-        expect((res.body.tracks as RadioTrack[]).filter((t) => t.artist.id === odd)).toEqual([]);
+        // Its songs play only through genres they show themselves, never through the artist's unreadable genres.
+        for (const t of (res.body.tracks as RadioTrack[]).filter((x) => x.artist.id === odd)) {
+            expect(shownGenres(byId.get(t.id)!, []).some((g) => genreKey(g).includes("rock"))).toBe(true);
+        }
     });
 });
 

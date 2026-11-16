@@ -31,7 +31,7 @@ async function clearCache() {
 }
 
 async function clean() {
-    await prisma.genre.deleteMany({ where: { id: `${P}-genre` } });
+    await prisma.genre.deleteMany({ where: { id: { in: [`${P}-genre`, `${P}-genre-other`] } } });
     await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
@@ -59,9 +59,12 @@ beforeAll(async () => {
             song("t3", `${P}-al-tag`, "Pfenwick zzc three"),
             // Untagged artist, but the song itself carries the genre.
             song("own", `${P}-al-plain`, "Pfenwick zzd own"),
+            // On the tagged artist's album, but the song itself is tagged with another genre: its own tags decide.
+            song("other", `${P}-al-tag`, "Pfenwick zze other"),
         ],
     });
     await prisma.genre.create({ data: { id: `${P}-genre`, name: GENRE, trackGenres: { create: { trackId: `${P}-t-own` } } } });
+    await prisma.genre.create({ data: { id: `${P}-genre-other`, name: "Zzdifferentsound", trackGenres: { create: { trackId: `${P}-t-other` } } } });
     await clearCache();
 });
 
@@ -90,11 +93,23 @@ it("keeps a song whose own genre matches though its artist is not tagged", async
     expect(titles(res.body)).toEqual(["Pfenwick zza one", "Pfenwick zzb two", "Pfenwick zzc three", "Pfenwick zzd own"]);
 });
 
+it("reads a song's own genre tags before its album's: the album's genre does not find a song tagged with another", async () => {
+    const res = await request(app).get("/search?q=pfenwick&type=tracks&genre=zzgenrestyle&limit=10");
+    expect(titles(res.body)).not.toContain("Pfenwick zze other");
+    const other = await request(app).get("/search?q=pfenwick&type=tracks&genre=zzdifferentsound&limit=10");
+    expect(titles(other.body)).toEqual(["Pfenwick zze other"]);
+});
+
+it("matches broadly: a genre also finds songs of genres that contain it, in any spelling", async () => {
+    const res = await request(app).get("/search?q=pfenwick&type=tracks&genre=Genre-Style&limit=10");
+    expect(titles(res.body)).toEqual(["Pfenwick zza one", "Pfenwick zzb two", "Pfenwick zzc three", "Pfenwick zzd own"]);
+});
+
 it("finds nothing for a genre no one carries, and everything without a genre", async () => {
     const none = await request(app).get("/search?q=pfenwick&type=tracks&genre=zzunknowngenre&limit=10");
     expect(titles(none.body)).toEqual([]);
     const all = await request(app).get("/search?q=pfenwick&type=tracks&limit=10");
-    expect(all.body.tracks).toHaveLength(7);
+    expect(all.body.tracks).toHaveLength(8);
 });
 
 it("filters the plain substring search the same way (a query full text search cannot use)", async () => {

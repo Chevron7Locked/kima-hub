@@ -3,9 +3,9 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { assertSqlName, playableSongSql } from "../utils/playableSong";
-import { libraryChangedAt } from "./libraryChanged";
+import { libraryChangedAtCached } from "./libraryChanged";
 import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
-import { genreKey, libraryAlbumIdsAnsweringToGenre } from "../utils/genreSql";
+import { songGenreFilterSql } from "../utils/genreSql";
 import { searchRows, containsSql, hasNonAscii } from "./textMatch";
 import { audiobookCoverAddress } from "./imageStorage";
 
@@ -17,33 +17,6 @@ interface SearchOptions {
     query: string;
     limit?: number;
     offset?: number;
-}
-
-/** What a genre filter keeps: the songs on albums showing the genre (utils/genreSql.ts), and the songs tagged with it themselves. */
-interface GenreScope {
-    albumIds: string[];
-    genreIds: string[];
-}
-
-/**
- * The albums and song genres that answer to a genre. Both are matched as genreKeys here, not in SQL: on SQL_ASCII the
- * database folds ASCII case only. A genre nothing carries has an empty scope, which keeps no song.
- */
-async function genreScopeOf(genre: string): Promise<GenreScope> {
-    const wanted = genreKey(genre);
-    if (wanted === "") return { albumIds: [], genreIds: [] };
-    const [albumIds, genres] = await Promise.all([
-        libraryAlbumIdsAnsweringToGenre(genre),
-        prisma.genre.findMany({ select: { id: true, name: true } }),
-    ]);
-    return { albumIds, genreIds: genres.filter((g) => genreKey(g.name) === wanted).map((g) => g.id) };
-}
-
-/** The genre condition for a raw song query that names the song `t` and its album `a`; nothing when there is no scope. */
-function genreSql(scope: GenreScope | undefined): Prisma.Sql {
-    if (!scope) return Prisma.empty;
-    return Prisma.sql`AND (a.id = ANY(${scope.albumIds}::text[])
-              OR EXISTS (SELECT 1 FROM "TrackGenre" tg WHERE tg."trackId" = t.id AND tg."genreId" = ANY(${scope.genreIds}::text[])))`;
 }
 
 /** A song's title as shown, lower-cased, for ordering: the edited title, else the file's. `song` is the table name or alias. */
@@ -370,13 +343,13 @@ export class SearchService {
         query,
         limit = 20,
         offset = 0,
-        scope,
-    }: SearchOptions & { scope?: GenreScope }): Promise<TrackSearchResult[]> {
+        genreFilter,
+    }: SearchOptions & { genreFilter?: Prisma.Sql }): Promise<TrackSearchResult[]> {
         // The ids are paged in the order of the title shown (Prisma cannot order by an edited title or the file's), then read.
         const found = await prisma.$queryRaw<{ id: string }[]>`
             SELECT t.id FROM "Track" t JOIN "Album" a ON a.id = t."albumId"
              WHERE ${containsSql([Prisma.sql`t.title`, Prisma.sql`t."displayTitle"`], query)} AND ${playableSongSql("t", "a")}
-             ${genreSql(scope)}
+             ${genreFilter ? Prisma.sql`AND ${genreFilter}` : Prisma.empty}
              ORDER BY ${shownSongTitleSql("t")} ASC, t.id ASC LIMIT ${limit} OFFSET ${offset}`;
         const results = await inOrder(found, (ids) => prisma.track.findMany({ where: { id: { in: ids } }, select: TRACK_FIELDS }));
 
@@ -405,7 +378,8 @@ export class SearchService {
         genre,
     }: SearchOptions & { genre?: string }): Promise<TrackSearchResult[]> {
         if (!query || query.trim().length === 0) return [];
-        const scope = genre ? await genreScopeOf(genre) : undefined;
+        // Near a genre, not only that genre: "hip hop" also finds "alternative hip-hop".
+        const genreFilter = genre ? await songGenreFilterSql(genre, "t", "a", "contains") : undefined;
         return this.ftsOrFallback(
             query,
             "Track",
@@ -425,12 +399,12 @@ export class SearchService {
             LEFT JOIN "Artist" ar ON a."artistId" = ar.id
             WHERE t."searchVector" @@ to_tsquery('english', ${tsquery})
             AND ${playableSongSql("t", "a")}
-            ${genreSql(scope)}
+            ${genreFilter ? Prisma.sql`AND ${genreFilter}` : Prisma.empty}
             ORDER BY rank DESC, ${shownSongTitleSql("t")} ASC, t.id ASC
             LIMIT ${take}
             OFFSET ${skip}
           `,
-            () => this.searchTracksFallback({ query, limit, offset, scope }),
+            () => this.searchTracksFallback({ query, limit, offset, genreFilter }),
             { limit, offset, fallbackOnEmpty: true },
         );
     }
@@ -737,7 +711,7 @@ export class SearchService {
 
         // Check Redis cache first. Per user: the answer includes the shows and episodes they follow. The library-changed
         // marker is part of the key, so an answer ends when a song stops or starts being playable.
-        const cacheKey = `search:all:${userId}:${await libraryChangedAt()}:${normalizeCacheQuery(query)}:${limit}:${genre || ""}`;
+        const cacheKey = `search:all:${userId}:${await libraryChangedAtCached()}:${normalizeCacheQuery(query)}:${limit}:${genre || ""}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {
@@ -810,7 +784,7 @@ export class SearchService {
         // Shows and episodes depend on who is asking; the library's music does not. The library-changed marker is part of
         // the key, so an answer ends when a song stops or starts being playable.
         const who = type === "podcasts" || type === "episodes" ? userId : "";
-        const cacheKey = `search:${type}:${who}:${await libraryChangedAt()}:${normalizeCacheQuery(query)}:${limit}:${offset}:${genre || ""}`;
+        const cacheKey = `search:${type}:${who}:${await libraryChangedAtCached()}:${normalizeCacheQuery(query)}:${limit}:${offset}:${genre || ""}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached) {

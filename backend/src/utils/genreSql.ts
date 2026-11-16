@@ -1,13 +1,12 @@
 /**
- * The genre key (genreKey), the one rule for the genres an album shows (shownAlbumGenres), the two filters
- * built on it (libraryAlbumIdsOfGenre: exactly that genre, for Subsonic; libraryAlbumIdsAnsweringToGenre: that genre or
- * one containing it, for the radio stations and the web's search), the song filter (songGenreFilterSql) and the genre
- * lists (computeGenreTotals, libraryGenreTotals, librarySongGenreTotals). An album shows its own merged genres, else its
- * artist's; a song shows its own tags (most voted first, shownGenresOfSongs), else its album's.
+ * The genre key (genreKey), the one rule for the genres an album shows (shownAlbumGenres), the album filter Subsonic uses
+ * (libraryAlbumIdsOfGenre: exactly that genre), the song filter (songGenreFilterSql: exactly that genre for Subsonic, or
+ * that genre and genres containing it for the radio stations and the web's search) and the genre lists (computeGenreTotals,
+ * libraryGenreTotals, librarySongGenreTotals). An album shows its own merged genres, else its artist's; a song shows its own
+ * tags (most voted first, shownGenresOfSongs), else its album's.
  *
  * Which genre a thing is found and counted under follows what it shows:
- * - Album filters and album counts (libraryAlbumIdsOfGenre, libraryAlbumIdsAnsweringToGenre, libraryGenreTotals) work by the
- *   album's genres. The radio stations and the web's search select albums, so they stay here.
+ * - Album filters and album counts (libraryAlbumIdsOfGenre, libraryGenreTotals) work by the album's genres.
  * - Song filters and the song-level list (songGenreFilterSql, librarySongGenreTotals, Subsonic's getSongsByGenre,
  *   getRandomSongs and getGenres) work by the genres a song shows: a song with a usable tag of its own is found and counted
  *   under its own tags only, a song with none under its album's. A genre only songs carry lists with no albums.
@@ -181,28 +180,33 @@ export async function libraryAlbumIdsOfGenre(genreValue: string): Promise<string
 }
 
 /**
- * The ids of the library's albums that show this genre or one containing it ("hip hop" answers "alternative hip-hop"),
- * the broad filter the radio stations and the web's search use to find music near a genre.
+ * How a requested genre is compared with the genres a thing shows: `exact` is that genre in any spelling and no other (the
+ * Subsonic genre filters), `contains` also takes genres that contain it ("hip hop" answers "alternative hip-hop"; the radio
+ * stations and the web's search, which look for music near a genre).
  */
-export async function libraryAlbumIdsAnsweringToGenre(genreValue: string): Promise<string[]> {
-    return libraryAlbumIdsWhere(genreValue, genreAnswersTo);
-}
+export type GenreMatch = "exact" | "contains";
 
 /**
  * A SQL condition on the playable songs that show this genre (any spelling of it), for a query that names the song
  * `"Track"` as `songAlias` and its album as `albumAlias`: a song with a usable tag of its own is in when one of its tags
- * is the genre and out otherwise, a song with none is in when its album shows the genre (libraryAlbumIdsOfGenre). A genre
- * nothing shows, or an empty name, matches no song. The database lists the candidate songs and their tags; the names are
- * compared here.
+ * matches and out otherwise, a song with none is in when its album shows a matching genre. `match` says what matches
+ * (GenreMatch); the Subsonic filters take the default, exactly that genre. A genre nothing shows, or an empty name,
+ * matches no song. The database lists the candidate songs and their tags; the names are compared here.
  */
-export async function songGenreFilterSql(genreValue: string, songAlias: string, albumAlias: string): Promise<Prisma.Sql> {
+export async function songGenreFilterSql(
+    genreValue: string,
+    songAlias: string,
+    albumAlias: string,
+    match: GenreMatch = "exact",
+): Promise<Prisma.Sql> {
     assertSqlName(songAlias, "songGenreFilterSql");
     assertSqlName(albumAlias, "songGenreFilterSql");
     const wanted = genreKey(genreValue);
     if (wanted === "") return Prisma.sql`1 = 0`;
-    const albumIds = await libraryAlbumIdsOfGenre(genreValue);
+    const matches = match === "exact" ? genreIsWanted : genreAnswersTo;
+    const albumIds = await libraryAlbumIdsWhere(genreValue, matches);
     const genreIds = (await prisma.genre.findMany({ select: { id: true, name: true } }))
-        .filter((g) => genreIsWanted(g.name, wanted))
+        .filter((g) => matches(g.name, wanted))
         .map((g) => g.id);
     const rows = await prisma.$queryRaw<{ id: string; name: string; normalizedName: string | null; tags: string[] }[]>(Prisma.sql`
         SELECT t.id, ar.name, ar."normalizedName", array_agg(g.name) AS tags
@@ -220,7 +224,7 @@ export async function songGenreFilterSql(genreValue: string, songAlias: string, 
     for (const row of rows) {
         const own = usableGenres(row.tags, row);
         if (own.length === 0) continue;
-        (own.some((name) => genreIsWanted(name, wanted)) ? included : excluded).push(row.id);
+        (own.some((name) => matches(name, wanted)) ? included : excluded).push(row.id);
     }
     const song = Prisma.raw(`"${songAlias}"`);
     const album = Prisma.raw(`"${albumAlias}"`);

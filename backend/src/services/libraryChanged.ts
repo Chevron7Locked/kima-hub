@@ -15,12 +15,21 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { PLAYABLE_SONG } from "../utils/playableSong";
-import { readSystemSettingsFresh, saveSystemSettings } from "../utils/systemSettings";
+import { getSystemSettings, readSystemSettingsFresh, saveSystemSettings } from "../utils/systemSettings";
 
 /** The moment of the last change, in milliseconds since the epoch; 0 before settings exist. */
 export async function libraryChangedAt(): Promise<number> {
     const row = await readSystemSettingsFresh("libraryChangedAt");
     return row?.libraryChangedAt?.getTime() ?? 0;
+}
+
+/**
+ * `libraryChangedAt` through the settings cache, for a reader that asks on every request (a search keys its cached answer by
+ * it). A save in this process drops the cache, so a move made here is seen at once; one made in another process is seen
+ * when the cache next expires.
+ */
+export async function libraryChangedAtCached(): Promise<number> {
+    return (await getSystemSettings())?.libraryChangedAt?.getTime() ?? 0;
 }
 
 /**
