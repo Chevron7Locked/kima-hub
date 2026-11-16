@@ -111,7 +111,7 @@ it("the settings page sending every field back tells a listener only about what 
 });
 
 // Audiobookshelf off means no stored progress, whichever save finds it so: a clear that failed is retried by the
-// next save, and progress left behind by an older version goes the same way.
+// next save, and so is any progress that is somehow still there.
 it("clears listening progress on every save while Audiobookshelf is off", async () => {
     const progress = { userId: ADMIN, audiobookshelfId: "zz-book", title: "zz-book" };
     try {

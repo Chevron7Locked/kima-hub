@@ -177,8 +177,9 @@ async function backfillImages(kind: BackfillKind, stop: StopCheck, signal: Abort
                         if (staged) {
                             const localPath = staged.address;
                             // Only where the row still holds the address that was read: one a person set during the download
-                            // stands, and so does any picture stored under the same name. The row's address and the file
-                            // change together: the file is renamed into place while the row's change is still uncommitted.
+                            // stands, and so does any picture stored under the same name. The row stays locked while the file is renamed
+                            // into place, so no edit lands between the guard and the rename. If the commit itself then fails, the
+                            // new file is in place under the old address: the picture is right, only its cache-bust version is stale.
                             let placed: { own: string | null } | null;
                             try {
                                 placed = await prisma.$transaction(async (tx) => {
