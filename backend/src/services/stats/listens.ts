@@ -24,9 +24,9 @@
  * Plays are read only here: no other module reads the Play table (the writes that record, relabel, move or delete rows stay with their owners).
  *
  * Kept plays: a song removed with no copy to take its history leaves its plays (`Play.trackId` null, with the song's
- * title, artist, album, recording and length written on each, and whether its album was a library or a Discover album).
+ * title, artist, album, recording and length written on each; only a library song's plays are kept, a Discover song's go with it).
  * Each reader keeps its meaning and counts a kept play wherever it can attribute it:
- * - the stats page (`withListens`) folds kept library plays with the rest, so its plays, listening time, clock, sources,
+ * - the stats page (`withListens`) folds kept plays with the rest, so its plays, listening time, clock, sources,
  *   distinct songs, artists and albums and per-artist counts are what they were before the delete. A kept play's artist and
  *   album are the ones of that name that exist now, else its stored names. What needs the song's audio (the taste plot,
  *   drift, key, era of an album not found, shape) or the song itself (top songs, the songs of an hour or a region) reads
@@ -36,7 +36,7 @@
  * - every reader that offers, seeds or ranks songs (`playCounts`, `mostPlayedTrackIds`, `recentPlayArtists`,
  *   `recentListenArtists`, `neverPlayedSql`, `playedMoreThanSql`, `listenedMoreThanSql`, `playRowsSql`, `albumsPlayedAtLeast`,
  *   `listenersOf`) reads plays of songs that are there, and so never sees a kept play;
- * - a kept Discover play (`keptLibrary` false) is in no reader here: it was a Discover play, and stays one.
+ * - `keptRecordings` names the recordings kept plays carry, for the delete module's adoption of them by a returning song.
  */
 
 import { Prisma, type Artist, type ListenSource } from "@prisma/client";
@@ -133,7 +133,7 @@ export function listenRows(
             LEFT JOIN LATERAL (SELECT b.id FROM "Album" b
                                 WHERE b."artistId" = ka.id AND b.title = p."keptAlbumTitle" AND b.location = 'LIBRARY'
                                 ORDER BY b.id LIMIT 1) kb ON TRUE
-            WHERE p."userId" = ${userId} AND p."trackId" IS NULL AND p."keptLibrary"`
+            WHERE p."userId" = ${userId} AND p."trackId" IS NULL AND p."keptTitle" IS NOT NULL`
         : Prisma.empty;
     const extra = libraryOnly ? Prisma.sql`, s.artist_key, s.album_key, s.kept_title, s.kept_artist` : Prisma.empty;
     return Prisma.sql`
@@ -450,6 +450,19 @@ export async function listenersOf(
         SELECT DISTINCT "trackId", "userId" FROM "Play"
          WHERE "trackId" = ANY(${trackIds}::text[])
          ORDER BY "userId", "trackId"`;
+}
+
+/**
+ * The recordings (MusicBrainz recording ids) that kept plays carry: the plays of songs that left the library with no copy
+ * and have not attached to a song again. `mbids` narrows it to those recordings; left out, every one. Anyone's plays.
+ */
+export async function keptRecordings(db: Prisma.TransactionClient | typeof prisma, mbids?: string[]): Promise<string[]> {
+    if (mbids && mbids.length === 0) return [];
+    const rows = await db.$queryRaw<Array<{ mbid: string }>>`
+        SELECT DISTINCT "keptRecordingMbid" AS mbid FROM "Play"
+         WHERE "trackId" IS NULL AND "keptTitle" IS NOT NULL AND "keptRecordingMbid" IS NOT NULL
+           ${mbids ? Prisma.sql`AND "keptRecordingMbid" = ANY(${mbids}::text[])` : Prisma.empty}`;
+    return rows.map((r) => r.mbid);
 }
 
 /**

@@ -8,15 +8,19 @@
  * A copy on a Discover album is no copy (a Discover song receives no history), nor is one whose file is missing, nor a
  * song with no recording id, which follows nothing. A like both songs had keeps the earlier `likedAt`.
  *
- * When no copy takes the history, the plays stay: `Play.trackId` is set null by the database when the song goes, and
- * `keepPlays` first writes on each play what is needed to count it (title, artist, album, recording, length, and whether
- * its album was a library or a Discover album), in the delete's own transaction. Likes, playlist places, share links and
- * the rest go with the song, as they always have. The listens module reads kept plays (see its header).
+ * When no copy takes the history, the plays of a library song stay: `Play.trackId` is set null by the database when the
+ * song goes, and `keepPlays` first writes on each play what is needed to count it (title, artist, album, recording and
+ * length), in the delete's own transaction. A Discover song's plays go with it: Discover is only Discover, nothing reads
+ * them, and a kept play is therefore always a library play. Likes, playlist places, share links and the rest go with the
+ * song, as they always have. The listens module reads kept plays (see its header).
  *
- * A kept library play whose recording a library song holds again attaches to that song (`adoptKeptPlays`): the
- * identification stage calls it as it writes a song's recording id, and the scan calls it for every recording left over, so
- * a recording that returns on a re-added or re-filed album has its plays back. A Discover play is never adopted: it was a
- * Discover play.
+ * A kept play whose recording a library song holds again attaches to that song (`adoptKeptPlays`): the identification
+ * stage calls it as it writes a song's recording id, and the scan calls it for every recording left over, so a recording
+ * that returns on a re-added or re-filed album has its plays back.
+ *
+ * Plays move or become kept only while no repair of their listener's history runs (`lockPlayHistory`): a delete that can
+ * wait takes the listener's shared lock, which waits for a repair to finish; one that cannot (the library sweep) leaves
+ * the songs of a listener under repair for a later pass, and `settleHistoryOfLeavingSongs` says which.
  *
  * The functions here run inside a caller's transaction (`Tx`), after the caller holds the songs' album rows.
  */
@@ -25,6 +29,8 @@ import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { losslessCodecSql } from "../../utils/audioCodec";
 import { playableSongSql } from "../../utils/playableSong";
+import { lockPlayHistory, songsWithBusyPlayHistory } from "../playRecording";
+import { keptRecordings, listenersOf } from "../stats/listens";
 
 type Tx = Prisma.TransactionClient;
 
@@ -140,18 +146,21 @@ export async function carryHistory(tx: Tx, pairs: Replacement[]): Promise<Map<st
 }
 
 /**
- * Writes on every play still pointing at one of `ids` what is needed to count it once the song is gone. Plays already
- * handed to a copy no longer point here, so only the plays nothing took are written.
+ * What becomes of the plays of `ids` that no copy took. A library song's are written with what is needed to count them
+ * once it is gone; a Discover song's are deleted (nothing reads them, and the database would only null them).
  */
 async function keepPlays(tx: Tx, ids: string[]): Promise<void> {
+    await tx.$executeRaw`
+        DELETE FROM "Play"
+         WHERE "trackId" IN (SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId"
+                              WHERE t.id = ANY(${ids}::text[]) AND al.location = 'DISCOVER')`;
     await tx.$executeRaw`
         UPDATE "Play" p
            SET "keptTitle" = COALESCE(t."displayTitle", t.title),
                "keptArtistName" = ar.name,
                "keptAlbumTitle" = al.title,
                "keptRecordingMbid" = t."recordingMbid",
-               "keptDuration" = t.duration,
-               "keptLibrary" = (al.location = 'LIBRARY')
+               "keptDuration" = t.duration
           FROM "Track" t
           JOIN "Album" al ON al.id = t."albumId"
           JOIN "Artist" ar ON ar.id = al."artistId"
@@ -160,49 +169,69 @@ async function keepPlays(tx: Tx, ids: string[]): Promise<void> {
 
 /**
  * Settles the history of songs about to be deleted, in the delete's transaction and before the delete: what has a
- * copy of its recording on another library album hands its history to it, and what has not leaves its plays kept.
- * The caller holds the songs' album rows. `ids` is every song the delete takes, so none of them is a copy.
+ * copy of its recording on another library album hands its history to it, and what has not leaves its library plays
+ * kept (a Discover song's plays are deleted). The caller holds the songs' album rows.
+ *
+ * `leaving` is every song the whole delete takes, which may be more than `ids` (a delete that goes in batches): none of
+ * them is a copy, so a history never moves onto a song a later batch deletes. It defaults to `ids`.
+ *
+ * The songs' rows are locked here, and then every listener's shared play-history lock is taken: `canWait` (the default)
+ * waits for a repair of a listener's history, `canWait: false` never waits and instead answers the songs it left
+ * untouched because their listener is being repaired, which the caller must not delete yet. Locks taken are held to the
+ * end of the transaction.
  */
-export async function settleHistoryOfLeavingSongs(tx: Tx, ids: string[]): Promise<void> {
-    if (ids.length === 0) return;
+export async function settleHistoryOfLeavingSongs(
+    tx: Tx,
+    ids: string[],
+    options: { leaving?: string[]; canWait?: boolean } = {},
+): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    // A play recorded for a song waits on its row, so the listeners read below are all the song has in this transaction.
+    await tx.$queryRaw`SELECT id FROM "Track" WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
+    let busy = new Set<string>();
+    if (options.canWait === false) {
+        busy = await songsWithBusyPlayHistory(tx, ids);
+    } else {
+        for (const userId of new Set((await listenersOf(tx, ids)).map((p) => p.userId))) await lockPlayHistory(tx, userId);
+    }
+    const settling = busy.size > 0 ? ids.filter((id) => !busy.has(id)) : ids;
+    const played = [...new Set((await listenersOf(tx, settling)).map((p) => p.trackId))];
     const withHistory = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT t.id FROM "Track" t
-         WHERE t.id = ANY(${ids}::text[]) AND t."recordingMbid" IS NOT NULL
-           AND (EXISTS (SELECT 1 FROM "Play" x WHERE x."trackId" = t.id)
+         WHERE t.id = ANY(${settling}::text[]) AND t."recordingMbid" IS NOT NULL
+           AND (t.id = ANY(${played}::text[])
              OR EXISTS (SELECT 1 FROM "LikedTrack" x WHERE x."trackId" = t.id)
              OR EXISTS (SELECT 1 FROM "PlaylistItem" x WHERE x."trackId" = t.id)
              OR EXISTS (SELECT 1 FROM share_links x WHERE x."entityType" = 'track' AND x."entityId" = t.id)
              OR EXISTS (SELECT 1 FROM subsonic_bookmarks x WHERE x."trackId" = t.id)
              OR EXISTS (SELECT 1 FROM "PlayAuditIgnore" x WHERE x."trackId" = t.id))`;
-    const copies = await holdCopies(tx, await recordingCopies(tx, withHistory.map((r) => r.id), ids));
+    const copies = await holdCopies(tx, await recordingCopies(tx, withHistory.map((r) => r.id), options.leaving ?? ids));
     await carryHistory(tx, copies);
-    await keepPlays(tx, ids);
+    await keepPlays(tx, settling);
+    return busy;
 }
 
 /**
- * Attaches kept library plays to the library song that now holds their recording: the best copy, as everywhere. `mbids`
- * narrows it to those recordings (the identification stage, naming the one it just wrote); left out, every recording a
- * kept play carries. Answers how many plays attached. A song flagged missing takes none, and a kept Discover play
- * attaches to nothing. Runs in `db`'s transaction when given one.
+ * Attaches kept plays to the library song that now holds their recording: the best copy, as everywhere. `mbids` narrows
+ * it to those recordings (the identification stage, naming the one it just wrote); left out, every recording a kept play
+ * carries. Answers how many plays attached. A song flagged missing takes none. Runs in `db`'s transaction when given one.
  */
 export async function adoptKeptPlays(db: Tx | typeof prisma = prisma, mbids?: string[]): Promise<number> {
-    if (mbids && mbids.length === 0) return 0;
-    const only = mbids ? Prisma.sql`AND x."keptRecordingMbid" = ANY(${mbids}::text[])` : Prisma.empty;
+    const kept = await keptRecordings(db, mbids);
+    if (kept.length === 0) return 0;
     try {
         return await db.$executeRaw`
         UPDATE "Play" p
            SET "trackId" = c.id, "keptTitle" = NULL, "keptArtistName" = NULL, "keptAlbumTitle" = NULL,
-               "keptRecordingMbid" = NULL, "keptDuration" = NULL, "keptLibrary" = NULL
+               "keptRecordingMbid" = NULL, "keptDuration" = NULL
           FROM (
                 SELECT DISTINCT ON (k."recordingMbid") k.id, k."recordingMbid"
                   FROM "Track" k
                   JOIN "Album" ka ON ka.id = k."albumId" AND ka.location = 'LIBRARY'
-                 WHERE k."missingSince" IS NULL
-                   AND k."recordingMbid" IN (SELECT x."keptRecordingMbid" FROM "Play" x
-                                              WHERE x."keptRecordingMbid" IS NOT NULL AND x."trackId" IS NULL AND x."keptLibrary" ${only})
+                 WHERE k."missingSince" IS NULL AND k."recordingMbid" = ANY(${kept}::text[])
                  ORDER BY k."recordingMbid", ${bestCopyFirst()}
           ) c
-         WHERE p."trackId" IS NULL AND p."keptLibrary" AND p."keptRecordingMbid" = c."recordingMbid"`;
+         WHERE p."trackId" IS NULL AND p."keptTitle" IS NOT NULL AND p."keptRecordingMbid" = c."recordingMbid"`;
     } catch (error) {
         // The chosen song was deleted between the question and the write (the foreign key says so): the plays stay kept,
         // and the next scan or identification asks again. Inside a caller's transaction the failure belongs to the caller.

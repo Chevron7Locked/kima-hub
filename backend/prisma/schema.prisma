@@ -383,15 +383,13 @@ model Play {
   source   ListenSource @default(LIBRARY)
   /// Recorded by the listen rule (enough of the track was heard), so a listen by construction.
   heard    Boolean      @default(false)
-  /// A kept play's song, as it was when the song left: written by the delete module, in the delete's own transaction,
+  /// A kept play's song, as it was when a library song left: written by the delete module, in the delete's own transaction,
   /// and cleared when the play attaches to a song again. All null on a play that has its song.
   keptTitle         String?
   keptArtistName    String?
   keptAlbumTitle    String?
   keptRecordingMbid String?
   keptDuration      Int?
-  /// Whether the song's album was a library album (true) or a Discover album (false).
-  keptLibrary       Boolean?
   track    Track?       @relation(fields: [trackId], references: [id], onDelete: SetNull)
   user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 

@@ -4,6 +4,7 @@
  * Real database; no mocks.
  */
 import { prisma } from "../../../utils/db";
+import { lockPlayHistory } from "../../playRecording";
 import { deleteAlbums, deleteArtists, deleteSongs } from "../albumDelete";
 import { adoptKeptPlays } from "../songHistory";
 
@@ -147,7 +148,8 @@ describe("a song that leaves the library, its recording still on another library
 
         expect(await playsOf("copy")).toBe(0);
         expect(await prisma.likedTrack.count({ where: { trackId: id("copy") } })).toBe(0);
-        expect((await kept()).map((k) => k.keptLibrary)).toEqual([false]);
+        // Discover is only Discover: its plays go with the song, and are not kept.
+        expect(await prisma.play.count({ where: { userId: id("user") } })).toBe(0);
     });
 
     it("matches by recording id alone: a song with none, or another recording, is no copy", async () => {
@@ -221,13 +223,12 @@ describe("a song that leaves with no copy", () => {
             keptAlbumTitle: "Album old",
             keptRecordingMbid: REC,
             keptDuration: 245,
-            keptLibrary: true,
         });
         expect(await prisma.likedTrack.count({ where: { userId: id("user") } })).toBe(0);
         expect(await prisma.shareLink.count({ where: { token: id("tok") } })).toBe(0);
     });
 
-    it("keeps the plays of every listener, and says a Discover play was one", async () => {
+    it("keeps the plays of every listener of a library song, and deletes a Discover song's with it", async () => {
         const a = await artist("a");
         await album("lib", a, "LIBRARY", { l: {} });
         await album("disc", a, "DISCOVER", { d: {} });
@@ -238,7 +239,9 @@ describe("a song that leaves with no copy", () => {
         await deleteAlbums([id("lib"), id("disc")]);
 
         const rows = await prisma.play.findMany({ where: { userId: { in: [id("user"), id("user2")] } } });
-        expect(rows.map((r) => [r.trackId, r.keptLibrary]).sort()).toEqual([[null, false], [null, true], [null, true]].sort());
+        expect(rows.map((r) => [r.userId, r.trackId, r.keptTitle]).sort()).toEqual(
+            [[id("user"), null, "Song l"], [id("user2"), null, "Song l"]].sort(),
+        );
     });
 
     it("leaves a song's plays when its artist is deleted", async () => {
@@ -268,7 +271,7 @@ describe("adoptKeptPlays: a returning recording takes back its kept plays", () =
         expect(await playsOf("returned")).toBe(2);
         expect(await kept()).toEqual([]);
         expect(await prisma.play.findFirstOrThrow({ where: { trackId: id("returned") } })).toMatchObject({
-            keptTitle: null, keptArtistName: null, keptAlbumTitle: null, keptRecordingMbid: null, keptDuration: null, keptLibrary: null,
+            keptTitle: null, keptArtistName: null, keptAlbumTitle: null, keptRecordingMbid: null, keptDuration: null,
         });
     });
 
@@ -287,7 +290,7 @@ describe("adoptKeptPlays: a returning recording takes back its kept plays", () =
         expect(await kept()).toHaveLength(1);
     });
 
-    it("never gives a Discover song a play, nor a library song a play that was Discover's", async () => {
+    it("never gives a Discover song a play, and a Discover song's plays were never kept to give", async () => {
         const a = await artist("a");
         await album("lib", a, "LIBRARY", { one: {} });
         await album("disc", a, "DISCOVER", { two: { recording: REC2 } });
@@ -301,7 +304,8 @@ describe("adoptKeptPlays: a returning recording takes back its kept plays", () =
 
         expect(await playsOf("returned")).toBe(0);
         expect(await playsOf("returned2")).toBe(0);
-        expect(await kept()).toHaveLength(2);
+        expect(await kept()).toHaveLength(1);
+        expect(await prisma.play.count({ where: { userId: id("user") } })).toBe(1);
     });
 
     it("runs inside the transaction it is given", async () => {
@@ -319,5 +323,191 @@ describe("adoptKeptPlays: a returning recording takes back its kept plays", () =
         ).rejects.toThrow("roll back");
 
         expect(await kept()).toHaveLength(1);
+    });
+});
+
+
+/** Songs with no history of their own, to make a delete's id list longer than one batch (5000 ids). */
+async function filler(albumNo: string, artistId: string, count: number): Promise<string[]> {
+    await prisma.album.create({
+        data: { id: id(albumNo), rgMbid: id(`${albumNo}-rg`), artistId, identityKey: id(`${albumNo}-key`), title: `Album ${albumNo}`, primaryType: "Album", location: "LIBRARY" },
+    });
+    const ids = Array.from({ length: count }, (_, i) => id(`${albumNo}-f${i}`));
+    await prisma.track.createMany({
+        data: ids.map((songId, i) => ({
+            id: songId, albumId: id(albumNo), title: songId, trackNo: i + 1, duration: 200,
+            filePath: `/${P}outside/${albumNo}/${i}.flac`, fileModified: new Date(), fileSize: 1,
+        })),
+    });
+    return ids;
+}
+
+describe("a delete that goes in more than one batch", () => {
+    it("never hands history to a song a later batch deletes: the plays of both are kept", async () => {
+        const a = await artist("a");
+        await album("old1", a, "LIBRARY", { first: {} });
+        await album("old2", a, "LIBRARY", { last: {} });
+        const bulk = await filler("bulk", a, 4999);
+        await play("first");
+        await play("last");
+
+        // `first` is in the first batch of 5000, `last` alone in the second.
+        const result = await deleteSongs([id("first"), ...bulk, id("last")]);
+
+        expect(result.songs).toBe(5001);
+        const rows = await kept();
+        expect(rows.map((r) => r.keptTitle).sort()).toEqual(["Song first", "Song last"]);
+        expect(await prisma.track.count({ where: { id: { in: [id("first"), id("last")] } } })).toBe(0);
+    });
+
+    it("hands both to a copy outside the delete", async () => {
+        const a = await artist("a");
+        await album("old1", a, "LIBRARY", { first: {} });
+        await album("old2", a, "LIBRARY", { last: {} });
+        await album("new", a, "LIBRARY", { copy: {} });
+        const bulk = await filler("bulk", a, 4999);
+        await play("first");
+        await play("last");
+
+        await deleteSongs([id("first"), ...bulk, id("last")]);
+
+        expect(await playsOf("copy")).toBe(2);
+        expect(await kept()).toEqual([]);
+    });
+
+    it("does the same for albums: an album of a later batch is no copy", async () => {
+        const a = await artist("a");
+        await album("old1", a, "LIBRARY", { first: {} });
+        await album("old2", a, "LIBRARY", { last: {} });
+        await play("first");
+        await play("last");
+        const empties = Array.from({ length: 4999 }, (_, i) => id(`empty${i}`));
+        await prisma.album.createMany({
+            data: empties.map((albumId) => ({
+                id: albumId, rgMbid: `${albumId}-rg`, artistId: a, identityKey: `${albumId}-key`, title: albumId, primaryType: "Album", location: "LIBRARY" as const,
+            })),
+        });
+
+        const result = await deleteAlbums([id("old1"), ...empties, id("old2")]);
+
+        expect(result.albums).toBe(5001);
+        expect((await kept()).map((r) => r.keptTitle).sort()).toEqual(["Song first", "Song last"]);
+    });
+});
+
+/** Holds a listener's exclusive play-history lock (a repair under way) until `release()` is called. */
+function repairing(userId: string): { started: Promise<void>; release: () => void; done: Promise<unknown> } {
+    let release = () => {};
+    let started = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const began = new Promise<void>((resolve) => (started = resolve));
+    const done = prisma.$transaction(async (tx) => {
+        await lockPlayHistory(tx, userId, { exclusive: true });
+        started();
+        await gate;
+    });
+    return { started: began, release, done };
+}
+
+describe("a delete honours the play-history lock of the listeners whose plays it moves or keeps", () => {
+    it("leaves a song with no copy for a later pass while its listener's history is being repaired, when it cannot wait", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {}, free: { recording: REC2 } });
+        await play("gone");
+        const repair = repairing(id("user"));
+        await repair.started;
+        try {
+            const result = await deleteSongs([id("gone")], { canWait: false });
+            expect(result.left).toEqual([id("gone")]);
+            expect(result.songs).toBe(0);
+            expect(await playsOf("gone")).toBe(1);
+        } finally {
+            repair.release();
+            await repair.done;
+        }
+        // Once the repair is done the same call goes through.
+        const again = await deleteSongs([id("gone")], { canWait: false });
+        expect(again.left).toEqual([]);
+        expect(await kept()).toHaveLength(1);
+    });
+
+    it("leaves a song whose plays would move to a copy, and deletes the others of the same call", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {}, other: { recording: REC2 } });
+        await album("new", a, "LIBRARY", { copy: {} });
+        await play("gone");
+        const repair = repairing(id("user"));
+        await repair.started;
+        try {
+            const result = await deleteSongs([id("gone"), id("other")], { canWait: false });
+            expect(result.left).toEqual([id("gone")]);
+            expect(result.songs).toBe(1);
+            expect(await playsOf("gone")).toBe(1);
+            expect(await playsOf("copy")).toBe(0);
+        } finally {
+            repair.release();
+            await repair.done;
+        }
+    });
+
+    it("waits for the repair when the caller can wait", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {} });
+        await play("gone");
+        const repair = repairing(id("user"));
+        await repair.started;
+        let finished = false;
+        const deleting = deleteSongs([id("gone")]).then((r) => {
+            finished = true;
+            return r;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        expect(finished).toBe(false);
+        expect(await playsOf("gone")).toBe(1);
+
+        repair.release();
+        await repair.done;
+        const result = await deleting;
+
+        expect(result.songs).toBe(1);
+        expect(result.left).toEqual([]);
+        expect(await kept()).toHaveLength(1);
+    });
+
+    it("an album delete waits too", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {} });
+        await play("gone");
+        const repair = repairing(id("user"));
+        await repair.started;
+        let finished = false;
+        const deleting = deleteAlbums([id("old")]).then((r) => {
+            finished = true;
+            return r;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        expect(finished).toBe(false);
+
+        repair.release();
+        await repair.done;
+        await deleting;
+
+        expect(await kept()).toHaveLength(1);
+    });
+
+    it("does not wait for a listener of other songs", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {} });
+        await play("gone", { user: id("user2") });
+        const repair = repairing(id("user"));
+        await repair.started;
+        try {
+            const result = await deleteSongs([id("gone")], { canWait: false });
+            expect(result.left).toEqual([]);
+            expect(result.songs).toBe(1);
+        } finally {
+            repair.release();
+            await repair.done;
+        }
     });
 });

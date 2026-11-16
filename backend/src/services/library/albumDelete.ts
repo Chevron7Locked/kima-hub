@@ -25,9 +25,12 @@
  *   releases its keeps too.
  *
  * What becomes of a deleted song's history is `songHistory`'s, called here before the songs go: a copy of its recording
- * on another library album takes its plays, like, playlist places and share links; with no copy its plays stay as kept
- * plays and the rest goes with it. A delete that takes several songs of one recording (an album, an artist) lets none
- * of them be the copy, and a delete of albums in several batches has already removed the earlier batches' songs.
+ * on another library album takes its plays, like, playlist places and share links; with no copy its library plays stay
+ * as kept plays and the rest goes with it (a Discover song's plays go with it). A delete that takes several songs of
+ * one recording (an album, an artist) lets none of them be the copy, however many batches it goes in: every batch
+ * is told the whole delete's songs. A delete honours the play-history lock of the listeners whose plays it moves or
+ * keeps: it waits for a repair of a listener's history, except where the caller cannot wait (`deleteSongs` with
+ * `canWait: false`, the library sweep), which leaves those songs alone and answers them in `left`.
  *
  * Out of this module: the song files and folders (their callers know the music root and what they may touch). Every delete
  * of albums or artists locks the rows it removes before it reads them (an artist's row, then its albums', each batch in
@@ -65,6 +68,8 @@ export interface Deletion {
     albums: number;
     /** Artists deleted. */
     artists: number;
+    /** Songs left undeleted for a later pass, because the caller could not wait for a repair of a listener's history. */
+    left: string[];
     /** What follows a commit. Already done unless `within` was given. */
     settle: () => Promise<void>;
 }
@@ -74,13 +79,14 @@ interface Owed {
     songs: number;
     albums: number;
     artists: number;
+    left: string[];
     playlists: HeldPlaylist[];
     recount: Set<string>;
     listed: boolean;
     what: string;
 }
 
-const emptyOwed = (what: string): Owed => ({ songs: 0, albums: 0, artists: 0, playlists: [], recount: new Set(), listed: false, what });
+const emptyOwed = (what: string): Owed => ({ songs: 0, albums: 0, artists: 0, left: [], playlists: [], recount: new Set(), listed: false, what });
 
 async function settle(owed: Owed): Promise<void> {
     announcePlaylistsChanged(owed.playlists);
@@ -95,13 +101,13 @@ async function settle(owed: Owed): Promise<void> {
 async function run(within: Tx | undefined, work: (tx: Tx) => Promise<Owed>): Promise<Deletion> {
     if (within) {
         const owed = await work(within);
-        return { songs: owed.songs, albums: owed.albums, artists: owed.artists, settle: () => settle(owed) };
+        return { songs: owed.songs, albums: owed.albums, artists: owed.artists, left: owed.left, settle: () => settle(owed) };
     }
     // Two deletes whose songs are copies of each other's recordings can each wait on the other's copy: the one Postgres
     // ends runs again, from the start, as the whole delete is one transaction.
     const owed = await retryOnDeadlock("a library delete", () => prisma.$transaction(work, { timeout: TRANSACTION_MS }));
     await settle(owed);
-    return { songs: owed.songs, albums: owed.albums, artists: owed.artists, settle: async () => {} };
+    return { songs: owed.songs, albums: owed.albums, artists: owed.artists, left: owed.left, settle: async () => {} };
 }
 
 function* batches<T>(items: T[]): Generator<T[]> {
@@ -121,18 +127,28 @@ async function removeAlbums(
     scope: { only?: "LIBRARY" | "DISCOVER"; onlyEmpty?: boolean },
     owed: Owed,
 ): Promise<void> {
+    if (ids.length === 0) return;
+    // Every album row is locked before anything is asked, so the songs the whole delete takes are known (and none is
+    // added) before the first batch chooses a copy to hand history to.
+    await tx.$queryRaw`SELECT id FROM "Album" WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
+    const rows: Array<{ id: string; artistId: string; _count: { tracks: number } }> = [];
     for (const batch of batches(ids)) {
-        await tx.$queryRaw`SELECT id FROM "Album" WHERE id = ANY(${batch}::text[]) ORDER BY id FOR UPDATE`;
-        const rows = await tx.album.findMany({
-            where: {
-                id: { in: batch },
-                ...(scope.only ? { location: scope.only } : {}),
-                ...(scope.onlyEmpty ? { tracks: { none: {} } } : {}),
-            },
-            select: { id: true, artistId: true, _count: { select: { tracks: true } } },
-        });
-        if (rows.length === 0) continue;
-        const albumIds = rows.map((row) => row.id);
+        rows.push(
+            ...(await tx.album.findMany({
+                where: {
+                    id: { in: batch },
+                    ...(scope.only ? { location: scope.only } : {}),
+                    ...(scope.onlyEmpty ? { tracks: { none: {} } } : {}),
+                },
+                select: { id: true, artistId: true, _count: { select: { tracks: true } } },
+            })),
+        );
+    }
+    if (rows.length === 0) return;
+    const doomed = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "Track" WHERE "albumId" = ANY(${rows.map((r) => r.id)}::text[])`;
+    const leaving = doomed.map((t) => t.id);
+    for (const batchRows of batches(rows)) {
+        const albumIds = batchRows.map((row) => row.id);
         if (!owed.listed) {
             owed.listed = (await tx.track.findFirst({ where: { AND: [PLAYABLE_SONG, { albumId: { in: albumIds } }] }, select: { id: true } })) !== null;
         }
@@ -140,14 +156,14 @@ async function removeAlbums(
             if (!owed.playlists.some((p) => p.playlistId === held.playlistId)) owed.playlists.push(held);
         }
         // An album with no songs counted for nothing, so its artist's counts do not move.
-        for (const row of rows) if (row._count.tracks > 0) owed.recount.add(row.artistId);
+        for (const row of batchRows) if (row._count.tracks > 0) owed.recount.add(row.artistId);
         await tx.$executeRaw`DELETE FROM "DiscoveryTrack" WHERE "trackId" IN (SELECT id FROM "Track" WHERE "albumId" = ANY(${albumIds}::text[]))`;
         // A share link names its album or song with no foreign key, so it would outlive both. A song's link first goes
         // to a copy of its recording when there is one (the settle below), and what is left of it goes with the song.
         await tx.$executeRaw`DELETE FROM share_links WHERE "entityType" = 'album' AND "entityId" = ANY(${albumIds}::text[])`;
-        const leaving = await tx.track.findMany({ where: { albumId: { in: albumIds } }, select: { id: true } });
-        await settleHistoryOfLeavingSongs(tx, leaving.map((t) => t.id));
-        await tx.$executeRaw`DELETE FROM share_links WHERE "entityType" = 'track' AND "entityId" = ANY(${leaving.map((t) => t.id)}::text[])`;
+        const batchSongs = (await tx.track.findMany({ where: { albumId: { in: albumIds } }, select: { id: true } })).map((t) => t.id);
+        await settleHistoryOfLeavingSongs(tx, batchSongs, { leaving });
+        await tx.$executeRaw`DELETE FROM share_links WHERE "entityType" = 'track' AND "entityId" = ANY(${batchSongs}::text[])`;
         await tx.album.deleteMany({ where: { id: { in: albumIds } } });
         owed.albums += albumIds.length;
     }
@@ -176,10 +192,12 @@ export async function deleteAlbums(
  * remove. `detachDiscovery` is for the library sweep, which keeps a Discover record and only unnames the song in it
  * (the integrity check removes it later); any other delete removes the record. `alsoTell` names playlists the caller
  * emptied of these songs before the call (the sweep hands their places to other copies), told with the rest, once.
+ * `canWait: false` is for the sweep, which never blocks behind a repair of a listener's play history: a song whose
+ * listener is being repaired is left as it is and answered in `left`.
  */
 export async function deleteSongs(
     ids: string[],
-    options: { within?: Tx; detachDiscovery?: boolean; alsoTell?: HeldPlaylist[] } = {},
+    options: { within?: Tx; detachDiscovery?: boolean; alsoTell?: HeldPlaylist[]; canWait?: boolean } = {},
 ): Promise<Deletion> {
     return run(options.within, async (tx) => {
         const owed = emptyOwed("a song deleted");
@@ -191,17 +209,27 @@ export async function deleteSongs(
                 select: { id: true, albumId: true, album: { select: { artistId: true } } },
             });
             if (rows.length === 0) continue;
-            const songIds = rows.map((row) => row.id);
             // The albums are locked before their songs change (the order a scan takes them), so a scan holding an album
             // and wanting one of these songs never meets this delete holding the song and wanting the album.
             await tx.$queryRaw`SELECT id FROM "Album" WHERE id = ANY(${[...new Set(rows.map((row) => row.albumId))]}::text[]) ORDER BY id FOR UPDATE`;
+            // History follows a copy of the recording, else the plays stay (see `songHistory`). Every song of the whole
+            // delete is excluded as a copy, so a later batch's song never receives it.
+            const busy = await settleHistoryOfLeavingSongs(
+                tx,
+                rows.map((row) => row.id),
+                { leaving: ids, canWait: options.canWait },
+            );
+            owed.left.push(...busy);
+            const going = rows.filter((row) => !busy.has(row.id));
+            const songIds = going.map((row) => row.id);
+            if (songIds.length === 0) continue;
             if (!owed.listed) {
                 owed.listed = (await tx.track.findFirst({ where: { AND: [PLAYABLE_SONG, { id: { in: songIds } }] }, select: { id: true } })) !== null;
             }
             for (const held of await playlistsHoldingTracks(tx, { id: { in: songIds } })) {
                 if (!owed.playlists.some((p) => p.playlistId === held.playlistId)) owed.playlists.push(held);
             }
-            for (const row of rows) {
+            for (const row of going) {
                 albumIds.add(row.albumId);
                 owed.recount.add(row.album.artistId);
             }
@@ -210,9 +238,7 @@ export async function deleteSongs(
             } else {
                 await tx.$executeRaw`DELETE FROM "DiscoveryTrack" WHERE "trackId" = ANY(${songIds}::text[])`;
             }
-            // History follows a copy of the recording, else the plays stay (see `songHistory`); a share link not handed
-            // to a copy goes with its song, and then the songs go.
-            await settleHistoryOfLeavingSongs(tx, songIds);
+            // A share link not handed to a copy goes with its song, and then the songs go.
             await tx.$executeRaw`DELETE FROM share_links WHERE "entityType" = 'track' AND "entityId" = ANY(${songIds}::text[])`;
             await tx.$executeRaw`DELETE FROM "Track" WHERE id = ANY(${songIds}::text[])`;
             owed.songs += songIds.length;
@@ -234,25 +260,33 @@ export async function deleteArtists(
     const { keepsTo, onlyEmpty } = options;
     return run(options.within, async (tx) => {
         const owed = emptyOwed("an artist deleted");
-        for (const batch of batches(ids.filter((id) => id !== keepsTo))) {
-            await tx.$queryRaw`SELECT id FROM "Artist" WHERE id = ANY(${batch}::text[]) ORDER BY id FOR UPDATE`;
-            const artistIds = (
-                await tx.artist.findMany({ where: { id: { in: batch }, ...(onlyEmpty ? { albums: { none: {} } } : {}) }, select: { id: true } })
-            ).map((a) => a.id);
-            if (artistIds.length === 0) continue;
-            const albumIds = (await tx.album.findMany({ where: { artistId: { in: artistIds } }, select: { id: true } })).map((a) => a.id);
-            await removeAlbums(tx, albumIds, {}, owed);
+        const wanted = ids.filter((id) => id !== keepsTo);
+        if (wanted.length === 0) return owed;
+        await tx.$queryRaw`SELECT id FROM "Artist" WHERE id = ANY(${wanted}::text[]) ORDER BY id FOR UPDATE`;
+        const artistIds: string[] = [];
+        for (const batch of batches(wanted)) {
+            const found = await tx.artist.findMany({ where: { id: { in: batch }, ...(onlyEmpty ? { albums: { none: {} } } : {}) }, select: { id: true } });
+            artistIds.push(...found.map((a) => a.id));
+        }
+        if (artistIds.length === 0) return owed;
+        const albumIds: string[] = [];
+        for (const batch of batches(artistIds)) {
+            albumIds.push(...(await tx.album.findMany({ where: { artistId: { in: batch } }, select: { id: true } })).map((a) => a.id));
+        }
+        // All the artists' albums go in one call, so the delete knows every song it takes (see `settleHistoryOfLeavingSongs`).
+        await removeAlbums(tx, albumIds, {}, owed);
+        for (const batch of batches(artistIds)) {
             if (keepsTo) {
                 // The successor may have taken albums from the artist before this call, so its counts are recounted too.
                 owed.recount.add(keepsTo);
-                for (const keep of await tx.ownedAlbum.findMany({ where: { artistId: { in: artistIds } }, select: { artistId: true, rgMbid: true } })) {
+                for (const keep of await tx.ownedAlbum.findMany({ where: { artistId: { in: batch } }, select: { artistId: true, rgMbid: true } })) {
                     await moveOwnerArtist(tx, keep.artistId, keepsTo, keep.rgMbid);
                 }
             }
             // Their similar-artist links, and any keep not handed on, go with them (the database cascades).
-            await tx.artist.deleteMany({ where: { id: { in: artistIds } } });
-            owed.artists += artistIds.length;
-            for (const artistId of artistIds) owed.recount.delete(artistId);
+            await tx.artist.deleteMany({ where: { id: { in: batch } } });
+            owed.artists += batch.length;
+            for (const artistId of batch) owed.recount.delete(artistId);
         }
         return owed;
     });
