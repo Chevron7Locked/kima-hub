@@ -149,11 +149,15 @@ describe("reassignAlbumRgMbid against Postgres", () => {
     });
 });
 
-/** A client whose ownership reads see the rows, then a concurrent deleter removes `vanishing` before the write. */
-function ownershipVanishingAfterRead(vanishing: Array<{ artistId: string; rgMbid: string }>) {
+/**
+ * A client whose ownership reads see the rows, then a concurrent deleter removes `vanishing` before the write: after the
+ * first read that finds a row, or after the `seen`th.
+ */
+function ownershipVanishingAfterRead(vanishing: Array<{ artistId: string; rgMbid: string }>, seen = 1) {
     let gone = false;
+    let found = 0;
     const vanish = async () => {
-        if (gone) return;
+        if (gone || ++found < seen) return;
         gone = true;
         for (const key of vanishing) await prisma.ownedAlbum.deleteMany({ where: key });
     };
@@ -198,6 +202,28 @@ describe("moving ownership when a row is deleted between the read and the write"
         const tx = ownershipVanishingAfterRead([{ artistId: id("art"), rgMbid: OLD }]);
 
         await expect(moveOwnership(tx as never, OLD, NEW)).resolves.toBeUndefined();
+        expect(await owned()).toEqual([{ artistId: id("art"), rgMbid: NEW, source: "enrichment" }]);
+    });
+
+    it("moveOwnerArtist keeps the album owned when the row it folds into vanishes", async () => {
+        await seed({ owned: [[id("art"), "native_scan"], [id("art2"), "enrichment"]] });
+        // The first read finds art's row, the second finds art2's; art2's then vanishes before the write.
+        const tx = ownershipVanishingAfterRead([{ artistId: id("art2"), rgMbid: OLD }], 2);
+
+        await moveOwnerArtist(tx, id("art"), id("art2"), OLD);
+
+        expect(await owned()).toEqual([{ artistId: id("art2"), rgMbid: OLD, source: "native_scan" }]);
+    });
+
+    it("moveOwnership keeps the album owned when the row it folds into vanishes", async () => {
+        await seed({ owned: [[id("art"), "enrichment"]] });
+        await prisma.ownedAlbum.create({ data: { artistId: id("art"), rgMbid: NEW, source: "native_scan" } });
+        // findMany sees the old row, findUnique the held one; the held one vanishes before the write.
+        const tx = ownershipVanishingAfterRead([{ artistId: id("art"), rgMbid: NEW }], 2);
+
+        await moveOwnership(tx as never, OLD, NEW);
+
+        expect(await owned()).toEqual([{ artistId: id("art"), rgMbid: NEW, source: "enrichment" }]);
     });
 });
 

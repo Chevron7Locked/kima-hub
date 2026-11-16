@@ -110,6 +110,28 @@ export async function moveAlbumRgMbid(
     return true;
 }
 
+/**
+ * Folds an ownership row into the one that already holds its place: `row` is removed, and the more protective source
+ * (`ownershipRank`) stands. The delete comes first and says whether this writer took the row: one a concurrent deleter
+ * removed has nothing to hand on. If the holder was removed meanwhile, `row`'s source is written in its place, so the
+ * album is never left with no ownership.
+ */
+async function handOwnership(
+    tx: Pick<MoveClient, "ownedAlbum">,
+    row: { artistId: string; rgMbid: string; source: string },
+    toArtistId: string,
+    toRgMbid: string,
+    heldSource: string,
+): Promise<void> {
+    const taken = await tx.ownedAlbum.deleteMany({ where: { artistId: row.artistId, rgMbid: row.rgMbid } });
+    if (taken.count === 0) return;
+    if (ownershipRank(row.source) < ownershipRank(heldSource)) {
+        const better = await tx.ownedAlbum.updateMany({ where: { artistId: toArtistId, rgMbid: toRgMbid }, data: { source: row.source } });
+        if (better.count > 0) return;
+    }
+    await tx.ownedAlbum.createMany({ data: [{ artistId: toArtistId, rgMbid: toRgMbid, source: row.source }], skipDuplicates: true });
+}
+
 /** Every artist's ownership row for the old id moves, keeping its source. */
 export async function moveOwnership(tx: MoveClient, oldRgMbid: string, newRgMbid: string): Promise<void> {
     const rows = await tx.ownedAlbum.findMany({ where: { rgMbid: oldRgMbid } });
@@ -118,15 +140,7 @@ export async function moveOwnership(tx: MoveClient, oldRgMbid: string, newRgMbid
             where: { artistId_rgMbid: { artistId: row.artistId, rgMbid: newRgMbid } },
         });
         if (clash) {
-            // The delete comes first and says whether this writer took the row: one a concurrent deleter removed has
-            // nothing to hand its source on.
-            const taken = await tx.ownedAlbum.deleteMany({ where: { artistId: row.artistId, rgMbid: oldRgMbid } });
-            if (taken.count > 0 && ownershipRank(row.source) < ownershipRank(clash.source)) {
-                await tx.ownedAlbum.updateMany({
-                    where: { artistId: row.artistId, rgMbid: newRgMbid },
-                    data: { source: row.source },
-                });
-            }
+            await handOwnership(tx, row, row.artistId, newRgMbid, clash.source);
         } else {
             await tx.ownedAlbum.updateMany({
                 where: { artistId: row.artistId, rgMbid: oldRgMbid },
@@ -143,11 +157,7 @@ export async function moveOwnerArtist(tx: Pick<MoveClient, "ownedAlbum">, fromAr
     if (!row) return;
     const clash = await tx.ownedAlbum.findUnique({ where: { artistId_rgMbid: { artistId: toArtistId, rgMbid } } });
     if (clash) {
-        // The delete says whether this writer took the row: one a concurrent deleter removed has nothing to hand on.
-        const taken = await tx.ownedAlbum.deleteMany({ where: { artistId: fromArtistId, rgMbid } });
-        if (taken.count > 0 && ownershipRank(row.source) < ownershipRank(clash.source)) {
-            await tx.ownedAlbum.updateMany({ where: { artistId: toArtistId, rgMbid }, data: { source: row.source } });
-        }
+        await handOwnership(tx, row, toArtistId, rgMbid, clash.source);
     } else {
         await tx.ownedAlbum.updateMany({ where: { artistId: fromArtistId, rgMbid }, data: { artistId: toArtistId } });
     }
