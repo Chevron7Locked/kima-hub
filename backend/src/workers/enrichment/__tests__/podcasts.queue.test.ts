@@ -17,7 +17,7 @@ jest.mock("../../enrichmentQueues", () => ({
 }));
 
 // Only the queueing is under test; the feed refresh the worker runs is not.
-jest.mock("../../../routes/podcasts", () => ({ refreshPodcastFeed: jest.fn() }));
+jest.mock("../../../services/podcastRefresh", () => ({ refreshPodcastFeed: jest.fn() }));
 jest.mock("../../../services/enrichmentFailureService", () => ({
     enrichmentFailureService: { recordFailure: jest.fn(), getFailures: jest.fn() },
 }));
@@ -132,5 +132,18 @@ describe("queueStalePodcasts -- dedup wedge regression", () => {
         expect(n).toBe(1);
         expect(await lastRefreshed("1")).toEqual(before);
         expect((await lastRefreshed("2")).getTime()).toBeGreaterThanOrEqual(started);
+    });
+
+    it("a refresh that finished while the queue refused leaves its own time in place", async () => {
+        await seedPodcast("1", "Pod One", 3);
+        const refreshedAt = new Date(Date.now() + 1000);
+        mockQueueAdd.mockImplementation(async (_name: string, data: { podcastId: string }) => {
+            await prisma.podcast.update({ where: { id: data.podcastId }, data: { lastRefreshed: refreshedAt } });
+            throw new Error("redis down");
+        });
+
+        await queueStalePodcasts();
+
+        expect(await lastRefreshed("1")).toEqual(refreshedAt);
     });
 });

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { refreshPodcastFeed } from "../podcasts";
+import { refreshPodcastFeed } from "../../services/podcastRefresh";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { wrap, clamp, parseIntParam } from "./mappers";

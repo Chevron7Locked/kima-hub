@@ -7,7 +7,7 @@ jest.mock("../../enrichmentQueues", () => ({
     QUEUE_NAMES: { PODCASTS: "enrichment-podcasts" },
     createWorkerConnection: jest.fn(),
 }));
-jest.mock("../../../routes/podcasts", () => ({ refreshPodcastFeed: jest.fn() }));
+jest.mock("../../../services/podcastRefresh", () => ({ refreshPodcastFeed: jest.fn() }));
 const mockRecordFailure = jest.fn().mockResolvedValue(undefined);
 jest.mock("../../../services/enrichmentFailureService", () => ({
     enrichmentFailureService: { recordFailure: (...a: unknown[]) => mockRecordFailure(...a) },

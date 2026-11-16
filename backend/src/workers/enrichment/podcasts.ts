@@ -13,7 +13,7 @@
  */
 import { Worker, Job } from "bullmq";
 import { createWorkerConnection, podcastQueue, QUEUE_NAMES } from "../enrichmentQueues";
-import { refreshPodcastFeed } from "../../routes/podcasts";
+import { refreshPodcastFeed } from "../../services/podcastRefresh";
 import { enrichmentFailureService } from "../../services/enrichmentFailureService";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
@@ -50,9 +50,10 @@ export async function queueStalePodcasts(): Promise<number> {
 
     // Advance lastRefreshed before queuing so every outcome, including an
     // unreachable feed, gets a full backoff window instead of re-queuing each cycle.
+    const claimedAt = new Date();
     await prisma.podcast.updateMany({
         where: { id: { in: stalePodcasts.map((p) => p.id) } },
-        data: { lastRefreshed: new Date() },
+        data: { lastRefreshed: claimedAt },
     });
 
     let queued = 0;
@@ -67,9 +68,10 @@ export async function queueStalePodcasts(): Promise<number> {
         } catch (err) {
             logger.warn(`[Enrichment] Failed to queue podcast ${podcast.id}: ${(err as Error).message}`);
             // The queue refused it, so no feed was tried: put the old time back and the next cycle asks again,
-            // instead of the podcast waiting a window for a refresh that never ran.
+            // instead of the podcast waiting a window for a refresh that never ran. A time written since (a refresh
+            // that finished meanwhile) is newer and stays.
             await prisma.podcast
-                .updateMany({ where: { id: podcast.id }, data: { lastRefreshed: podcast.lastRefreshed } })
+                .updateMany({ where: { id: podcast.id, lastRefreshed: claimedAt }, data: { lastRefreshed: podcast.lastRefreshed } })
                 .catch(() => {});
         }
     }
