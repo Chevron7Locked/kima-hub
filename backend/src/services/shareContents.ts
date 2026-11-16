@@ -55,7 +55,9 @@ type TrackRow = NonNullable<Awaited<ReturnType<typeof findTrack>>>;
 
 const findTrack = (id: string) => prisma.track.findFirst({ where: { id, ...PLAYABLE_SONG }, select: trackFields });
 
-function publicTrack(track: TrackRow) {
+type AlbumTrackRow = Prisma.TrackGetPayload<{ select: typeof albumTrackFields }>;
+
+function publicAlbumTrack(track: AlbumTrackRow) {
     return {
         id: track.id,
         title: track.displayTitle || track.title,
@@ -63,6 +65,12 @@ function publicTrack(track: TrackRow) {
         trackNo: track.trackNo,
         discNumber: track.discNumber,
         discSubtitle: track.discSubtitle,
+    };
+}
+
+function publicTrack(track: TrackRow) {
+    return {
+        ...publicAlbumTrack(track),
         album: {
             title: track.album.displayTitle || track.album.title,
             coverUrl: track.album.coverUrl,
@@ -94,14 +102,7 @@ async function loadPublicAlbum(id: string) {
         title: album.displayTitle || album.title,
         coverUrl: album.coverUrl,
         artist: { name: album.artist.displayName || album.artist.name },
-        tracks: album.tracks.map((t) => ({
-            id: t.id,
-            title: t.displayTitle || t.title,
-            duration: t.duration,
-            trackNo: t.trackNo,
-            discNumber: t.discNumber,
-            discSubtitle: t.discSubtitle,
-        })),
+        tracks: album.tracks.map(publicAlbumTrack),
     };
 }
 
