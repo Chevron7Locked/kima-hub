@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A re-ripped album keeps its history.** A song ripped again with different track or disc numbers keeps its plays, like and playlist places, matched by its recording.
 - **Deleting a playlist removes its share links**, on the web and from Subsonic apps.
 - **A shared song keeps working when its file is replaced.** The link moves to the copy that takes over the song's plays and playlist places.
 - **A library scan can no longer lose a song it is adding.** A song filed into an album at the moment that album was being removed as empty used to be deleted with it.
