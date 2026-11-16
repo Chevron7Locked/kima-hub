@@ -190,7 +190,9 @@ searchRouter.all("/search.view", wrap(async (req, res) => {
     return subsonicOk(req, res, { searchResult: result });
 }));
 
-searchRouter.all(["/search3.view", "/search2.view"], wrap(async (req, res) => {
+// search3 and the legacy search2 answer with the same hits under different keys. Which one answers is decided by the route
+// it is mounted on, not by the request's path text (a router matches any letter case).
+const searchRoute = (responseKey: "searchResult3" | "searchResult2") => wrap(async (req, res) => {
     const query = one(req, "query") ?? "";
 
     const artistCount = clamp(parseIntParam(one(req, "artistCount"), 20), 0, 500);
@@ -199,8 +201,6 @@ searchRouter.all(["/search3.view", "/search2.view"], wrap(async (req, res) => {
     const artistOffset = Math.max(0, parseIntParam(one(req, "artistOffset"), 0));
     const albumOffset  = Math.max(0, parseIntParam(one(req, "albumOffset"), 0));
     const songOffset   = Math.max(0, parseIntParam(one(req, "songOffset"), 0));
-
-    const responseKey = req.path.startsWith("/search3") ? "searchResult3" : "searchResult2";
 
     // OpenSubsonic clients (Symfonium, DSub, Substreamer) sync by paginating
     // search3 over an empty query: `query=`, a missing query, or the literal
@@ -289,7 +289,9 @@ searchRouter.all(["/search3.view", "/search2.view"], wrap(async (req, res) => {
     }
 
     return subsonicOk(req, res, { [responseKey]: result });
-}));
+});
+searchRouter.all("/search3.view", searchRoute("searchResult3"));
+searchRouter.all("/search2.view", searchRoute("searchResult2"));
 
 // ===================== RANDOM SONGS =====================
 
@@ -420,14 +422,14 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
 
 // ===================== SIMILAR SONGS =====================
 
-searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async (req, res) => {
+// getSimilarSongs2 and the legacy getSimilarSongs answer with the same songs under different keys, told apart by route.
+const similarSongsRoute = (responseKey: "similarSongs2" | "similarSongs") => wrap(async (req, res) => {
     const id = one(req, "id");
     if (!id) {
         return subsonicError(req, res, SubsonicError.MISSING_PARAM, "Required parameter is missing: id");
     }
 
     const count = clamp(parseIntParam(one(req, "count"), 50), 1, 500);
-    const responseKey = req.path.startsWith("/getSimilarSongs2") ? "similarSongs2" : "similarSongs";
 
     // `id` may be an artist, album or song; clients usually send a song id.
     let artistId: string | null = null;
@@ -479,4 +481,6 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
     return subsonicOk(req, res, {
         [responseKey]: songs.length > 0 ? { song: songs } : {},
     });
-}));
+});
+searchRouter.all("/getSimilarSongs2.view", similarSongsRoute("similarSongs2"));
+searchRouter.all("/getSimilarSongs.view", similarSongsRoute("similarSongs"));
