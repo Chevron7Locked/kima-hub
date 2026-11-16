@@ -118,15 +118,15 @@ export async function moveOwnership(tx: MoveClient, oldRgMbid: string, newRgMbid
             where: { artistId_rgMbid: { artistId: row.artistId, rgMbid: newRgMbid } },
         });
         if (clash) {
-            if (ownershipRank(row.source) < ownershipRank(clash.source)) {
-                await tx.ownedAlbum.update({
-                    where: { artistId_rgMbid: { artistId: row.artistId, rgMbid: newRgMbid } },
+            // The delete comes first and says whether this writer took the row: one a concurrent deleter removed has
+            // nothing to hand its source on.
+            const taken = await tx.ownedAlbum.deleteMany({ where: { artistId: row.artistId, rgMbid: oldRgMbid } });
+            if (taken.count > 0 && ownershipRank(row.source) < ownershipRank(clash.source)) {
+                await tx.ownedAlbum.updateMany({
+                    where: { artistId: row.artistId, rgMbid: newRgMbid },
                     data: { source: row.source },
                 });
             }
-            await tx.ownedAlbum.delete({
-                where: { artistId_rgMbid: { artistId: row.artistId, rgMbid: oldRgMbid } },
-            });
         } else {
             await tx.ownedAlbum.updateMany({
                 where: { artistId: row.artistId, rgMbid: oldRgMbid },
@@ -143,12 +143,13 @@ export async function moveOwnerArtist(tx: Pick<MoveClient, "ownedAlbum">, fromAr
     if (!row) return;
     const clash = await tx.ownedAlbum.findUnique({ where: { artistId_rgMbid: { artistId: toArtistId, rgMbid } } });
     if (clash) {
-        if (ownershipRank(row.source) < ownershipRank(clash.source)) {
-            await tx.ownedAlbum.update({ where: { artistId_rgMbid: { artistId: toArtistId, rgMbid } }, data: { source: row.source } });
+        // The delete says whether this writer took the row: one a concurrent deleter removed has nothing to hand on.
+        const taken = await tx.ownedAlbum.deleteMany({ where: { artistId: fromArtistId, rgMbid } });
+        if (taken.count > 0 && ownershipRank(row.source) < ownershipRank(clash.source)) {
+            await tx.ownedAlbum.updateMany({ where: { artistId: toArtistId, rgMbid }, data: { source: row.source } });
         }
-        await tx.ownedAlbum.delete({ where: { artistId_rgMbid: { artistId: fromArtistId, rgMbid } } });
     } else {
-        await tx.ownedAlbum.update({ where: { artistId_rgMbid: { artistId: fromArtistId, rgMbid } }, data: { artistId: toArtistId } });
+        await tx.ownedAlbum.updateMany({ where: { artistId: fromArtistId, rgMbid }, data: { artistId: toArtistId } });
     }
 }
 
