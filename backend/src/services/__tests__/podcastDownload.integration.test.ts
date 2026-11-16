@@ -147,3 +147,32 @@ it("keeps nothing from a download of an address the episode lost while it ran", 
     expect(fs.existsSync(path.join(cacheRoot, "podcast-audio", `${id}.mp3`))).toBe(false);
     expect(fs.existsSync(path.join(cacheRoot, "podcast-audio", `${id}.tmp`))).toBe(false);
 }, 30_000);
+
+it("keeps nothing when a feed refresh gives the episode a new address after the download looked, before it filed the audio", async () => {
+    const id = `${P}-slow`;
+    slowArrived = deferred();
+    slowGate = deferred();
+    const updated = deferred();
+    const commit = deferred();
+    downloadInBackground(id, `${base}/slow.mp3`, USER);
+    await slowArrived.promise;
+
+    // The refresh has changed the address but not committed it when the download finishes its body.
+    const refresh = prisma.$transaction(async (tx) => {
+        await tx.podcastEpisode.update({ where: { id }, data: { audioUrl: `${base}/full.mp3` } });
+        updated.resolve();
+        await commit.promise;
+    }, { timeout: 20_000 });
+    await updated.promise;
+    slowGate.resolve();
+    // The download reaches its address check and has to wait for the refresh's row.
+    await new Promise((ok) => setTimeout(ok, 800));
+    commit.resolve();
+    await refresh;
+    while (isDownloading(id)) await new Promise((ok) => setTimeout(ok, 50));
+
+    expect(await getCachedFilePath(id)).toBeNull();
+    expect(await prisma.podcastDownload.count({ where: { episodeId: id } })).toBe(0);
+    expect(fs.existsSync(path.join(cacheRoot, "podcast-audio", `${id}.mp3`))).toBe(false);
+    expect(fs.existsSync(path.join(cacheRoot, "podcast-audio", `${id}.tmp`))).toBe(false);
+}, 30_000);

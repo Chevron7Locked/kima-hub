@@ -215,42 +215,31 @@ async function performDownload(
             }
         }
 
-        // A feed refresh may have given the episode a new address while this one downloaded: audio from the old address
-        // is not the episode's, and a refresh found no record to drop because none is written until now.
-        const current = await prisma.podcastEpisode.findUnique({ where: { id: episodeId }, select: { audioUrl: true } });
-        if (current?.audioUrl !== audioUrl) {
+        // A feed refresh may give the episode a new address while this one downloads: audio from the old address is not
+        // the episode's. The address is checked, the file put in place and its record written under the episode's row
+        // lock, so a refresh that changes the address waits, then finds the record and drops the copy.
+        const fileSizeMb = stats.size / 1024 / 1024;
+        const filed = await prisma.$transaction(async (tx) => {
+            const rows = await tx.$queryRaw<{ audioUrl: string }[]>`
+                SELECT "audioUrl" FROM "PodcastEpisode" WHERE id = ${episodeId} FOR UPDATE`;
+            if (rows[0]?.audioUrl !== audioUrl) return false;
+
+            // The episode's size is now the size of the copy held.
+            await fs.rename(tempPath, finalPath);
+            await tx.podcastEpisode.update({ where: { id: episodeId }, data: { fileSize: stats.size } });
+            await tx.podcastDownload.upsert({
+                where: { userId_episodeId: { userId, episodeId } },
+                create: { userId, episodeId, localPath: finalPath, fileSizeMb, downloadedAt: new Date(), lastAccessedAt: new Date() },
+                update: { localPath: finalPath, fileSizeMb, downloadedAt: new Date(), lastAccessedAt: new Date() },
+            });
+            return true;
+        });
+        if (!filed) {
             await fs.unlink(tempPath).catch(() => {});
             logger.debug(`[PODCAST-DL] Episode ${episodeId} changed address while downloading, discarding the old audio`);
             return;
         }
-
-        // Move temp file to final location; the episode's size is now the size of the copy held.
-        await fs.rename(tempPath, finalPath);
-        await prisma.podcastEpisode.updateMany({ where: { id: episodeId }, data: { fileSize: stats.size } });
         await recordMeasuredLength(episodeId, finalPath);
-
-        // Record in database
-        const fileSizeMb = stats.size / 1024 / 1024;
-
-        await prisma.podcastDownload.upsert({
-            where: {
-                userId_episodeId: { userId, episodeId }
-            },
-            create: {
-                userId,
-                episodeId,
-                localPath: finalPath,
-                fileSizeMb,
-                downloadedAt: new Date(),
-                lastAccessedAt: new Date()
-            },
-            update: {
-                localPath: finalPath,
-                fileSizeMb,
-                downloadedAt: new Date(),
-                lastAccessedAt: new Date()
-            }
-        });
 
         logger.debug(`[PODCAST-DL] Successfully cached episode ${episodeId} (${fileSizeMb.toFixed(1)}MB)`);
 
