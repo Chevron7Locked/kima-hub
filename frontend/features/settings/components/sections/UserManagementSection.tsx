@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
 import { InlineStatus, StatusType } from "@/components/ui/InlineStatus";
 import { Button } from "@/components/ui/Button";
+import { passwordProblem } from "@/lib/passwordRule";
 
 interface User {
     id: string;
@@ -62,9 +63,15 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
     }, []);
 
     const handleCreate = async () => {
-        if (!newUsername.trim() || newPassword.length < 6) {
+        if (!newUsername.trim()) {
             setCreateStatus("error");
-            setCreateMessage("Username required, password 6+ chars");
+            setCreateMessage("Username required");
+            return;
+        }
+        const problem = passwordProblem(newPassword);
+        if (problem) {
+            setCreateStatus("error");
+            setCreateMessage(problem);
             return;
         }
 
@@ -188,7 +195,7 @@ export function UserManagementSection({ settings, onUpdate }: UserManagementSect
                                 variant="primary"
                                 size="sm"
                                 onClick={handleCreate}
-                                disabled={creating || !newUsername.trim() || newPassword.length < 6}
+                                disabled={creating || !newUsername.trim() || passwordProblem(newPassword) !== null}
                             >
                                 {creating ? "Creating..." : "Create"}
                             </Button>

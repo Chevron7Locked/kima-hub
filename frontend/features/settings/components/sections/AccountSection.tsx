@@ -12,7 +12,8 @@ import { CachedImage } from "@/components/ui/CachedImage";
 import { copyText } from "@/lib/clipboard";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
-import { factorInput, isFactor } from "@/lib/second-factor";
+import { passwordProblem } from "@/lib/passwordRule";
+import { recoveryCodeInput, isFactor } from "@/lib/second-factor";
 
 export function AccountSection() {
     const { user, deleteAccount } = useAuth();
@@ -81,9 +82,10 @@ export function AccountSection() {
             setPasswordMessage("All fields required");
             return;
         }
-        if (newPassword.length < 6) {
+        const problem = passwordProblem(newPassword);
+        if (problem) {
             setPasswordStatus("error");
-            setPasswordMessage("Min 6 characters");
+            setPasswordMessage(problem);
             return;
         }
         if (newPassword !== confirmPassword) {
@@ -316,7 +318,7 @@ export function AccountSection() {
                         <SettingsInput
                             type="text"
                             value={disableToken}
-                            onChange={(v) => setDisableToken(factorInput(v))}
+                            onChange={(v) => setDisableToken(recoveryCodeInput(v))}
                             placeholder="6-digit code or recovery code"
                         />
                         <div className="inline-flex items-center gap-3">
@@ -382,7 +384,7 @@ export function AccountSection() {
                         <SettingsInput
                             type="text"
                             value={newCodesToken}
-                            onChange={(v) => setNewCodesToken(factorInput(v))}
+                            onChange={(v) => setNewCodesToken(recoveryCodeInput(v))}
                             placeholder="6-digit code or recovery code"
                         />
                         <div className="inline-flex items-center gap-3">
