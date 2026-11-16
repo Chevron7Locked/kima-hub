@@ -485,11 +485,13 @@ async function enrichAlbumCovers(
                         )?.url ?? null;
 
                         if (coverUrl) {
-                            // Save to database
-                            await prisma.album.update({
-                                where: { id: album.id },
+                            // The sources take a while to answer. Only the cover this sweep read as missing is replaced:
+                            // one set meanwhile (a person's, a scan's) stays, and nothing is noted for a write that did not happen.
+                            const { count } = await prisma.album.updateMany({
+                                where: { id: album.id, coverUrl: album.coverUrl },
                                 data: { coverUrl },
                             });
+                            if (count === 0) return;
                             notePictureChange("album", album.id, { was: album.coverUrl, now: coverUrl, own: album.userCoverUrl });
 
                             // Cache in Redis

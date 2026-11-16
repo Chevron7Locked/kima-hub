@@ -214,6 +214,18 @@ describe("the enrichment worker asks every source", () => {
             expect(await storedCover("1")).toBeNull();
         });
 
+        it("leaves a cover that was set while the sources were being asked", async () => {
+            const OTHER = "https://x/set-meanwhile.jpg";
+            mockFindAlbumArtwork.mockImplementation(async () => {
+                await prisma.album.update({ where: { id: `${P}alb-1` }, data: { coverUrl: OTHER } });
+                return { url: COVER, source: "deezer" };
+            });
+
+            await enrichSimilarArtist(await arrangeUncovered());
+
+            expect(await storedCover("1")).toBe(OTHER);
+        });
+
         it("still tries for an album whose id this app invented", async () => {
             // The id-keyed sources skip themselves; Deezer does not need an id.
             const artist = await seedArtist("1");

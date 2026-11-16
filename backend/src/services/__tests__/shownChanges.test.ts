@@ -9,12 +9,15 @@ import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import * as libraryChanged from "../libraryChanged";
 import {
     SHOWN_CHANGE_WINDOW_MS,
+    albumShownChange,
+    artistShownChange,
     flushShownChanges,
     noteGenresChange,
     notePictureChange,
     noteYearChange,
     rewritePictureColumn,
     shownPicture,
+    songTitleChanged,
 } from "../shownChanges";
 
 jest.setTimeout(60_000);
@@ -265,6 +268,42 @@ describe("shownPicture", () => {
         expect(shownPicture(pic("f"), null)).toBe(pic("f"));
         expect(shownPicture(pic("f"), "")).toBe(pic("f"));
         expect(shownPicture(undefined, undefined)).toBeNull();
+    });
+});
+
+describe("what a person's edit or reset changed in what is shown", () => {
+    const artist = { name: "Cult", displayName: null, heroUrl: pic("f"), userHeroUrl: null, genres: ["rock"], userGenres: [] };
+    const album = {
+        title: "Live", displayTitle: null, coverUrl: pic("f"), userCoverUrl: null,
+        year: 1999, originalYear: null, displayYear: null, genres: ["rock"], userGenres: [],
+    };
+
+    it("an artist: the first of name, picture, genres that shows differently, else null", () => {
+        expect(artistShownChange(artist, { ...artist })).toBeNull();
+        expect(artistShownChange(artist, { ...artist, displayName: "The Cult", userHeroUrl: pic("o") })).toBe("name");
+        expect(artistShownChange(artist, { ...artist, userHeroUrl: pic("o"), userGenres: ["goth"] })).toBe("picture");
+        expect(artistShownChange(artist, { ...artist, userGenres: ["goth"] })).toBe("genres");
+        // an own name equal to the stored one shows nothing new; an own picture under the same address likewise
+        expect(artistShownChange(artist, { ...artist, displayName: "Cult", userHeroUrl: pic("f") })).toBeNull();
+        // a found genre under the person's own list changes nothing shown
+        expect(artistShownChange({ ...artist, userGenres: ["goth"] }, { ...artist, userGenres: ["goth"], genres: ["punk"] })).toBeNull();
+    });
+
+    it("an album: title, cover, year (displayYear ?? originalYear ?? year), genres", () => {
+        expect(albumShownChange(album, { ...album })).toBeNull();
+        expect(albumShownChange(album, { ...album, displayTitle: "Live!" })).toBe("title");
+        expect(albumShownChange(album, { ...album, userCoverUrl: pic("o") })).toBe("cover");
+        expect(albumShownChange(album, { ...album, displayYear: 2001 })).toBe("year");
+        expect(albumShownChange(album, { ...album, originalYear: 1999 })).toBeNull();
+        expect(albumShownChange(album, { ...album, userGenres: ["goth"] })).toBe("genres");
+        // a reset that clears an own year back to the stored one shows nothing new
+        expect(albumShownChange({ ...album, displayYear: 1999 }, album)).toBeNull();
+    });
+
+    it("a song: only its title", () => {
+        expect(songTitleChanged({ title: "A", displayTitle: null }, { title: "A", displayTitle: "A" })).toBe(false);
+        expect(songTitleChanged({ title: "A", displayTitle: null }, { title: "A", displayTitle: "B" })).toBe(true);
+        expect(songTitleChanged({ title: "A", displayTitle: "B" }, { title: "A", displayTitle: null })).toBe(true);
     });
 });
 

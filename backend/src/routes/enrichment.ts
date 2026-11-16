@@ -32,8 +32,7 @@ import { parseStoredCover, resolveInCoversDir } from "../services/imageStorage";
 import { parseLimit, parseOffset } from "./library/paging";
 import { wholeNumber } from "../utils/wholeNumber";
 import { isWebAddress } from "../utils/webAddress";
-import { getMergedGenres } from "../utils/metadataOverrides";
-import { getEffectiveYear } from "../utils/dateFilters";
+import { albumShownChange, artistShownChange, songTitleChanged } from "../services/shownChanges";
 
 const router = Router();
 
@@ -131,12 +130,8 @@ async function lockedArtistShown(tx: Prisma.TransactionClient, id: string) {
     SELECT "name", "displayName", "heroUrl", "userHeroUrl", "genres", "userGenres" FROM "Artist" WHERE "id" = ${id} FOR UPDATE`;
   return rows[0] ?? null;
 }
-/** The genres an artist shows, in order, as one comparable text: the person's list when set, else the enriched one. */
-const genresShown = (artist: { genres?: unknown; userGenres?: unknown }): string => JSON.stringify(getMergedGenres(artist));
 /** An album's year columns and genre lists, as the shown year and genres are judged from them. */
 type AlbumYearGenres = { year: number | null; originalYear: number | null; displayYear: number | null; genres: unknown; userGenres: unknown };
-/** The year an album shows: `displayYear ?? originalYear ?? year`, none as null. */
-const yearShown = (album: AlbumYearGenres): number | null => getEffectiveYear(album) || null;
 async function lockedAlbumShown(tx: Prisma.TransactionClient, id: string) {
   const rows = await tx.$queryRaw<Array<{ title: string; displayTitle: string | null; coverUrl: string | null; userCoverUrl: string | null } & AlbumYearGenres>>`
     SELECT "title", "displayTitle", "coverUrl", "userCoverUrl", "year", "originalYear", "displayYear", "genres", "userGenres"
@@ -560,13 +555,8 @@ router.put("/artists/:id/metadata", async (req, res) => {
       // A shown name, picture and genre list are what a Subsonic client lists, so an edit that changes any of them moves the
       // library's change marker. An edit that sends what is already shown, a new MBID (it changes neither), or an artist
       // no client lists (Discover's, or one whose songs are missing or corrupt) moves nothing.
-      if (before && (artist.displayName || artist.name) !== (before.displayName || before.name)) {
-        await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's name edit");
-      } else if (before && (artist.userHeroUrl || artist.heroUrl) !== (before.userHeroUrl || before.heroUrl)) {
-        await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's picture edit");
-      } else if (before && genresShown(artist) !== genresShown(before)) {
-        await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's genre edit");
-      }
+      const artistChange = before && artistShownChange(before, artist);
+      if (artistChange) await markLibraryChangedIfListed(() => artistIsListed(req.params.id), `an artist's ${artistChange} edit`);
       res.json(artist);
     } catch (error) {
       if (error instanceof BadField) return refuseRequest(req, res, error.message);
@@ -641,15 +631,8 @@ router.put("/albums/:id/metadata", async (req, res) => {
       if (moved) forgetOwnedIndex();
 
       // Only a shown title, cover, year or genre list that changed is a change to what a client lists.
-      if (before && (album.displayTitle || album.title) !== (before.displayTitle || before.title)) {
-        await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's title edit");
-      } else if (before && (album.userCoverUrl || album.coverUrl) !== (before.userCoverUrl || before.coverUrl)) {
-        await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's cover edit");
-      } else if (before && yearShown(album) !== yearShown(before)) {
-        await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's year edit");
-      } else if (before && genresShown(album) !== genresShown(before)) {
-        await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's genre edit");
-      }
+      const albumChange = before && albumShownChange(before, album);
+      if (albumChange) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), `an album's ${albumChange} edit`);
       res.json(album);
     } catch (error) {
       if (error instanceof BadField) return refuseRequest(req, res, error.message);
@@ -710,7 +693,7 @@ router.put("/tracks/:id/metadata", async (req, res) => {
     });
 
     // Only a shown title that changed is a change to what a client lists.
-    if (before && (track.displayTitle || track.title) !== (before.displayTitle || before.title)) {
+    if (before && songTitleChanged(before, track)) {
       await markLibraryChangedIfListed(() => songIsListed(req.params.id), "a song's title edit");
     }
     res.json(track);
@@ -761,9 +744,8 @@ router.post("/artists/:id/reset", async (req, res) => {
     await forgetArtistHero(req.params.id);
 
     // Only a shown name or picture that changed back is a change to what a client lists.
-    if ((existingArtist.displayName || existingArtist.name) !== existingArtist.name) await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's name reset");
-    else if ((existingArtist.userHeroUrl || existingArtist.heroUrl) !== existingArtist.heroUrl) await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's picture reset");
-    else if (genresShown(existingArtist) !== genresShown({ genres: existingArtist.genres, userGenres: [] })) await markLibraryChangedIfListed(() => artistIsListed(req.params.id), "an artist's genre reset");
+    const artistChange = artistShownChange(existingArtist, artist);
+    if (artistChange) await markLibraryChangedIfListed(() => artistIsListed(req.params.id), `an artist's ${artistChange} reset`);
     res.json({
       message: "Artist metadata reset to original values",
       artist,
@@ -813,10 +795,8 @@ router.post("/albums/:id/reset", async (req, res) => {
     const { existingAlbum, album } = done;
 
     // Only a shown title, cover, year or genre list that changed back is a change to what a client lists.
-    if ((existingAlbum.displayTitle || existingAlbum.title) !== existingAlbum.title) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's title reset");
-    else if ((existingAlbum.userCoverUrl || existingAlbum.coverUrl) !== existingAlbum.coverUrl) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's cover reset");
-    else if (yearShown(existingAlbum) !== yearShown({ ...existingAlbum, displayYear: null })) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's year reset");
-    else if (genresShown(existingAlbum) !== genresShown({ genres: existingAlbum.genres, userGenres: [] })) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), "an album's genre reset");
+    const albumChange = albumShownChange(existingAlbum, album);
+    if (albumChange) await markLibraryChangedIfListed(() => albumIsListed(req.params.id), `an album's ${albumChange} reset`);
     res.json({
       message: "Album metadata reset to original values",
       album,
@@ -860,7 +840,7 @@ router.post("/tracks/:id/reset", async (req, res) => {
     const { existingTrack, track } = done;
 
     // Only a shown title that changed back is a change to what a client lists.
-    if ((existingTrack.displayTitle || existingTrack.title) !== existingTrack.title) await markLibraryChangedIfListed(() => songIsListed(req.params.id), "a song's title reset");
+    if (songTitleChanged(existingTrack, track)) await markLibraryChangedIfListed(() => songIsListed(req.params.id), "a song's title reset");
     res.json({
       message: "Track metadata reset to original values",
       track,

@@ -4,7 +4,7 @@
  * an artist's genres. What is shown is the person's own value when they set one, else the found one (`userHeroUrl ||
  * heroUrl`, `userCoverUrl || coverUrl`, an album's `displayYear ?? originalYear ?? year`, the genres of `getMergedGenres`),
  * so a found value that lands under a person's own changes nothing a client shows. A person's own edit moves the marker in
- * routes/enrichment.ts.
+ * routes/enrichment.ts, which asks `artistShownChange`, `albumShownChange` and `songTitleChanged` what the edit changed.
  *
  * A writer calls `notePictureChange`, `noteYearChange` or `noteGenresChange` with what it replaced and what it stored. Notes
  * gather for a quiet window (`SHOWN_CHANGE_WINDOW_MS`, from the first note of a run) and then move the library-changed
@@ -78,19 +78,59 @@ export function notePictureChange(
 /** The three year columns of an album, as stored. */
 export type AlbumYears = { displayYear?: number | null; originalYear?: number | null; year?: number | null };
 
-/** An album's year columns changed (an enrichment filled one): noted when the year shown, `displayYear ?? originalYear ?? year`, differs. */
-export function noteYearChange(albumId: string, change: { was: AlbumYears; now: AlbumYears }): void {
-    const shown = (years: AlbumYears) => (getEffectiveYear(years) || null)?.toString() ?? null;
-    note("album", "year", albumId, shown(change.was), shown(change.now));
-}
+/** The year an album shows, `displayYear ?? originalYear ?? year`; null for none. */
+const shownYear = (years: AlbumYears): string | null => (getEffectiveYear(years) || null)?.toString() ?? null;
 
 /** The two genre lists of an artist or album, as stored. */
 export type GenreLists = { genres?: unknown; userGenres?: unknown };
 
-/** An artist's or album's genre lists changed: noted when the merged list shown (the person's, else the enriched), compared whole and in order, differs. */
+/** The genres a row shows (the person's list, else the enriched one), as one text that compares whole and in order. */
+const shownGenres = (lists: GenreLists): string => JSON.stringify(getMergedGenres(lists));
+
+/** An album's year columns changed (an enrichment filled one): noted when the year shown differs. */
+export function noteYearChange(albumId: string, change: { was: AlbumYears; now: AlbumYears }): void {
+    note("album", "year", albumId, shownYear(change.was), shownYear(change.now));
+}
+
+/** An artist's or album's genre lists changed: noted when the genres shown differ. */
 export function noteGenresChange(kind: ShownKind, id: string, change: { was: GenreLists; now: GenreLists }): void {
-    const shown = (lists: GenreLists) => JSON.stringify(getMergedGenres(lists));
-    note(kind, "genres", id, shown(change.was), shown(change.now));
+    note(kind, "genres", id, shownGenres(change.was), shownGenres(change.now));
+}
+
+/** The title or name a row shows: the person's own when set, else the stored one. */
+const shownTitle = (stored: string, own: string | null | undefined): string => own || stored;
+
+type ArtistShown = GenreLists & { name: string; displayName?: string | null; heroUrl?: string | null; userHeroUrl?: string | null };
+
+type AlbumShown = AlbumYears &
+    GenreLists & { title: string; displayTitle?: string | null; coverUrl?: string | null; userCoverUrl?: string | null };
+
+/**
+ * What a person's edit or reset of an artist changed in what a client lists (its name, picture or genres): the first
+ * that differs, or null. The caller moves the library-changed marker for a non-null answer.
+ */
+export function artistShownChange(was: ArtistShown, now: ArtistShown): "name" | "picture" | "genres" | null {
+    if (shownTitle(was.name, was.displayName) !== shownTitle(now.name, now.displayName)) return "name";
+    if (shownPicture(was.heroUrl, was.userHeroUrl) !== shownPicture(now.heroUrl, now.userHeroUrl)) return "picture";
+    if (shownGenres(was) !== shownGenres(now)) return "genres";
+    return null;
+}
+
+/** As `artistShownChange`, for an album's title, cover, year or genres. */
+export function albumShownChange(was: AlbumShown, now: AlbumShown): "title" | "cover" | "year" | "genres" | null {
+    if (shownTitle(was.title, was.displayTitle) !== shownTitle(now.title, now.displayTitle)) return "title";
+    if (shownPicture(was.coverUrl, was.userCoverUrl) !== shownPicture(now.coverUrl, now.userCoverUrl)) return "cover";
+    if (shownYear(was) !== shownYear(now)) return "year";
+    if (shownGenres(was) !== shownGenres(now)) return "genres";
+    return null;
+}
+
+/** Whether a person's edit or reset of a song changed the title a client lists. */
+export function songTitleChanged(
+    was: { title: string; displayTitle?: string | null },
+    now: { title: string; displayTitle?: string | null },
+): boolean {
+    return shownTitle(was.title, was.displayTitle) !== shownTitle(now.title, now.displayTitle);
 }
 
 /** Moves the marker now for the notes held, when any of them shows a client something new. Waits for the marker. */
