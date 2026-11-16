@@ -94,6 +94,12 @@ describe("a saved queue after the songs were edited", () => {
         }
     });
 
+    it("names the album by the title a person gave it, as every other song entry does", async () => {
+        await prisma.album.update({ where: { id: `${P}-al` }, data: { displayTitle: "Chosen Album" } });
+        const entries = (await get("/getPlayQueue.view")).playQueue.entry as Array<Record<string, unknown>>;
+        expect(entries.map((e) => e.album)).toEqual(["Chosen Album", "Chosen Album"]);
+    });
+
     it("leaves what is stored as it was saved", async () => {
         await get("/getPlayQueue.view");
         const stored = (await prisma.playbackState.findUniqueOrThrow({ where: { userId: USER } })).queue as Array<{ id: string; title: string }>;

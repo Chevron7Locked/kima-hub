@@ -65,6 +65,7 @@ const DESCRIBED = {
         select: {
             id: true,
             title: true,
+            displayTitle: true,
             coverUrl: true,
             userCoverUrl: true,
             artist: { select: { id: true, name: true, displayName: true } },
@@ -79,7 +80,7 @@ function describeSong(t: Prisma.TrackGetPayload<{ select: typeof DESCRIBED }>): 
         displayTitle: t.displayTitle,
         duration: t.duration ?? undefined,
         artist: t.album?.artist ? { id: t.album.artist.id, name: t.album.artist.displayName || t.album.artist.name } : null,
-        album: t.album ? { id: t.album.id, title: t.album.title, coverArt: t.album.userCoverUrl || t.album.coverUrl } : null,
+        album: t.album ? { id: t.album.id, title: t.album.displayTitle || t.album.title, coverArt: t.album.userCoverUrl || t.album.coverUrl } : null,
     };
 }
 

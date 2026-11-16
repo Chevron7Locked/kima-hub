@@ -99,7 +99,7 @@ compatRouter.all("/deleteInternetRadioStation.view", (req: Request, res: Respons
     notSupported(req, res, "Internet radio")
 );
 
-// Accounts are managed on the web, never over Subsonic (Kevin, 2026-11-11). getUser and getUsers still answer.
+// Accounts are managed on the web, never over Subsonic. getUser and getUsers still answer.
 compatRouter.all(
     ["/changePassword.view", "/createUser.view", "/updateUser.view", "/deleteUser.view"],
     (req: Request, res: Response) => notSupported(req, res, "Account management")
