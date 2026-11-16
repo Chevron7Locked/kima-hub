@@ -5,7 +5,6 @@ import { prisma, Prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { eventBus } from "../eventBus";
 import * as jobMoves from "../downloads/jobs";
-import { ACTIVE_STATUSES } from "../downloads/jobStatuses";
 import type { ImportJob } from "./types";
 export const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
 
@@ -82,7 +81,12 @@ export async function updateImportJobFields(
     data: { ...data, updatedAt: new Date() },
   });
   if (count === 0) return false;
-  await publishImportJob(importJobId);
+  try {
+    await publishImportJob(importJobId);
+  } catch (error) {
+    // The write is committed: a missed announcement is logged, not raised, as for a dismissal's counts.
+    logger.warn(`Could not announce import ${importJobId} after its write:`, error);
+  }
   return true;
 }
 
@@ -100,12 +104,13 @@ export const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed
 export async function failImportJob(importJobId: string, error: string): Promise<boolean> {
   if (!(await updateImportJobFields(importJobId, { status: "failed", error }, CLOSED_IMPORT_STATES))) return false;
 
+  jobLoggers.delete(importJobId);
   const row = await prisma.spotifyImportJob.findUnique({ where: { id: importJobId } });
   if (row) notifyImportFailed(toImportJob(row));
 
   try {
     const running = await prisma.downloadJob.findMany({
-      where: { metadata: { path: ["spotifyImportJobId"], equals: importJobId }, status: { in: ACTIVE_STATUSES } },
+      where: { metadata: { path: ["spotifyImportJobId"], equals: importJobId }, status: { in: jobMoves.ACTIVE_STATUSES } },
       select: { id: true },
     });
     if (running.length > 0) await jobMoves.cancel(running, "Import failed");

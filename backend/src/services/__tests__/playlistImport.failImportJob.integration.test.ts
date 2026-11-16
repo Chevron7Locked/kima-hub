@@ -112,6 +112,21 @@ it("tells the person once, with the reason, and closes the import's unsettled do
     expect(notifyFailed).toHaveBeenCalledTimes(1);
 });
 
+it("still tells the person and closes the downloads when the page's announcement cannot be read", async () => {
+    const running = await job("downloading");
+    const pending = await downloadJob(running.id, "pending");
+    const warned = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const read = jest.spyOn(prisma.spotifyImportJob, "findUnique").mockRejectedValueOnce(new Error("connection lost"));
+
+    expect(await failImportJob(running.id, "Scan timed out after 30 minutes")).toBe(true);
+    await downloadJobs.whenIdle();
+
+    read.mockRestore();
+    warned.mockRestore();
+    expect(notifyFailed).toHaveBeenCalledTimes(1);
+    expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: pending.id } })).status).toBe("failed");
+});
+
 it("still fails the import and tells the person when its downloads cannot be cancelled", async () => {
     const running = await job("downloading");
     await downloadJob(running.id, "pending");
