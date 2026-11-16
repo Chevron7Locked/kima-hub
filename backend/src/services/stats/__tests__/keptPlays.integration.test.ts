@@ -118,6 +118,33 @@ describe("the stats page's totals", () => {
         expect(await totals()).toEqual(before);
     });
 
+    it("never give a gone artist the id of a same-named artist that only Discover holds", async () => {
+        await deleteArtists([id("art_x")]);
+        await prisma.artist.create({ data: { id: id("art_dx"), name: `${P}Artist x`, identityKey: id("ak_dx") } });
+        await prisma.album.create({
+            data: { id: id("alb_dx"), rgMbid: id("rg_dx"), artistId: id("art_dx"), identityKey: id("ik_dx"), title: `${P}alb_dx`, primaryType: "Album", location: "DISCOVER" },
+        });
+
+        const stats = await withListens(USER, "all", (l) => listeningStats(l, "UTC"));
+
+        expect(stats.topArtists.find((a) => a.name === `${P}Artist x`)?.id).toBeNull();
+    });
+
+    it("give a gone artist the id of a same-named artist the library holds", async () => {
+        await deleteArtists([id("art_x")]);
+        await prisma.artist.create({ data: { id: id("art_x2"), name: `${P}Artist x`, identityKey: id("ak_x2") } });
+        await prisma.album.create({
+            data: { id: id("alb_x2"), rgMbid: id("rg_x2"), artistId: id("art_x2"), identityKey: id("ik_x2"), title: `${P}alb_x2`, primaryType: "Album", location: "LIBRARY" },
+        });
+        await prisma.track.create({
+            data: { id: id("x9"), albumId: id("alb_x2"), title: `${P}Song x9`, trackNo: 1, duration: 200, filePath: `/${P}outside/x9.flac`, fileModified: new Date(), fileSize: 1 },
+        });
+
+        const stats = await withListens(USER, "all", (l) => listeningStats(l, "UTC"));
+
+        expect(stats.topArtists.find((a) => a.name === `${P}Artist x`)?.id).toBe(id("art_x2"));
+    });
+
     it("count a Discover play nowhere, kept or not", async () => {
         const before = await totals();
         await deleteAlbums([id("alb_z")]);

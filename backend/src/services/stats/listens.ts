@@ -43,6 +43,7 @@
 import { Prisma, type Artist, type ListenSource } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { assertSqlName } from "../../utils/playableSong";
+import { artistHasPlayableSongSql } from "../libraryFilters";
 
 /** A table alias written in code, checked before it goes into SQL text. */
 function alias(name: string, fn: string): Prisma.Sql {
@@ -116,8 +117,8 @@ export function listenRows(
               ${touchedSince
                   ? Prisma.sql`AND p."trackId" IN (SELECT r."trackId" FROM "Play" r WHERE r."userId" = ${userId} AND r."playedAt" >= ${touchedSince})`
                   : Prisma.empty}`;
-    // A kept play's artist and album are the ones of that name that exist now, so its listen counts with theirs; with none,
-    // the stored names stand in for them. Its audio features are not kept, so only the counts that need none read it.
+    // A kept play's artist and album are the ones of that name that the library lists now (a Discover-only artist is not
+    // one), so its listen counts with theirs; with none, the stored names stand in for them. Its audio features are not kept, so only the counts that need none read it.
     const kept = withKept
         ? Prisma.sql`
           UNION ALL
@@ -129,7 +130,8 @@ export function listenRows(
                    coalesce(kb.id, 'kept:' || concat_ws(chr(31), p."keptArtistName", p."keptAlbumTitle")),
                    p."keptTitle", p."keptArtistName"
             FROM "Play" p
-            LEFT JOIN LATERAL (SELECT a.id FROM "Artist" a WHERE a.name = p."keptArtistName" ORDER BY a.id LIMIT 1) ka ON TRUE
+            LEFT JOIN LATERAL (SELECT a.id FROM "Artist" a WHERE a.name = p."keptArtistName" AND ${artistHasPlayableSongSql("a")}
+                                ORDER BY a.id LIMIT 1) ka ON TRUE
             LEFT JOIN LATERAL (SELECT b.id FROM "Album" b
                                 WHERE b."artistId" = ka.id AND b.title = p."keptAlbumTitle" AND b.location = 'LIBRARY'
                                 ORDER BY b.id LIMIT 1) kb ON TRUE
