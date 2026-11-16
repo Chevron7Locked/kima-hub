@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { api } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { settleFor } from "./settleFor";
 import { useAuth } from "@/lib/auth-context";
 import { ConnectionTestResult, SystemSettings } from "../types";
@@ -101,8 +102,14 @@ export function useSystemSettings() {
     const saveSystemSettings = async (settingsToSave: SystemSettings) => {
         const { musicPath, ...rest } = settingsToSave;
         const changedFolder = musicPath !== loadedMusicPathRef.current;
-        await api.updateSystemSettings(changedFolder ? settingsToSave : rest);
+        const answer = await api.updateSystemSettings(changedFolder ? settingsToSave : rest);
         if (changedFolder) loadedMusicPathRef.current = musicPath;
+        // The save stands either way; the server retries the clear on the next save.
+        if (answer?.audiobookProgressCleared === false) {
+            notify.error("audiobookshelf progress was not cleared", {
+                message: "audiobookshelf is off, but the listening progress kept for it could not be removed. save again to retry.",
+            });
+        }
     };
 
     const updateSystemSettings = (updates: Partial<SystemSettings>) => {

@@ -110,7 +110,9 @@ it("the settings page sending every field back tells a listener only about what 
     }
 });
 
-it("turning Audiobookshelf off clears listening progress once; a later save with it still off leaves new progress alone", async () => {
+// Audiobookshelf off means no stored progress, whichever save finds it so: a clear that failed is retried by the
+// next save, and progress left behind by an older version goes the same way.
+it("clears listening progress on every save while Audiobookshelf is off", async () => {
     const progress = { userId: ADMIN, audiobookshelfId: "zz-book", title: "zz-book" };
     try {
         await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: true }).expect(200);
@@ -119,18 +121,38 @@ it("turning Audiobookshelf off clears listening progress once; a later save with
         await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: false }).expect(200);
         expect(await prisma.audiobookProgress.count({ where: { userId: ADMIN } })).toBe(0);
 
+        // Sent off again, and not sent at all: both find it off.
         await prisma.audiobookProgress.create({ data: progress });
         await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: false, transcodeCacheMaxGb: 11 }).expect(200);
+        expect(await prisma.audiobookProgress.count({ where: { userId: ADMIN } })).toBe(0);
+
+        await prisma.audiobookProgress.create({ data: progress });
+        await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ transcodeCacheMaxGb: 12 }).expect(200);
+        expect(await prisma.audiobookProgress.count({ where: { userId: ADMIN } })).toBe(0);
+    } finally {
+        await prisma.audiobookProgress.deleteMany({ where: { userId: ADMIN } });
+    }
+});
+
+it("leaves listening progress alone while Audiobookshelf is on", async () => {
+    const progress = { userId: ADMIN, audiobookshelfId: "zz-book", title: "zz-book" };
+    try {
+        await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: true }).expect(200);
+        await prisma.audiobookProgress.create({ data: progress });
+
+        await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ transcodeCacheMaxGb: 13 }).expect(200);
         expect(await prisma.audiobookProgress.count({ where: { userId: ADMIN } })).toBe(1);
     } finally {
         await prisma.audiobookProgress.deleteMany({ where: { userId: ADMIN } });
     }
 });
 
-it("says so in the answer when the listening progress could not be cleared, and the save still stands", async () => {
+it("says so in the answer when the listening progress could not be cleared, the save still stands, and the next save clears it", async () => {
     expectLog("error");
+    const progress = { userId: ADMIN, audiobookshelfId: "zz-book", title: "zz-book" };
     try {
         await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: true }).expect(200);
+        await prisma.audiobookProgress.create({ data: progress });
         const clear = jest.spyOn(prisma.audiobookProgress, "deleteMany").mockRejectedValueOnce(new Error("disk full") as never);
 
         const res = await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: false });
@@ -139,8 +161,14 @@ it("says so in the answer when the listening progress could not be cleared, and 
         expect(res.status).toBe(200);
         expect(res.body).toEqual({ success: true, audiobookProgressCleared: false });
         expect((await prisma.systemSettings.findUnique({ where: { id: "default" } }))?.audiobookshelfEnabled).toBe(false);
+        expect(await prisma.audiobookProgress.count({ where: { userId: ADMIN } })).toBe(1);
+
+        const retry = await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ transcodeCacheMaxGb: 14 });
+        expect(retry.body).toEqual({ success: true });
+        expect(await prisma.audiobookProgress.count({ where: { userId: ADMIN } })).toBe(0);
     } finally {
         jest.restoreAllMocks();
+        await prisma.audiobookProgress.deleteMany({ where: { userId: ADMIN } });
     }
 });
 

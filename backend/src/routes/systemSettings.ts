@@ -167,10 +167,11 @@ router.post("/", async (req, res) => {
     const changed = await saveSystemSettings(data);
     if (data.musicPath !== undefined) useMusicFolder(data.musicPath);
 
-    // Audiobookshelf turned off (not merely sent back off): its listening progress goes with it. The save is done
-    // either way, so a failure to clear is told in the answer, not turned into a failed save.
+    // While Audiobookshelf is off, no listening progress is kept: every save clears it, so a clear that failed is
+    // retried by the next save. The save is done either way, so a failure to clear is told in the answer, not turned
+    // into a failed save.
     let progressCleared = true;
-    if (data.audiobookshelfEnabled === false && changed.includes("audiobookshelfEnabled")) {
+    if (!(await getSystemSettings())?.audiobookshelfEnabled) {
       try {
         const deletedProgress = await prisma.audiobookProgress.deleteMany({});
         logger.debug(`[SYSTEM SETTINGS] Audiobookshelf off: deleted ${deletedProgress.count} progress entries`);
