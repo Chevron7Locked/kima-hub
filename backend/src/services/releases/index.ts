@@ -7,6 +7,7 @@
 
 import { ChoiceDecidedBy } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { readSystemSettingsFresh } from "../../utils/systemSettings";
 import { logger } from "../../utils/logger";
 import { GPU_CHOICE_KEY, RELEASES, choicesIn, findRelease, isMoodMixItem, type Release, type ReleaseItem } from "./catalog";
 import { gpuSupported } from "../gpuRuntime";
@@ -16,7 +17,7 @@ export { findRelease, GPU_CHOICE_KEY } from "./catalog";
 
 /** The GPU question's answer is the switch itself, not a stored choice. */
 async function gpuChoiceAnswer(): Promise<boolean> {
-    const settings = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { gpuOnnxEnabled: true } });
+    const settings = await readSystemSettingsFresh("gpuOnnxEnabled");
     return settings?.gpuOnnxEnabled ?? false;
 }
 
@@ -27,7 +28,7 @@ async function isAdminUser(userId: string): Promise<boolean> {
 
 /** Whether an admin's album re-file has finished cleanly (refileProcessor.ts stamps it). */
 async function albumsRefiled(): Promise<boolean> {
-    const settings = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { albumsRefiledAt: true } });
+    const settings = await readSystemSettingsFresh("albumsRefiledAt");
     return settings?.albumsRefiledAt != null;
 }
 
@@ -110,7 +111,7 @@ async function forUser(
     let setUpAt: Date | null | undefined;
     const installedBefore = async (date: string) => {
         if (setUpAt === undefined) {
-            setUpAt = (await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { createdAt: true } }))?.createdAt ?? null;
+            setUpAt = (await readSystemSettingsFresh("createdAt"))?.createdAt ?? null;
         }
         return setUpAt !== null && setUpAt < new Date(date);
     };

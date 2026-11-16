@@ -1,9 +1,8 @@
 import fs from "fs";
 import path from "path";
-import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
-import { saveSystemSettings } from "../utils/systemSettings";
+import { readSystemSettingsFresh, saveSystemSettings } from "../utils/systemSettings";
 import { gpuSupported } from "./gpuPlatform";
 import { featureDetection } from "./featureDetection";
 
@@ -61,10 +60,7 @@ function writeEnabledProjection(toggles: GpuToggles): void {
 }
 
 async function readToggles(): Promise<GpuToggles> {
-    const settings = await prisma.systemSettings.findUnique({
-        where: { id: "default" },
-        select: { gpuOnnxEnabled: true, gpuAnalysisEnabled: true },
-    });
+    const settings = await readSystemSettingsFresh("gpuOnnxEnabled", "gpuAnalysisEnabled");
     return {
         soundVectors: Boolean(settings?.gpuOnnxEnabled),
         analysis: Boolean(settings?.gpuAnalysisEnabled),
@@ -179,10 +175,7 @@ export async function embeddingsDeferredForGpu(now = new Date()): Promise<boolea
     if (deferCache && now.getTime() - deferCache.atMs < DEFER_CACHE_MS) return deferCache.deferred;
     let deferred = false;
     try {
-        const settings = await prisma.systemSettings.findUnique({
-            where: { id: "default" },
-            select: { gpuOnnxEnabled: true },
-        });
+        const settings = await readSystemSettingsFresh("gpuOnnxEnabled");
         if (settings?.gpuOnnxEnabled) {
             const state = readJsonSafe<GpuState>(STATE_PATH) || {};
             const enabledAt = readJsonSafe<{ updatedAt?: string }>(ENABLED_PATH)?.updatedAt;

@@ -13,6 +13,18 @@ jest.mock("../releases/moodMixes", () => ({ MOOD_MIX_RELEASE: "1.11.0", moodMixS
 // The GPU choice is part of the tested catalog; pin the platform answer so the
 // suite sees it on arm/macOS runners too, as on the linux/x86_64 target.
 jest.mock("../gpuRuntime", () => ({ gpuSupported: () => true }));
+// Settings are read through the settings module; one test replaces its answer to prove that is where they come from.
+let mockSettingsAnswer: Record<string, unknown> | null = null;
+jest.mock("../../utils/systemSettings", () => {
+    const actual = jest.requireActual("../../utils/systemSettings");
+    return {
+        ...actual,
+        readSystemSettingsFresh: (...fields: string[]) =>
+            mockSettingsAnswer
+                ? Promise.resolve(Object.fromEntries(fields.map((f) => [f, mockSettingsAnswer![f]])))
+                : actual.readSystemSettingsFresh(...fields),
+    };
+});
 
 const { moodMixState } = require("../releases/moodMixes");
 
@@ -452,5 +464,49 @@ describe("catalog", () => {
 
         const memberKeys = (await changelogFor(MEMBER)).releases.find((r) => r.version === "1.11.0")!.items.map((i) => i.key);
         expect(memberKeys).not.toContain(GPU_CHOICE_KEY);
+    });
+});
+
+/** The settings row is read through the settings module: what it answers decides, whatever the table holds. */
+describe("the release questions read the settings through the settings module", () => {
+    const answer = (fields: Record<string, unknown>) => {
+        mockSettingsAnswer = fields;
+        jest.spyOn(prisma.systemSettings, "findUnique").mockImplementation((() => {
+            throw new Error("the settings table was read directly");
+        }) as never);
+    };
+    const refileOffered = async () =>
+        (await pendingReleases(USER)).find((r) => r.version === "1.12.4")!.items.some((i) => i.key === "albums.refile");
+
+    beforeEach(() => {
+        jest.restoreAllMocks();
+        noMix();
+    });
+    afterEach(() => {
+        mockSettingsAnswer = null;
+        jest.restoreAllMocks();
+    });
+
+    it("shows the GPU choice as the switch stands", async () => {
+        await prisma.releaseChoice.create({
+            data: { userId: USER, version: "1.11.0", key: GPU_CHOICE_KEY, enabled: false, decidedBy: ChoiceDecidedBy.EXPLICIT },
+        });
+        answer({ gpuOnnxEnabled: true, createdAt: new Date("2026-01-01T00:00:00Z"), albumsRefiledAt: null });
+
+        const gpu = (await changelogFor(USER)).releases.find((r) => r.version === "1.11.0")!.items.find((i) => i.key === GPU_CHOICE_KEY)!;
+        expect(gpu.answer).toMatchObject({ enabled: true });
+    });
+
+    it("stops offering the re-file once the settings say a clean run is recorded", async () => {
+        answer({ createdAt: new Date("2026-01-01T00:00:00Z"), albumsRefiledAt: null });
+        expect(await refileOffered()).toBe(true);
+
+        answer({ createdAt: new Date("2026-01-01T00:00:00Z"), albumsRefiledAt: new Date() });
+        expect(await refileOffered()).toBe(false);
+    });
+
+    it("does not offer the re-file to a server the settings say was set up after the release", async () => {
+        answer({ createdAt: new Date("2026-12-01T00:00:00Z"), albumsRefiledAt: null });
+        expect(await refileOffered()).toBe(false);
     });
 });
