@@ -27,6 +27,40 @@ describe("pruneEmptyAlbumsAndArtists", () => {
         expect(await prisma.artist.count({ where: { id: `${P}bare` } })).toBe(0);
     });
 
+    it("keeps an album, and its artist, when a scan adds a song between the list and the delete", async () => {
+        await prisma.artist.create({ data: { id: `${P}race`, name: `${P}race`, identityKey: `${P}race` } });
+        await prisma.album.create({
+            data: { id: `${P}ral`, rgMbid: `${P}rrg`, artistId: `${P}race`, identityKey: `${P}ral`, title: `${P}ral`, primaryType: "Album" },
+        });
+        // The scan lands just after the prune has listed the empty albums.
+        const listed = prisma.album.findMany.bind(prisma.album);
+        let added = false;
+        const spy = jest.spyOn(prisma.album, "findMany").mockImplementation(((args: Parameters<typeof listed>[0]) => {
+            const found = listed(args);
+            if (!added && JSON.stringify(args?.where) === JSON.stringify({ tracks: { none: {} } })) {
+                added = true;
+                return found.then(async (rows) => {
+                    await prisma.track.create({
+                        data: { id: `${P}rt`, albumId: `${P}ral`, title: "x", trackNo: 1, duration: 1, filePath: `/${P}rt.flac`, fileModified: new Date(), fileSize: 1 },
+                    });
+                    return rows;
+                });
+            }
+            return found;
+        }) as typeof prisma.album.findMany);
+
+        try {
+            await pruneEmptyAlbumsAndArtists();
+        } finally {
+            spy.mockRestore();
+        }
+
+        expect(added).toBe(true);
+        expect(await prisma.album.count({ where: { id: `${P}ral` } })).toBe(1);
+        expect(await prisma.track.count({ where: { id: `${P}rt` } })).toBe(1);
+        expect(await prisma.artist.count({ where: { id: `${P}race` } })).toBe(1);
+    });
+
     it("takes an emptied artist's keeps with it", async () => {
         await prisma.artist.create({ data: { id: `${P}gone`, name: `${P}gone`, identityKey: `${P}gone` } });
         await prisma.ownedAlbum.create({ data: { artistId: `${P}gone`, rgMbid: `${P}rg4`, source: "native_scan" } });

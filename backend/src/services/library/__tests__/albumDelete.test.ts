@@ -6,7 +6,7 @@ import { prisma } from "../../../utils/db";
 import { eventBus, type SSEEvent } from "../../eventBus";
 import { markerMoves } from "../../../__tests__/helpers/libraryMarker";
 import { ownedIndexVersion } from "../../discovery/ownedIndexVersion";
-import { deleteAlbums, deleteArtists, deleteEmptyArtists } from "../albumDelete";
+import { deleteAlbums, deleteArtists, deleteEmptyArtists, deleteSongs } from "../albumDelete";
 
 const P = "zz-albumdel_";
 const id = (n: string) => `${P}${n}`;
@@ -16,6 +16,7 @@ async function clear(): Promise<void> {
     await prisma.$executeRawUnsafe(`DELETE FROM "DiscoveryTrack" WHERE id LIKE '${P}%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "DiscoveryAlbum" WHERE id LIKE '${P}%'`);
     await prisma.playlist.deleteMany({ where: { userId: id("user") } });
+    await prisma.shareLink.deleteMany({ where: { token: { startsWith: P } } });
     await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
 }
 
@@ -258,5 +259,181 @@ describe("deleteEmptyArtists", () => {
         expect(await prisma.artist.count({ where: { id: { in: [bare, kept] } } })).toBe(0);
         expect(await prisma.ownedAlbum.count({ where: { artistId: kept } })).toBe(0);
         expect(await prisma.artist.count({ where: { id: busy } })).toBe(1);
+    });
+});
+
+const link = (n: string, entityType: "album" | "track" | "playlist", entityId: string) =>
+    prisma.shareLink.create({ data: { token: id(n), entityType, entityId, createdBy: id("user") } });
+const linksLeft = async () => (await prisma.shareLink.findMany({ where: { token: { startsWith: P } }, select: { token: true } })).map((l) => l.token).sort();
+const aSong = (n: string, albumId: string) =>
+    prisma.track.create({
+        data: { id: id(n), albumId, title: n, trackNo: 1, duration: 1, filePath: `/${P}outside/${n}.flac`, fileModified: new Date(), fileSize: 1 },
+    });
+
+describe("a song or album added after the list was made", () => {
+    it("keeps an album that got a song since it was listed empty, and takes the ones still empty", async () => {
+        const a = await artist("a");
+        await album("stillEmpty", a, { songs: 0 });
+        await album("filled", a, { songs: 0 });
+        await aSong("late", id("filled"));
+
+        const result = await deleteAlbums([id("stillEmpty"), id("filled")], { onlyEmpty: true });
+
+        expect(result.albums).toBe(1);
+        expect(await prisma.album.findMany({ where: { id: { startsWith: P } }, select: { id: true } })).toEqual([{ id: id("filled") }]);
+        expect(await prisma.track.count({ where: { id: id("late") } })).toBe(1);
+    });
+
+    it("keeps an artist that got an album since it was listed empty", async () => {
+        const quiet = await artist("quiet");
+        const busy = await artist("busy");
+        await album("late", busy, { songs: 1 });
+
+        const result = await deleteArtists([quiet, busy], { onlyEmpty: true });
+
+        expect(result.artists).toBe(1);
+        expect(await prisma.artist.count({ where: { id: busy } })).toBe(1);
+        expect(await prisma.album.count({ where: { id: id("late") } })).toBe(1);
+    });
+
+    it("waits for a scan that is adding a song at that moment, and then leaves the album", async () => {
+        const a = await artist("a");
+        await album("racing", a, { songs: 0 });
+        let adding!: () => void;
+        const added = new Promise<void>((resolve) => (adding = resolve));
+        // The scan: inserts the song (taking the album row's share lock through the foreign key), then commits late.
+        const scan = prisma.$transaction(async (tx) => {
+            await tx.track.create({
+                data: { id: id("scanned"), albumId: id("racing"), title: "s", trackNo: 1, duration: 1, filePath: `/${P}outside/s.flac`, fileModified: new Date(), fileSize: 1 },
+            });
+            adding();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+        });
+        await added;
+
+        const deleting = deleteAlbums([id("racing")], { onlyEmpty: true });
+        await scan;
+        const result = await deleting;
+
+        expect(result.albums).toBe(0);
+        expect(await prisma.album.count({ where: { id: id("racing") } })).toBe(1);
+        expect(await prisma.track.count({ where: { id: id("scanned") } })).toBe(1);
+    });
+});
+
+describe("share links", () => {
+    it("an album delete takes the links to the album and to its songs, and no others", async () => {
+        const a = await artist("a");
+        await album("gone", a, { songs: 2 });
+        await album("kept", a);
+        await link("album", "album", id("gone"));
+        await link("song", "track", id("gone-t1"));
+        await link("keptAlbum", "album", id("kept"));
+        await link("keptSong", "track", id("kept-t0"));
+        await link("list", "playlist", id("gone"));
+
+        await deleteAlbums([id("gone")]);
+
+        expect(await linksLeft()).toEqual([id("keptAlbum"), id("keptSong"), id("list")].sort());
+    });
+
+    it("an artist delete takes the links of its albums and songs", async () => {
+        const a = await artist("a");
+        const b = await artist("b");
+        await album("one", a, { songs: 2 });
+        await album("two", b);
+        await link("album", "album", id("one"));
+        await link("song", "track", id("one-t0"));
+        await link("other", "album", id("two"));
+
+        await deleteArtists([a]);
+
+        expect(await linksLeft()).toEqual([id("other")]);
+    });
+});
+
+describe("deleteSongs", () => {
+    it("takes the songs, their Discover records, share links and playlist entries, and leaves the rest of the album", async () => {
+        const a = await artist("a");
+        await album("one", a, { songs: 3 });
+        await prisma.discoveryAlbum.create({ data: { id: id("da"), userId: id("user"), rgMbid: id("one-rg"), artistName: "x", albumTitle: "x", weekStartDate: new Date() } });
+        await prisma.discoveryTrack.create({ data: { id: id("dt"), discoveryAlbumId: id("da"), trackId: id("one-t0"), fileName: "a", filePath: "a" } });
+        await link("gone", "track", id("one-t0"));
+        await link("stays", "track", id("one-t1"));
+        await link("album", "album", id("one"));
+        const holding = await holdsSong("holds", id("one-t0"));
+
+        const result = await deleteSongs([id("one-t0")]);
+
+        expect(result).toMatchObject({ songs: 1, albums: 0 });
+        expect((await prisma.track.findMany({ where: { albumId: id("one") }, select: { id: true }, orderBy: { id: "asc" } })).map((t) => t.id)).toEqual([id("one-t1"), id("one-t2")]);
+        expect(await prisma.discoveryTrack.count({ where: { id: id("dt") } })).toBe(0);
+        expect(await linksLeft()).toEqual([id("album"), id("stays")].sort());
+        expect(await prisma.playlistItem.count({ where: { playlistId: holding.id } })).toBe(0);
+        expect(told()).toEqual([{ playlistId: holding.id, deleted: false }]);
+    });
+
+    it("takes the album too when it was the last song, with the album's share links", async () => {
+        const a = await artist("a");
+        await album("last", a, { songs: 1 });
+        await album("other", a);
+        await link("album", "album", id("last"));
+        await link("other", "album", id("other"));
+
+        const result = await deleteSongs([id("last-t0")]);
+
+        expect(result).toMatchObject({ songs: 1, albums: 1 });
+        expect(await prisma.album.findMany({ where: { id: { startsWith: P } }, select: { id: true } })).toEqual([{ id: id("other") }]);
+        expect(await linksLeft()).toEqual([id("other")]);
+    });
+
+    it("deletes songs of several albums in one run and recounts their artist", async () => {
+        const a = await artist("a");
+        await album("one", a, { songs: 2 });
+        await album("two", a, { songs: 1 });
+        await prisma.artist.update({ where: { id: a }, data: { libraryAlbumCount: 2, totalTrackCount: 3 } });
+
+        const result = await deleteSongs([id("one-t0"), id("two-t0")]);
+
+        expect(result).toMatchObject({ songs: 2, albums: 1 });
+        expect(await prisma.artist.findUniqueOrThrow({ where: { id: a }, select: { libraryAlbumCount: true, totalTrackCount: true } })).toEqual({
+            libraryAlbumCount: 1,
+            totalTrackCount: 1,
+        });
+    });
+
+    it("with `detachDiscovery`, keeps the Discover record and unnames the song in it", async () => {
+        const a = await artist("a");
+        await album("one", a, { songs: 2 });
+        await prisma.discoveryAlbum.create({ data: { id: id("da"), userId: id("user"), rgMbid: id("one-rg"), artistName: "x", albumTitle: "x", weekStartDate: new Date() } });
+        await prisma.discoveryTrack.create({ data: { id: id("dt"), discoveryAlbumId: id("da"), trackId: id("one-t0"), fileName: "a", filePath: "a" } });
+
+        await deleteSongs([id("one-t0")], { detachDiscovery: true });
+
+        expect(await prisma.discoveryTrack.findUniqueOrThrow({ where: { id: id("dt") }, select: { trackId: true } })).toEqual({ trackId: null });
+    });
+
+    it("moves the library-changed marker for a playable song, and not for a missing one", async () => {
+        const a = await artist("a");
+        await album("one", a, { songs: 2 });
+        await album("gone", a, { songs: 1, missing: true });
+
+        expect(await markerMoves(() => deleteSongs([id("gone-t0")]))).toBe(false);
+        expect(await markerMoves(() => deleteSongs([id("one-t0")]))).toBe(true);
+    });
+
+    it("inside the caller's transaction, tells nothing until settled", async () => {
+        const a = await artist("a");
+        await album("one", a, { songs: 1 });
+        await holdsSong("holds", id("one-t0"));
+
+        const result = await prisma.$transaction((tx) => deleteSongs([id("one-t0")], { within: tx }));
+        expect(heard).toEqual([]);
+        await result.settle();
+        expect(told()).toHaveLength(1);
+    });
+
+    it("an id no song has is nothing to delete", async () => {
+        expect(await deleteSongs([id("nope")])).toMatchObject({ songs: 0, albums: 0 });
     });
 });

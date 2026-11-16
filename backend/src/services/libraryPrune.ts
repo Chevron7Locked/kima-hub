@@ -15,7 +15,7 @@ export async function pruneEmptyAlbumsAndArtists(): Promise<{ albums: number; ar
     let albums = 0;
     if (orphanedAlbums.length > 0) {
         logger.debug(`Removing ${orphanedAlbums.length} orphaned albums...`);
-        albums = (await deleteAlbums(orphanedAlbums.map((a) => a.id))).albums;
+        albums = (await deleteAlbums(orphanedAlbums.map((a) => a.id), { onlyEmpty: true })).albums;
     }
     return { albums, artists: await deleteEmptyArtists() };
 }
