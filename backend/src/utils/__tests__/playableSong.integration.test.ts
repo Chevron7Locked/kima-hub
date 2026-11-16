@@ -828,6 +828,8 @@ describe("a genre and a decade whose playable songs fall short of the radio row'
         ]);
     });
     afterAll(async () => {
+        // Plays first: a song deleted under a play that kept nothing fails on the Play check.
+        await prisma.play.deleteMany({ where: { trackId: { startsWith: `${P}-thin` } } });
         await prisma.track.deleteMany({ where: { id: { startsWith: `${P}-thin` } } });
         await prisma.album.deleteMany({ where: { id: { startsWith: `${P}-thin` } } });
         await prisma.artist.deleteMany({ where: { id: { startsWith: `${P}-thin` } } });

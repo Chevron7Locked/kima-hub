@@ -8,6 +8,8 @@ export async function removeMoodRows(prefix: string, { matchingState = false } =
     await prisma.$executeRawUnsafe(`DELETE FROM mood_state`);
     if (matchingState) await prisma.$executeRawUnsafe(`DELETE FROM matching_state`);
     await prisma.$executeRawUnsafe(`DELETE FROM track_embeddings`);
+    // Plays first: a song deleted under a play that kept nothing fails on the Play check.
+    await prisma.$executeRawUnsafe(`DELETE FROM "Play" WHERE "trackId" LIKE '${prefix}%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Track" WHERE id LIKE '${prefix}%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Album" WHERE id LIKE '${prefix}%'`);
     await prisma.$executeRawUnsafe(`DELETE FROM "Artist" WHERE id LIKE '${prefix}%'`);
