@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
-import { playableSongSql } from "../utils/playableSong";
+import { assertSqlName, playableSongSql } from "../utils/playableSong";
 import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
 import { genreKey, libraryAlbumIdsAnsweringToGenre } from "../utils/genreSql";
 import { searchRows, containsSql, hasNonAscii } from "./textMatch";
@@ -47,7 +47,7 @@ function genreSql(scope: GenreScope | undefined): Prisma.Sql {
 
 /** A song's title as shown, lower-cased, for ordering: the edited title, else the file's. `song` is the table name or alias. */
 export function shownSongTitleSql(song: string): Prisma.Sql {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(song)) throw new Error(`"${song}" is not a table name or alias`);
+    assertSqlName(song, "shownSongTitleSql");
     return Prisma.sql`LOWER(COALESCE(NULLIF("${Prisma.raw(song)}"."displayTitle", ''), "${Prisma.raw(song)}".title))`;
 }
 

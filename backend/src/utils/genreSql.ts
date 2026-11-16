@@ -19,7 +19,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { getMergedGenres } from "./metadataOverrides";
 import { albumHasPlayableSongSql } from "../services/libraryFilters";
-import { playableSongSql } from "./playableSong";
+import { assertSqlName, playableSongSql } from "./playableSong";
 
 /**
  * Spaces (any width, no-break included), hyphens, dashes and the minus sign, underscores, slashes, dots and middle dots,
@@ -188,8 +188,6 @@ export async function libraryAlbumIdsAnsweringToGenre(genreValue: string): Promi
     return libraryAlbumIdsWhere(genreValue, genreAnswersTo);
 }
 
-const SQL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
 /**
  * A SQL condition on the playable songs that show this genre (any spelling of it), for a query that names the song
  * `"Track"` as `songAlias` and its album as `albumAlias`: a song with a usable tag of its own is in when one of its tags
@@ -198,9 +196,8 @@ const SQL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * compared here.
  */
 export async function songGenreFilterSql(genreValue: string, songAlias: string, albumAlias: string): Promise<Prisma.Sql> {
-    for (const name of [songAlias, albumAlias]) {
-        if (!SQL_NAME.test(name)) throw new Error(`songGenreFilterSql: "${name}" is not a table name or alias`);
-    }
+    assertSqlName(songAlias, "songGenreFilterSql");
+    assertSqlName(albumAlias, "songGenreFilterSql");
     const wanted = genreKey(genreValue);
     if (wanted === "") return Prisma.sql`1 = 0`;
     const albumIds = await libraryAlbumIdsOfGenre(genreValue);

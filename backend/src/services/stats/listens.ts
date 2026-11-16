@@ -42,12 +42,11 @@
 
 import { Prisma, type Artist, type ListenSource } from "@prisma/client";
 import { prisma } from "../../utils/db";
-
-const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+import { assertSqlName } from "../../utils/playableSong";
 
 /** A table alias written in code, checked before it goes into SQL text. */
 function alias(name: string, fn: string): Prisma.Sql {
-    if (!IDENTIFIER.test(name)) throw new Error(`${fn}: "${name}" is not a table alias`);
+    assertSqlName(name, fn);
     return Prisma.raw(`"${name}"`);
 }
 

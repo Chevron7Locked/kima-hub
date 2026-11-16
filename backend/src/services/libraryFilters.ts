@@ -5,15 +5,10 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
-import { PLAYABLE_SONG, playableSongSql } from "../utils/playableSong";
+import { PLAYABLE_SONG, assertSqlName, playableSongSql } from "../utils/playableSong";
 
 /** `Album.location` for owned albums. */
 export const LIBRARY_LOCATION = "LIBRARY";
-
-/** Spread into an `Album` where-clause to scope it to owned-library albums. */
-export const LIBRARY_ALBUM_WHERE: Prisma.AlbumWhereInput = {
-    location: LIBRARY_LOCATION,
-};
 
 /**
  * A library album with at least one playable song. Lists of albums and artists show only these: an album whose every
@@ -24,12 +19,10 @@ export const PLAYABLE_ALBUM_WHERE: Prisma.AlbumWhereInput = {
     tracks: { some: PLAYABLE_SONG },
 };
 
-const SQL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
 /** The outer query's table name or alias, checked before it is written into SQL. `ps` and `pa` are the inner aliases
  * these pieces use, so an outer name of either would be shadowed. */
 function outerName(name: string): void {
-    if (!SQL_NAME.test(name)) throw new Error(`"${name}" is not a table name or alias`);
+    assertSqlName(name, "outer name");
     if (name === "ps" || name === "pa") throw new Error(`"${name}" clashes with an alias the playable pieces use inside`);
 }
 
