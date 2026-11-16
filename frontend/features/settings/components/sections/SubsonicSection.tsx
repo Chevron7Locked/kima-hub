@@ -70,7 +70,7 @@ export function SubsonicSection() {
     const handleRevoke = async (id: string) => {
         setRevoking(id);
         try {
-            await api.delete(`/api-keys/${id}`);
+            await api.delete(`/api-keys/${encodeURIComponent(id)}`);
             setApiKeys((prev) => prev.filter((k) => k.id !== id));
         } catch {
             setStatus("error");

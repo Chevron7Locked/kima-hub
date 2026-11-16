@@ -81,7 +81,7 @@ export function ImportsTab() {
     const handleCancel = async (jobId: string) => {
         setCancelling((prev) => new Set(prev).add(jobId));
         try {
-            await api.post(`/spotify/import/${jobId}/cancel`);
+            await api.post(`/spotify/import/${encodeURIComponent(jobId)}/cancel`);
             queryClient.invalidateQueries({ queryKey: ["user-imports"] });
         } catch (error) {
             console.error("Failed to cancel import:", error);
@@ -203,7 +203,7 @@ function ImportJobCard({
 
                 {job.status === "completed" && job.createdPlaylistId && (
                     <Link
-                        href={`/playlist/${job.createdPlaylistId}`}
+                        href={`/playlist/${encodeURIComponent(job.createdPlaylistId)}`}
                         className="mt-1 inline-flex items-center gap-1 rounded-sm text-[11px] text-brand outline-none hover:underline focus-visible:ring-2 focus-visible:ring-brand/60"
                     >
                         open the playlist

@@ -208,7 +208,7 @@ function ImportPlaylistPageContent() {
             const cached = queryClient.getQueryData<PreviewStatus>(["preview-status", previewJobId]);
             if (cached && cached.status !== "running") return cached;
             // Otherwise poll the backend (handles SSE reconnect gap)
-            return api.get<PreviewStatus>(`/spotify/preview/${previewJobId}`);
+            return api.get<PreviewStatus>(`/spotify/preview/${encodeURIComponent(previewJobId)}`);
         },
         enabled: !!previewJobId && step === "previewing",
         // Poll every 3s while pending/running; stop once terminal
@@ -255,7 +255,7 @@ function ImportPlaylistPageContent() {
             const cached = queryClient.getQueryData<ImportJob & { jobId?: string }>(["import-status", importJob?.id]);
             if (cached && TERMINAL_IMPORT_STATUSES.includes(cached.status)) return cached;
             if (!importJob?.id) return null;
-            return api.get<ImportJob & { jobId?: string }>(`/spotify/import/${importJob.id}/status`);
+            return api.get<ImportJob & { jobId?: string }>(`/spotify/import/${encodeURIComponent(importJob.id)}/status`);
         },
         enabled: !!importJob && !TERMINAL_IMPORT_STATUSES.includes(importJob.status),
         refetchInterval: (query) => {
@@ -410,7 +410,7 @@ function ImportPlaylistPageContent() {
                 message: string;
                 playlistId: string | null;
                 tracksMatched: number;
-            }>(`/spotify/import/${importJob.id}/cancel`, {});
+            }>(`/spotify/import/${encodeURIComponent(importJob.id)}/cancel`, {});
 
             setImportJob((prev) =>
                 prev
@@ -572,7 +572,7 @@ function ImportPlaylistPageContent() {
                             <a
                                 href={
                                     url ||
-                                    `https://open.spotify.com/playlist/${preview.playlist.id}`
+                                    `https://open.spotify.com/playlist/${encodeURIComponent(preview.playlist.id)}`
                                 }
                                 target="_blank"
                                 rel="noopener noreferrer"
@@ -971,7 +971,7 @@ function ImportPlaylistPageContent() {
                                                     added: number;
                                                     total: number;
                                                 }>(
-                                                    `/spotify/import/${importJob.id}/refresh`,
+                                                    `/spotify/import/${encodeURIComponent(importJob.id)}/refresh`,
                                                     {}
                                                 );
                                                 if (result.added > 0) {
@@ -1017,7 +1017,7 @@ function ImportPlaylistPageContent() {
                                     variant="primary"
                                     onClick={() =>
                                         router.push(
-                                            `/playlist/${importJob.createdPlaylistId}`
+                                            `/playlist/${encodeURIComponent(importJob.createdPlaylistId)}`
                                         )
                                     }
                                     className="bg-success hover:bg-success hover:brightness-110"

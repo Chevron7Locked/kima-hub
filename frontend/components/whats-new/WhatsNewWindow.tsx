@@ -136,7 +136,7 @@ export function WhatsNewWindow({
     const answer = async (key: string, enabled: boolean) => {
         setChoices((c) => ({ ...c, [key]: enabled }));
         try {
-            await api.post(`/whats-new/${versionOf(key)}/choice`, { key, enabled });
+            await api.post(`/whats-new/${encodeURIComponent(versionOf(key))}/choice`, { key, enabled });
             refreshOpenCount(queryClient);
         } catch {
             setChoices((c) => {

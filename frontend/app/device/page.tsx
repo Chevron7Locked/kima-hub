@@ -111,7 +111,7 @@ export default function DeviceLinkPage() {
         const pollInterval = setInterval(async () => {
             try {
                 const status = await api.request<{ status: string; deviceName?: string }>(
-                    `/device-link/status/${linkCode.code}`
+                    `/device-link/status/${encodeURIComponent(linkCode.code)}`
                 );
 
                 setAskingDevice(status.status === "waiting" ? (status.deviceName ?? "a device") : null);
@@ -132,7 +132,7 @@ export default function DeviceLinkPage() {
         setAnswering(true);
         setError(null);
         try {
-            await api.request(`/device-link/${answer}/${linkCode.code}`, { method: "POST" });
+            await api.request(`/device-link/${answer}/${encodeURIComponent(linkCode.code)}`, { method: "POST" });
             setAskingDevice(null);
             if (answer === "deny") {
                 setLinkCode(null);
@@ -154,7 +154,7 @@ export default function DeviceLinkPage() {
 
     const revokeDevice = async (device: LinkedDevice) => {
         try {
-            await api.request(`/device-link/devices/${device.id}`, {
+            await api.request(`/device-link/devices/${encodeURIComponent(device.id)}`, {
                 method: "DELETE",
             });
             setDevices((prev) => prev.filter((d) => d.id !== device.id));
