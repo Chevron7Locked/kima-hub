@@ -1,8 +1,8 @@
 /**
  * The enrichment scheduler's run state.
  *
- * One mode, changed only through the moves below, replaces the seven flags the scheduler used to flip from the
- * control channel, the start and stop calls, the cycle's admission and the phase loop:
+ * One mode, changed only through the moves below. The control channel, the start and stop calls, the cycle's
+ * admission and the phase loop all go through them:
  *
  *   running   cycles are admitted and run to the end
  *   paused    an operator's pause: no cycle starts and a running one halts at its next phase
@@ -12,10 +12,13 @@
  * A stop is never lost: wherever it is seen (admission, a phase boundary, the stored state), it settles to
  * `stopped`, so a stop that lands mid-cycle holds against the next timer tick.
  *
- * Beside the mode are five facts that are not modes: whether a cycle is in flight, which phase it is inside,
- * whether a wake request is waiting, whether the stop warning was already given, and whether the worker is closed
- * (the latch that ends the timer chain). The module holds no Redis, timers or workers; the scheduler does the talking and asks here which
- * move to make.
+ * A cycle that a wake request let through a stop (a person ran enrichment by hand) runs to its end: the stop it was
+ * let through is not a reason to halt it. A stop that arrives during it halts it like any other.
+ *
+ * Beside the mode are facts that are not modes: whether a cycle is in flight, which phase it is inside, whether a wake
+ * request is waiting, whether the stop warning was already given, and whether the worker is closed (the latch that
+ * ends the timer chain). The module holds no Redis, timers or workers; the scheduler does the talking and asks here
+ * which move to make.
  */
 
 export type RunMode = "running" | "paused" | "stopping" | "stopped";
@@ -72,7 +75,10 @@ export interface RunState {
     // Questions the cycle asks.
     /** Whether a cycle may go past the stop check: not while stopped, unless it was woken. */
     admitsCycle(): boolean;
-    /** Whether a cycle that is running should stop its work now: any mode but running. */
+    /**
+     * Whether a cycle that is running should stop its work now: paused, or stopping, or stopped by a stop that came
+     * after the cycle began. A cycle a wake request let through a stop is not halted by that stop.
+     */
     haltRequested(): boolean;
     /** Periodic cleanup runs only while the worker runs, never during a pause or stop. */
     mayDoHousekeeping(): boolean;
@@ -86,6 +92,8 @@ export function createRunState(): RunState {
     let wake = false;
     let warned = false;
     let closed = false;
+    // The cycle in flight began while the worker was stopped, let through by a wake request. Cleared by a new stop.
+    let pastStop = false;
     let phase: string | null = null;
     // Resolves the settle promise of the cycle in flight; null while none runs.
     let settle: (() => void) | null = null;
@@ -105,6 +113,7 @@ export function createRunState(): RunState {
             if (mode === "paused") mode = "running";
         },
         stop() {
+            pastStop = false;
             mode = "stopping";
         },
 
@@ -116,6 +125,8 @@ export function createRunState(): RunState {
             if (mode !== "stopped") warned = false;
             // The stop wins over a request still waiting: left set, it would run a cycle past the stop at the next tick.
             wake = false;
+            // A stop settled while a hand-run cycle is in flight is a new stop for that cycle too.
+            pastStop = false;
             mode = "stopped";
         },
 
@@ -141,12 +152,14 @@ export function createRunState(): RunState {
 
         beginCycle() {
             inFlight = true;
+            pastStop = mode === "stopped";
             settled = new Promise<void>((resolve) => {
                 settle = resolve;
             });
         },
         endCycle() {
             inFlight = false;
+            pastStop = false;
             phase = null;
             settle?.();
             settle = null;
@@ -163,7 +176,7 @@ export function createRunState(): RunState {
         admitsCycle() {
             return mode !== "stopped" || wake;
         },
-        haltRequested: () => mode !== "running",
+        haltRequested: () => (mode === "stopped" ? !pastStop : mode !== "running"),
         mayDoHousekeeping: () => mode === "running",
 
         markStopWarned() {

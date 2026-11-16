@@ -149,6 +149,47 @@ describe("run state", () => {
             expect(run.admitsCycle()).toBe(false);
         });
 
+        it("a cycle let through a stop by a request runs to its end", () => {
+            const run = inMode("stopped");
+            run.requestWake();
+            run.takeWake();
+            run.beginCycle();
+            expect(run.haltRequested()).toBe(false);
+            run.endCycle();
+            // It does not lift the stop: the next tick is still refused.
+            expect(run.mode()).toBe("stopped");
+            expect(run.admitsCycle()).toBe(false);
+        });
+
+        it("a stop that arrives during such a cycle halts it, even when another look settled the stop first", () => {
+            const run = inMode("stopped");
+            run.requestWake();
+            run.takeWake();
+            run.beginCycle();
+            run.stop();
+            expect(run.haltRequested()).toBe(true);
+            // A second trigger's admission saw the stop and settled it before this cycle's next phase boundary.
+            run.settleStop();
+            expect(run.haltRequested()).toBe(true);
+        });
+
+        it("a stop settled from the stored state, with no stop message, halts a cycle let through an earlier stop", () => {
+            const run = inMode("stopped");
+            run.requestWake();
+            run.takeWake();
+            run.beginCycle();
+            run.settleStop();
+            expect(run.haltRequested()).toBe(true);
+        });
+
+        it("a cycle that began running is halted by a stop another look has already settled", () => {
+            const run = inMode("running");
+            run.beginCycle();
+            run.stop();
+            run.settleStop();
+            expect(run.haltRequested()).toBe(true);
+        });
+
         it("a stop seen by a cycle drops a waiting request: the stop wins over it", () => {
             const run = inMode("running");
             run.requestWake();

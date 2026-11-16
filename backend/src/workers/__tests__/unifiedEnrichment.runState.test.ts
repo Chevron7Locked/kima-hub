@@ -173,6 +173,25 @@ describe("a stop between cycles", () => {
     });
 });
 
+describe("a cycle triggered by hand while stopped", () => {
+    it("runs every phase, and leaves the stop in place", async () => {
+        control("stop");
+        await triggerEnrichmentNow();
+        expect(cyclesRun()).toBe(0);
+
+        state.updateState.mockClear();
+        await triggerEnrichmentNow();
+
+        expect(cyclesRun()).toBe(1);
+        const phases = state.updateState.mock.calls.map(([update]) => (update as { currentPhase?: string | null }).currentPhase);
+        expect(phases).toEqual(expect.arrayContaining(["artists", "tracks", "fingerprint"]));
+
+        // The trigger did not lift the stop: the timer still does nothing.
+        await jest.advanceTimersByTimeAsync(10 * 60 * 1000);
+        expect(cyclesRun()).toBe(1);
+    });
+});
+
 describe("a start that lands while a stop is being settled", () => {
     it("is not undone by the settling", async () => {
         control("stop");

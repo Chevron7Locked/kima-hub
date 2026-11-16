@@ -5,6 +5,7 @@ import { redisClient } from "../utils/redis";
 import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { eventBus } from "../services/eventBus";
 import { startEnrichmentNow } from "../workers/unifiedEnrichment";
+import { ownedSongSql } from "../workers/enrichment/ownedSong";
 import * as stageRecords from "../services/stages/stageRecords";
 import os from "os";
 import { isInternalSecret } from "../utils/internalSecret";
@@ -285,7 +286,7 @@ router.post("/vibe/start", async (req, res) => {
             WHERE ts.stage = 'embedding'
               AND ts.status IN ('pending', 'failed', 'working')
               AND ts.retryable = true
-              AND EXISTS (SELECT 1 FROM "Track" lt JOIN "Album" la ON la.id = lt."albumId" WHERE lt.id = ts."trackId" AND la.location = 'LIBRARY')
+              AND EXISTS (SELECT 1 FROM "Track" lt WHERE lt.id = ts."trackId" AND ${ownedSongSql("lt")})
               AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= now())
               ${force ? Prisma.empty : Prisma.sql`AND NOT EXISTS (SELECT 1 FROM track_embeddings te WHERE te.track_id = ts."trackId")`}
         `;

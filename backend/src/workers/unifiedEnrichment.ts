@@ -21,6 +21,7 @@ import {
     resumeVibeQueuing,
 } from "./audioCompletionSubscriber";
 import { createRunState } from "./enrichment/runState";
+import { ownedSongSql } from "./enrichment/ownedSong";
 import { createMoodStep } from "./enrichment/moods";
 import { runSimilarityStep } from "./enrichment/similarity";
 import { ANALYSIS_QUEUE, pushToAnalyzer, runAudioAnalysis } from "./enrichment/audioAnalysisJob";
@@ -98,9 +99,7 @@ async function clapHasTheRun(now: Date): Promise<boolean> {
             SELECT 1 FROM "Track" t
               JOIN "TrackStage" an ON an."trackId" = t.id AND an.stage = 'analysis' AND an.status = 'done'
               LEFT JOIN "TrackStage" ts ON ts."trackId" = t.id AND ts.stage = 'embedding'
-             WHERE t."missingSince" IS NULL
-               AND t."filePath" IS NOT NULL
-               AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
+             WHERE ${ownedSongSql("t")}
                AND (ts.id IS NULL
                     OR ts.status = 'working'
                     OR (ts.status IN ('pending', 'failed') AND ts.retryable = true
@@ -124,9 +123,7 @@ export async function analysisStillRunning(now: Date): Promise<boolean> {
         SELECT EXISTS (
             SELECT 1 FROM "Track" t
               LEFT JOIN "TrackStage" ts ON ts."trackId" = t.id AND ts.stage = 'analysis'
-             WHERE t."missingSince" IS NULL
-               AND t."filePath" IS NOT NULL
-               AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
+             WHERE ${ownedSongSql("t")}
                AND (ts.id IS NULL
                     OR ts.status IN ('pending', 'working')
                     OR (ts.status = 'failed' AND ts.retryable = true
@@ -247,10 +244,9 @@ export async function getNextWork(
                             OR ts.status = 'working')
                            AND ts.retryable = true
                            AND (ts."nextRetryAt" IS NULL OR ts."nextRetryAt" <= $3)))
-                -- A missing file is skipped, not failed: the scan clears the flag when it returns.
-                AND t."missingSince" IS NULL
-                -- A Discover song is never enriched; a like moves its album to the library, and it is due from then.
-                AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
+                -- A missing file is skipped, not failed (the scan clears the flag when it returns), and a Discover song
+                -- is never enriched (a like moves its album to the library, and it is due from then).
+                AND ${ownedSongSql("t").sql}
                 -- The prerequisite's record, as its edge declares (StageWaitKind).
                   AND ($5::text IS NULL
                      OR EXISTS (SELECT 1 FROM "TrackStage" prev
@@ -1108,12 +1104,12 @@ async function runEnrichmentCycle(): Promise<{
 
 /**
  * Check if enrichment should stop and handle state cleanup if stopping.
- * Returns true if cycle should halt (stopping, stopped or paused). A stop seen here settles to
- * stopped, so the next timer tick does not start work again.
+ * Returns true if cycle should halt (a stop, or a pause). A stop seen here settles to stopped, so the next timer tick
+ * does not start work again. A cycle a person ran by hand past an earlier stop is not halted by that stop.
  */
 async function shouldHaltCycle(): Promise<boolean> {
     const mode = run.mode();
-    if (mode === "stopping" || mode === "stopped") {
+    if ((mode === "stopping" || mode === "stopped") && run.haltRequested()) {
         // Settled before the write: a start that lands during it is then not undone.
         run.settleStop();
         await enrichmentStateService.updateState({
@@ -1273,7 +1269,6 @@ export async function executeIdentificationPhase(): Promise<number> {
     return runIdentification(offerFor("recording"));
 }
 
-/**
 /** The `analysis` question: its own work is in enrichment/audioAnalysisJob.ts; this binds the offer to the stage. */
 export async function executeAudioPhase(): Promise<number> {
     return runAudioAnalysis(offerFor("analysis"), analysisList);
@@ -1326,6 +1321,21 @@ export function invalidateEnrichmentProgress(): void {
     progressMemo = null;
 }
 
+/** One stage's counts over the library's songs, from `computeEnrichmentProgress`. */
+interface StageProgress {
+    total: number;
+    completed: number;
+    working: number;
+    retryableFailed: number;
+    terminalFailed: number;
+    fileMissing: number;
+}
+
+/** What a stage owes and nothing has picked up: every song not done, working, failed or waiting on a missing file. */
+function pendingOf(p: StageProgress): number {
+    return p.total - p.completed - p.terminalFailed - p.retryableFailed - p.working - p.fileMissing;
+}
+
 /** Enrichment progress per stage, read from the records and the analysis queue. */
 async function computeEnrichmentProgress() {
     // Which artists count, and which are owed, is the artist job's rule.
@@ -1364,7 +1374,8 @@ async function computeEnrichmentProgress() {
                 FROM "Track" t
                 LEFT JOIN "TrackStage" ts
                          ON ts."trackId" = t.id AND ts.stage = ${stage}
-                -- Library songs only: Discover songs are never enriched, so they are never owed.
+                -- Library songs only: Discover songs are never enriched, so they are never owed. Missing-file songs
+                -- stay in: the counts show them as waiting on their file (file_missing), so this is not the owed-song rule.
                 WHERE EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
             `;
             return {
@@ -1390,8 +1401,7 @@ async function computeEnrichmentProgress() {
         SELECT count(*) AS waiting
           FROM "TrackStage" ts
           JOIN "Track" t ON t.id = ts."trackId"
-         WHERE t."missingSince" IS NULL
-           AND EXISTS (SELECT 1 FROM "Album" a WHERE a.id = t."albumId" AND a.location = 'LIBRARY')
+         WHERE ${ownedSongSql("t")}
            AND ts.stage = 'recording'
            AND (ts.status = 'pending'
                 OR (ts.status = 'failed' AND ts.retryable
@@ -1414,34 +1424,10 @@ async function computeEnrichmentProgress() {
     // Questions about missing files are closed by the scan as FILE_MISSING and
     // reported per stage as `waitingMissing`; the scan reopens them if the file returns.
 
-    const recordingPending =
-        recording.total -
-        recording.completed -
-        recording.terminalFailed -
-        recording.retryableFailed -
-        recording.working -
-        recording.fileMissing;
-    const analysisPending =
-        analysis.total -
-        analysis.completed -
-        analysis.terminalFailed -
-        analysis.retryableFailed -
-        analysis.working -
-        analysis.fileMissing;
-    const embeddingPending =
-        embedding.total -
-        embedding.completed -
-        embedding.terminalFailed -
-        embedding.retryableFailed -
-        embedding.working -
-        embedding.fileMissing;
-    const fingerprintPending =
-        fingerprint.total -
-        fingerprint.completed -
-        fingerprint.terminalFailed -
-        fingerprint.retryableFailed -
-        fingerprint.working -
-        fingerprint.fileMissing;
+    const recordingPending = pendingOf(recording);
+    const analysisPending = pendingOf(analysis);
+    const embeddingPending = pendingOf(embedding);
+    const fingerprintPending = pendingOf(fingerprint);
     const coreComplete =
         artists.owed === 0 &&
         recordingPending === 0 &&
