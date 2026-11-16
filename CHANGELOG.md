@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A share's visit count counts each time the share is opened.** Subsonic apps show it as the share's visit count; playing or seeking a shared song doesn't change it.
 - **Subsonic song genre filters follow each song's own tags:** filtering songs by genre and the genre list's song counts use a song's own tags, falling back to its album's genres. Album lists by genre and album counts are unchanged.
 - **A song's genres show its most-voted tag first** in Subsonic apps.
 - **A settings change is seen at once** by everything that reads settings right after it is saved.
@@ -31,15 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Subsonic apps on a server not set to UTC no longer see the library change time hours off.**
 - **Subsonic genre filters match the genre exactly:** "rock" no longer also lists "punk rock". Kima radio and stations keep their broader match.
 - **Subsonic apps that read the OpenSubsonic genre list see every genre** an album or song shows.
-- **A shared link never streams a play it didn't count.** A second request from the same listener waits briefly for the first one's play to be counted, and is refused at the play limit or asked to try again if it wasn't.
 - **One genre for an album everywhere:** Subsonic apps and the web show the same genre for an album and its songs, and genre filters and genre lists agree with it. An album's own genres come first, and its artist's only when the album has none.
 - **Songs in playlists and shares show their genre in Subsonic apps.**
 - **Subsonic genre and starred lists keep a stable order** when items tie, so paging never repeats or skips one.
 - **Subsonic apps pick up changes made just before a restart,** and an artist re-run that removes shown genres.
 - **Re-running enrichment no longer overwrites a year or genres you set while it ran.**
 - **A song that can't be read answers a clean error** instead of a broken half-reply, and an empty file answers "not found" however a player asks for it.
-- **A shared link's play isn't given back while the same listener is still streaming it** from a second request.
-- **A shared link's play counts only once audio reaches the listener.** A listener who disconnects before the audio starts, or an app that only checks the song, no longer uses up one of the link's plays.
 - **Subsonic apps show the same album year as the web:** your own year edit first, then the original release year, in album lists, year filters, random songs and sorting.
 - **Albums in Subsonic apps show the album's own genres,** falling back to the artist's.
 - **Year and genre changes reach Subsonic apps:** editing or resetting an album's year or genres, and years or genres filled in by identification or enrichment, show up once the edit or enrichment cycle finishes.
@@ -114,9 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Turning off two-factor or making new recovery codes while another request is changing the same account now says to try again, and your code is not used up.
 - A playback change made just before you close or hide the tab is saved instead of lost.
 - Picking up where another device left off no longer overwrites that device's newer playback with an older one.
-- A shared song's play is no longer kept open by a request the share refused, a shared play that never sent any audio is not counted against the link, and a database failure while counting a play no longer lets the next request play for free.
 - Moods and stations no longer move a borderline song in or out from one run to the next.
-- A shared song you are still listening to keeps its play when another request of the same play fails, so seeking never counts it twice.
 - Soulseek: a connection that cannot be closed cleanly is logged and dropped, so the next reconnect starts clean.
 - A saved mood mix no longer keeps songs removed from your library; a replaced file's copy takes its place.
 - A player that saves only the song it is on, without a queue position, now lands on that song's place in the saved queue.
@@ -128,7 +124,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A queue only moves to a copy that can play, and when there are two copies the better one takes over: playable first, then lossless, then higher bitrate.
 - A saved queue's position stays on the right song when some entries were dropped or can't play.
 - The playlists page's text is lowercase like the rest of the app.
-- A shared song counts one play for each person who plays it, and one person's seeking stays one play.
 - A weekly Discover playlist that failed can be made again without the week ending up with no playlist at all.
 - Soulseek: a dropped connection closing late no longer cuts off the new one, and a failed connection says why it failed.
 - Turning off two-factor, or making new recovery codes, while the server is too busy now says to try again, and your code is not used up.
@@ -155,7 +150,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A playlist's songs no longer carry their file paths or analysis details** to people viewing it; only what is needed to list and play them.
 - **Retrying a new playlist with a different name or visibility makes that playlist** instead of returning the earlier one.
 - **Following playback from another device no longer depends on this device's clock**, and a song you just started here is no longer replaced by another device's older state, even if saving it failed. A podcast episode or audiobook that failed to restore is tried again on the next check.
-- **A shared song that fails to start no longer keeps the listener waiting** when the server's database is slow.
 - **The artist recount's progress reaches 100%** even when some artists could not be updated; the log says how many failed.
 - **Two-factor sign-in setup keeps its secret on the server**, so turning it on always uses the secret your authenticator scanned. Setup expires after 10 minutes; start again if it does.
 - **You can turn two-factor sign-in off with a recovery code** if you have lost your authenticator, and make a new set of recovery codes from settings without turning it off. The old codes stop working.
@@ -213,7 +207,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A song path needs two songs that play.** A start or end song that is missing, unreadable or in Discover is refused as not found, instead of building a queue that breaks at its ends.
 - **Artist counts catch up after a busy recount.** An artist whose songs change while the library recounts is counted again right after, so counts no longer stay stale until the next scan.
 - **Library scans finish their artist counts faster.** Only the artists whose songs were added, changed, lost or brought back are recounted.
-- **Subsonic shares keep their expiry and say what they hold.** A share made from a Subsonic app with an expiry now lapses when it should instead of living forever, and the app is told when it was made, when it expires, how often it was played and which songs it holds. A link you already had keeps its expiry.
+- **Subsonic shares keep their expiry and say what they hold.** A share made from a Subsonic app with an expiry now lapses when it should instead of living forever, and the app is told when it was made, when it expires, how often it was opened and which songs it holds. A link you already had keeps its expiry.
 - **Share links offer only songs that play.** A share link to a song that went missing or unreadable, or that is only a Discover suggestion, now answers as deleted; an album or playlist share lists and plays only the songs that play.
 - **A share link shows only its own covers.** Any valid share link could fetch any cover stored in Kima; now it serves only the covers of what it shares. A Subsonic app listing its shares now sees each share's songs.
 - **Downloads end the same way wherever they're stopped.** A manual Soulseek download now puts a "download complete" or "download failed" row in the notification tray. Cancelling a Discover batch now also stops its downloads that were already running, and clearing or deleting downloads on the downloads page lets a waiting Discover batch finish. A Lidarr outage no longer stops you clearing downloads.
@@ -268,8 +262,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Saving settings no longer waits for Soulseek to reconnect.** The save answers at once and the reconnect follows; two saves at the same moment no longer undo each other's changes.
 - **Playlist import finds songs by artists with many songs.** Before, only an artist's first 50 songs were looked at, so a later one could be missed. Credits joined with punctuation ("artist/other", "(artist)") still match, and an M3U line that matches only by file name must agree on both artist and title when it gives both. A line whose path fits more than one of your songs equally well is skipped rather than guessed (the song whose folders agree most with the path wins, as in Navidrome), a song kept at the top of your music folder is found by its file name, and an M3U file that matches nothing makes no empty playlist: the import says none of its songs were found. A line no longer imports a longer song that only contains its title's words ("Love" no longer brings in "Love Me Do"), while a song with a featured artist or a remaster note in its title still matches. An artist or song you renamed is found by the name you gave it, in an M3U file too. An M3U file's paths are read the way music players read them: encoded, `file://` and relative paths, backslashes, differences in capital letters, and files saved by a Mac or in an older encoding all find the song, and a long M3U file imports faster.
 - **Passwords over 72 characters are refused.** Before, everything past the 72nd character was silently ignored. Usernames are trimmed of surrounding spaces when an account is created and when signing in, a blank username is refused, and admins creating an account get the same username length rule as onboarding. A refused `ADMIN_RESET_PASSWORD` now shows as an error in the log.
-- **A shared link that won't open says why.** Not found, expired, out of plays, and too many tries each get their own message, and leaving a shared page stops its music. A song that stops playing on a shared page now says the real reason instead of guessing.
-- **A play-limited share link counts each listen once.** Skipping around in a song, or a song that never started, no longer uses up a play, and a link on its last play no longer cuts off part-way through.
+- **A shared link that won't open says why.** Not found, expired and too many tries each get their own message, and leaving a shared page stops its music. A song that stops playing on a shared page now says the real reason instead of guessing.
 - **Discover tells same-name artists apart in Lidarr.** Keeping a Discover album takes Discover's tag off only the Lidarr artist that owns that album, not off other artists with the same name. And an unrelated artist with the same name as one of this week's suggestions no longer stops Discover clearing an artist it added. Liking a Discover album finds the right Lidarr artist even when Discover had not stored the album's Lidarr id, and keeps the album in your library even if Lidarr can't be reached. Discover's cleanup and its like and unlike now match an album, its download records and the listeners told about it by MusicBrainz id, and by name only when an id is missing.
 - **`LOG_LEVEL` works in any case.** `DEBUG`, `debug` and `Debug` mean the same level, and a value Kima doesn't know logs at the default level with a warning naming it, instead of silencing every log line.
 - **Subsonic apps can no longer play a song Kima would not offer.** Streaming, downloading or asking how to stream a Discover suggestion, a song whose file is missing or one that could not be read now answers "not found".
