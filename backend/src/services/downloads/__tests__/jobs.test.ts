@@ -170,8 +170,8 @@ describe("complete", () => {
     });
 
     it("tells the import once for a job it settled, and not for one already settled", async () => {
-        const { spotifyImportService } = await import("../../spotifyImport");
-        const told = jest.spyOn(spotifyImportService, "checkImportCompletion").mockResolvedValue();
+        const { playlistImportService } = await import("../../playlistImport");
+        const told = jest.spyOn(playlistImportService, "checkImportCompletion").mockResolvedValue();
         const j = await job("dl_done_import", {
             metadata: { spotifyImportJobId: "imp-1", artistName: "Brad Sucks", albumTitle: "Guess Who’s a Mess" },
         });
@@ -184,9 +184,9 @@ describe("complete", () => {
     });
 
     it("tells the batch and the import once each however many of their jobs it completes", async () => {
-        const { spotifyImportService } = await import("../../spotifyImport");
+        const { playlistImportService } = await import("../../playlistImport");
         const { discoverWeeklyService } = await import("../../discoverWeekly");
-        const importTold = jest.spyOn(spotifyImportService, "checkImportCompletion").mockResolvedValue();
+        const importTold = jest.spyOn(playlistImportService, "checkImportCompletion").mockResolvedValue();
         const batchTold = jest.spyOn(discoverWeeklyService, "checkBatchCompletion").mockResolvedValue();
         const batch = await batchOf(2);
         const a = await job("dl_done_many_a", { discoveryBatchId: batch.id, metadata: { spotifyImportJobId: "imp-2" } });
@@ -251,8 +251,8 @@ describe("fail", () => {
     });
 
     it("tells the import, and not again for a job already failed", async () => {
-        const { spotifyImportService } = await import("../../spotifyImport");
-        const told = jest.spyOn(spotifyImportService, "checkImportCompletion").mockResolvedValue();
+        const { playlistImportService } = await import("../../playlistImport");
+        const told = jest.spyOn(playlistImportService, "checkImportCompletion").mockResolvedValue();
         const j = await job("dl_fail_import", { metadata: { spotifyImportJobId: "imp-3" } });
 
         await downloadJobs.fail([j], "gone");
@@ -292,8 +292,8 @@ describe("cancel", () => {
     });
 
     it("tells the batch and the import", async () => {
-        const { spotifyImportService } = await import("../../spotifyImport");
-        const importTold = jest.spyOn(spotifyImportService, "checkImportCompletion").mockResolvedValue();
+        const { playlistImportService } = await import("../../playlistImport");
+        const importTold = jest.spyOn(playlistImportService, "checkImportCompletion").mockResolvedValue();
         const batch = await batchOf(1);
         const j = await job("dl_cancel_told", { discoveryBatchId: batch.id, metadata: { spotifyImportJobId: "imp-4" } });
 
@@ -940,10 +940,10 @@ describe("settling answers promptly", () => {
     });
 
     it("returns before the import's completion check ends", async () => {
-        const { spotifyImportService } = await import("../../spotifyImport");
+        const { playlistImportService } = await import("../../playlistImport");
         let release!: () => void;
         const checking = new Promise<void>((resolve) => (release = resolve));
-        const check = jest.spyOn(spotifyImportService, "checkImportCompletion").mockReturnValue(checking);
+        const check = jest.spyOn(playlistImportService, "checkImportCompletion").mockReturnValue(checking);
         const j = await job("dl_prompt_import", { metadata: { spotifyImportJobId: "imp-9" } });
 
         await downloadJobs.complete([j]);
@@ -955,7 +955,7 @@ describe("settling answers promptly", () => {
     });
 
     it("whenIdle also waits for a move that has written the job but is still telling the user, and for the check that follows", async () => {
-        const { spotifyImportService } = await import("../../spotifyImport");
+        const { playlistImportService } = await import("../../playlistImport");
         let release!: () => void;
         const gate = new Promise<void>((resolve) => (release = resolve));
         let reached!: () => void;
@@ -967,7 +967,7 @@ describe("settling answers promptly", () => {
             await gate;
             return evaluate(...args);
         });
-        const told = jest.spyOn(spotifyImportService, "checkImportCompletion").mockResolvedValue();
+        const told = jest.spyOn(playlistImportService, "checkImportCompletion").mockResolvedValue();
         const j = await job("dl_idle_move", { metadata: { spotifyImportJobId: "imp-idle", artistName: "Brad Sucks", albumTitle: "Guess Who’s a Mess" } });
 
         const move = downloadJobs.complete([j]);

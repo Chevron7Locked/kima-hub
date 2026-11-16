@@ -429,10 +429,8 @@ export class PlaylistImportService {
     });
 
     const total = downloadJobs.length;
-    const completed = downloadJobs.filter(
-      (j) => j.status === "completed",
-    ).length;
-    const failed = downloadJobs.filter((j) => jobMoves.FAILED_STATUSES.includes(j.status)).length;
+    const completed = downloadJobs.filter((j) => jobMoves.isCompleted(j.status)).length;
+    const failed = downloadJobs.filter((j) => jobMoves.isFailed(j.status)).length;
     const pending = total - completed - failed;
 
     if (total === 0 && job.albumsTotal > 0) {
@@ -464,7 +462,7 @@ export class PlaylistImportService {
 
     if (pending > 0) {
       const oldestPending = downloadJobs
-        .filter((j) => jobMoves.ACTIVE_STATUSES.includes(j.status))
+        .filter((j) => jobMoves.isActive(j.status))
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
 
       const waitTimeMs = oldestPending
@@ -491,7 +489,7 @@ export class PlaylistImportService {
       );
 
       await jobMoves.fail(
-        downloadJobs.filter((j) => jobMoves.ACTIVE_STATUSES.includes(j.status)),
+        downloadJobs.filter((j) => jobMoves.isActive(j.status)),
         "Timed out waiting for download",
       );
     }
@@ -502,8 +500,8 @@ export class PlaylistImportService {
       where: { metadata: { path: ["spotifyImportJobId"], equals: importJobId } },
       select: { status: true },
     });
-    const finalCompleted = finalStatuses.filter((j) => j.status === "completed").length;
-    const finalFailed = finalStatuses.filter((j) => jobMoves.FAILED_STATUSES.includes(j.status)).length;
+    const finalCompleted = finalStatuses.filter((j) => jobMoves.isCompleted(j.status)).length;
+    const finalFailed = finalStatuses.filter((j) => jobMoves.isFailed(j.status)).length;
     logger.debug(`   All downloads finished! Triggering library scan...`);
     jobLogger?.info(
       `All ${finalStatuses.length} download jobs finished (${finalCompleted} completed, ${finalFailed} failed)`,

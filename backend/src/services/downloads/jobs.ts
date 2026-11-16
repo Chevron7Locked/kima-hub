@@ -781,8 +781,8 @@ function tellBatchesAndImports(batches: Set<string>, imports: Set<string>): void
         tasks.push(
             inLane(`import:${importId}`, async () => {
                 try {
-                    const { spotifyImportService } = await import("../spotifyImport");
-                    await spotifyImportService.checkImportCompletion(importId);
+                    const { playlistImportService } = await import("../playlistImport");
+                    await playlistImportService.checkImportCompletion(importId);
                 } catch (importError) {
                     logger.error(`Failed to tell import ${importId} of a settled download:`, importError);
                 }
