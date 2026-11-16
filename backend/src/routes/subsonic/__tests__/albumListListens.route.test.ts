@@ -70,3 +70,38 @@ describe("the album lists that read plays", () => {
         expect(await list("recent")).toEqual([burst, spread]);
     });
 });
+
+describe("the album lists and kept plays", () => {
+    const back = `${P}-back`;
+    const REC = "44444444-4444-4444-8444-444444444444";
+
+    beforeAll(async () => {
+        await prisma.album.create({
+            data: { id: back, rgMbid: `${back}-rg`, artistId: ARTIST, identityKey: back, title: `${P} ${back}`, primaryType: "Album", location: "LIBRARY" },
+        });
+        await prisma.track.create({
+            data: { id: `${back}-t`, albumId: back, title: `${P} ${back}`, trackNo: 1, duration: 200, mime: "FLAC", filePath: `/${P}/${back}.flac`, fileModified: new Date(), fileSize: 1, recordingMbid: REC },
+        });
+        // Three listens a day apart of a song that left with no copy, the recording of the one that is here now; and one
+        // of a song nothing here is found for.
+        for (let i = 0; i < 3; i++) {
+            await prisma.play.create({
+                data: {
+                    userId: USER, trackId: null, playedAt: new Date(Date.now() - 10 * DAY - i * DAY), keptTitle: "gone", keptArtistName: "gone", keptAlbumTitle: "gone",
+                    keptRecordingMbid: REC, keptDuration: 200,
+                },
+            });
+        }
+        await prisma.play.create({
+            data: { userId: USER, trackId: null, playedAt: new Date(Date.now() - 20 * DAY), keptTitle: "nowhere", keptArtistName: "nowhere", keptAlbumTitle: "nowhere", keptDuration: 200 },
+        });
+    });
+
+    it("count a kept play toward the album of the song found by its recording id", async () => {
+        expect(await list("frequent")).toEqual([back, spread, burst]);
+    });
+
+    it("order recent by the newest listen, kept ones included, and list no album for a kept play nothing is found for", async () => {
+        expect(await list("recent")).toEqual([burst, spread, back]);
+    });
+});
