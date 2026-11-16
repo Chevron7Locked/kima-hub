@@ -75,9 +75,11 @@ beforeAll(async () => {
     await seedSyntheticMoods(PREFIX);
     await prisma.$transaction((tx) => buildMoodState(tx));
     // The fixture writes a song's plays all at one instant, which the listen rule counts as one listen. Spread them a
-    // day apart so the plays the fixture says a listener has are that many listens.
+    // day apart so the plays the fixture says a listener has are that many listens. Each lands at noon UTC, so none is a
+    // night play (Late Night reads 22:00-04:00) whatever the hour the suite runs at.
     await prisma.$executeRaw`
-        UPDATE "Play" p SET "playedAt" = now() - n.k * interval '1 day'
+        UPDATE "Play" p SET "playedAt" = date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+                                          + interval '12 hours' - n.k * interval '1 day'
         FROM (SELECT id, row_number() OVER (PARTITION BY "userId", "trackId" ORDER BY id) AS k FROM "Play"
               WHERE "userId" LIKE ${PREFIX + "%"}) n
         WHERE p.id = n.id`;
