@@ -541,6 +541,13 @@ export class AudioStreamingService {
             const etag = `"${stats.ino}-${stats.size}-${stats.mtimeMs}"`;
             const lastModified = stats.mtime.toUTCString();
 
+            // An empty file has nothing to play, so it is not found, whatever the request carries: not a cached copy's
+            // 304, not an unsatisfiable range.
+            if (fileSize === 0) {
+                res.status(404).json({ error: "Track not available" });
+                return;
+            }
+
             // RFC 9110: evaluate conditional request headers before Range.
             // 304 is correct even when a Range header is present.
             const ifNoneMatch = req.headers["if-none-match"];
@@ -565,12 +572,6 @@ export class AudioStreamingService {
                     }).end();
                     return;
                 }
-            }
-
-            // An empty file has nothing to play, and no byte range to read: it is not found, with a range or without.
-            if (fileSize === 0) {
-                res.status(404).json({ error: "Track not available" });
-                return;
             }
 
             // Parse Range header

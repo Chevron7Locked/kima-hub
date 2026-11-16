@@ -326,6 +326,13 @@ describe("streamFileWithRangeSupport for a file that is gone", () => {
             await svc.streamFileWithRangeSupport({ headers: { range: "bytes=0-" } } as any, emptyRanged, emptyFile, "audio/flac");
             expect(emptyRanged.statusCode).toBe(404);
 
+            // A client that cached the file's entity tag before it emptied is told the file is gone, not "not modified".
+            const emptyCached = answer();
+            const emptyStats = fs.statSync(emptyFile);
+            const emptyEtag = `"${emptyStats.ino}-${emptyStats.size}-${emptyStats.mtimeMs}"`;
+            await svc.streamFileWithRangeSupport({ headers: { "if-none-match": emptyEtag } } as any, emptyCached, emptyFile, "audio/flac");
+            expect(emptyCached.statusCode).toBe(404);
+
             const denied = answer();
             jest.spyOn(fs.promises, "stat").mockRejectedValueOnce(Object.assign(new Error("no"), { code: "EACCES" }));
             await svc.streamFileWithRangeSupport({ headers: {} } as any, denied, path.join(dir, "locked.flac"), "audio/flac");
