@@ -6,6 +6,7 @@
 
 import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
+import { eventBus, type SSEEvent } from "../../services/eventBus";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { queueCleaner } from "../queueCleaner";
 
@@ -45,6 +46,28 @@ it("fails a Spotify import left scanning past its deadline, with no Lidarr set u
         status: "failed",
         error: "Scan timed out after 30 minutes",
     });
+});
+
+it("tells the person's import page when it fails a scan that timed out", async () => {
+    const job = await prisma.spotifyImportJob.create({
+        data: {
+            userId: USER, spotifyPlaylistId: "37i9dQZF1DXcBWIGoYBM5M", playlistName: "Today's Top Hits",
+            status: "scanning", albumsTotal: 1, tracksTotal: 1, pendingTracks: [],
+        },
+    });
+    await prisma.$executeRaw`UPDATE "SpotifyImportJob" SET "updatedAt" = now() - interval '45 minutes' WHERE id = ${job.id}`;
+    const heard: SSEEvent[] = [];
+    const stop = eventBus.subscribe(USER, { send: (event) => (heard.push(event), true) });
+
+    await queueCleaner.recoverStuckWork();
+    stop();
+
+    expect(heard).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+            type: "import:progress",
+            payload: expect.objectContaining({ jobId: job.id, status: "failed", error: "Scan timed out after 30 minutes" }),
+        }),
+    ]));
 });
 
 it("closes a Discover batch left downloading past its two-hour limit, with no Lidarr set up", async () => {

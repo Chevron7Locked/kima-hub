@@ -5,6 +5,7 @@
  */
 import { prisma } from "../../utils/db";
 import { staleJobCleanupService } from "../staleJobCleanup";
+import { eventBus, type SSEEvent } from "../eventBus";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(30_000);
@@ -40,4 +41,20 @@ it("fails an import stuck in any active status, and keeps a recent one", async (
     expect(result.spotifyImportJobs.ids.sort()).toEqual(stuck.map((j) => j.id).sort());
     const rows = await prisma.spotifyImportJob.findMany({ where: { userId: USER } });
     for (const row of rows) expect(row.status).toBe(row.id === recent.id ? "fetching" : "failed");
+});
+
+it("tells the person's import page of each import it fails", async () => {
+    const stuck = await job("downloading", 3 * HOURS);
+    const heard: SSEEvent[] = [];
+    const stop = eventBus.subscribe(USER, { send: (event) => (heard.push(event), true) });
+
+    await staleJobCleanupService.cleanupAll();
+    stop();
+
+    expect(heard).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+            type: "import:progress",
+            payload: expect.objectContaining({ jobId: stuck.id, status: "failed", error: "Cleaned up as stale by user request" }),
+        }),
+    ]));
 });

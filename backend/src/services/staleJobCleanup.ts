@@ -2,6 +2,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { queues } from "../workers/queues";
 import * as downloadJobs from "./downloads/jobs";
+import { failImportJob } from "./playlistImport";
 
 const STALE_THRESHOLDS = {
     discoveryBatch: 60 * 60 * 1000, // 1 hour
@@ -142,18 +143,15 @@ class StaleJobCleanupService {
             return { cleaned: 0, ids: [] };
         }
 
-        const ids = staleJobs.map((j) => j.id);
         logger.debug(
-            `[STALE-CLEANUP] Cleaning ${ids.length} Spotify import jobs`
+            `[STALE-CLEANUP] Cleaning ${staleJobs.length} Spotify import jobs`
         );
 
-        await prisma.spotifyImportJob.updateMany({
-            where: { id: { in: ids } },
-            data: {
-                status: "failed",
-                error: "Cleaned up as stale by user request",
-            },
-        });
+        // Each failure tells the person's import page; an import that closed since the read keeps its outcome.
+        const ids: string[] = [];
+        for (const { id } of staleJobs) {
+            if (await failImportJob(id, "Cleaned up as stale by user request")) ids.push(id);
+        }
 
         return { cleaned: ids.length, ids };
     }

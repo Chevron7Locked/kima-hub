@@ -87,6 +87,15 @@ export async function updateImportJobFields(
 export const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed", "cancelled"];
 
 /**
+ * Fails an import from outside the import (the stuck-work check, the stale-job cleanup). It leaves only a state that is
+ * not final, so an import another path completed, cancelled or failed keeps its outcome and its reason, and it tells the
+ * person's open import page. False when the import was already closed or is gone.
+ */
+export function failImportJob(importJobId: string, error: string): Promise<boolean> {
+  return updateImportJobFields(importJobId, { status: "failed", error }, CLOSED_IMPORT_STATES);
+}
+
+/**
  * Marks an import as building its playlist: its status and progress, and its listing only when the row has none yet
  * (a row made before the listing was known). The link to a playlist, the counts and a listing a dismissal changed are
  * the row's own and are left alone, and the build reads the row's listing, not its own older copy (a song dismissed

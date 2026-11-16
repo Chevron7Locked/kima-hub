@@ -7,6 +7,6 @@
  * - placing.ts and jobState.ts: the download jobs, the playlist, and the songs it still waits for.
  */
 export { playlistImportService, mergeEditionTracks } from "./placing";
-export { getImportJob, announceImportCounts } from "./jobState";
+export { getImportJob, announceImportCounts, failImportJob } from "./jobState";
 export { parseM3U, decodeM3U, M3UNothingMatched, M3UContainsNullBytes, M3UTooManyEntries, type M3UEntry } from "./reading";
 export type { ImportJob, ImportPreview } from "./types";

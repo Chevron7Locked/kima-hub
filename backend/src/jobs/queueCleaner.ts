@@ -75,14 +75,9 @@ class QueueCleanerService {
                         `[IMPORT STUCK] Job ${job.id} stuck in scanning for ${Math.round(jobAge / 60000)}min - force failing`
                     );
 
-                    await prisma.spotifyImportJob.update({
-                        where: { id: job.id },
-                        data: {
-                            status: "failed",
-                            error: "Scan timed out after 30 minutes",
-                        },
-                    });
-                    recoveredCount++;
+                    // An import that closed while this check ran keeps its outcome, and is not counted as recovered.
+                    const { failImportJob } = await import("../services/playlistImport");
+                    if (await failImportJob(job.id, "Scan timed out after 30 minutes")) recoveredCount++;
                 } else if (jobAge > SCANNING_RETRY_TIMEOUT) {
                     logger.debug(
                         `[IMPORT STUCK] Job ${job.id} stuck in scanning for ${Math.round(jobAge / 60000)}min - re-queuing scan`
