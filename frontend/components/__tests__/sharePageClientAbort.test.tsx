@@ -24,7 +24,7 @@ let signal: AbortSignal | undefined;
 // What the server answers for a share token; a token with no entry never gets an answer.
 let answers: Record<string, unknown> = {};
 // Tokens the server refuses with a status and a message; the message is the backend's own wording.
-let refused: Record<string, { status: number; error?: string; reason?: string }> = {};
+let refused: Record<string, { status: number; error?: string }> = {};
 /** The addresses asked for, in order. */
 let asked: string[] = [];
 
@@ -44,10 +44,7 @@ beforeEach(() => {
                 return Promise.resolve({
                     ok: false,
                     status: refusal.status,
-                    json: async () =>
-                        refusal.error
-                            ? { error: refusal.error, ...(refusal.reason ? { reason: refusal.reason } : {}) }
-                            : Promise.reject(new SyntaxError("not json")),
+                    json: async () => (refusal.error ? { error: refusal.error } : Promise.reject(new SyntaxError("not json"))),
                 });
             }
             const answered = Object.entries(answers).find(([tok]) => tok === tokenOf(url));
@@ -149,38 +146,16 @@ describe("SharePageClient", () => {
             expect(await opened()).toContain("Share link not found");
         });
 
-        it("410 with the reason expired is a link that has expired", async () => {
-            refused = { tok: { status: 410, error: "Share link has expired", reason: "expired" } };
-            const text = await opened();
-            expect(text).toContain("This link has expired");
-            expect(text).not.toContain("play limit");
+        it("410 is a link that has expired", async () => {
+            refused = { tok: { status: 410, error: "Share link has expired" } };
+            expect(await opened()).toContain("This link has expired");
         });
 
-        it("410 with the reason play-limit is a link that has reached its play limit", async () => {
-            refused = { tok: { status: 410, error: "Share link play limit reached", reason: "play-limit" } };
-            const text = await opened();
-            expect(text).toContain("This link has reached its play limit");
-            expect(text).not.toContain("expired");
-        });
-
-        it.each([
-            ["no reason", { status: 410, error: "Share link play limit reached" }],
-            ["a reason the page does not know", { status: 410, error: "Gone", reason: "something-new" }],
-        ])("410 with %s keeps the combined wording", async (_name, refusal) => {
-            refused = { tok: refusal };
-            expect(await opened()).toContain("This link has expired or reached its play limit");
-        });
-
-        it("a reason on any other status changes nothing", async () => {
-            refused = { tok: { status: 500, error: "x", reason: "expired" } };
-            expect(await opened()).toContain("Couldn't open this share");
-        });
-
-        it("429 is too many requests, not a link that reached its play limit", async () => {
+        it("429 is too many requests, not a link that has expired", async () => {
             refused = { tok: { status: 429, error: "Too many requests from this IP, please try again later." } };
             const text = await opened();
             expect(text).toContain("Too many requests");
-            expect(text).not.toContain("play limit");
+            expect(text).not.toContain("expired");
         });
 
         it("any other answer, with or without a readable body, is a general failure", async () => {
@@ -222,9 +197,9 @@ describe("SharePageClient", () => {
             await act(async () => root.unmount());
         });
 
-        it("says the link has expired when the share answers 410 with the reason expired", async () => {
+        it("says the link has expired when the share answers 410", async () => {
             await open();
-            refused = { tok: { status: 410, error: "Share link has expired", reason: "expired" } };
+            refused = { tok: { status: 410, error: "Share link has expired" } };
             await audioError();
 
             expect(host.textContent).toContain("This link has expired");
@@ -232,17 +207,8 @@ describe("SharePageClient", () => {
             await act(async () => root.unmount());
         });
 
-        it("says the link has reached its play limit when the share answers 410 with the reason play-limit", async () => {
-            await open();
-            refused = { tok: { status: 410, error: "Share link play limit reached", reason: "play-limit" } };
-            await audioError();
-
-            expect(host.textContent).toContain("This link has reached its play limit");
-            await act(async () => root.unmount());
-        });
-
         it.each([
-            [410, "This link has expired or reached its play limit"],
+            [410, "This link has expired"],
             [404, "Share link not found"],
             [429, "Too many requests"],
         ])("says what a %i answer says", async (status, text) => {
@@ -312,7 +278,7 @@ describe("SharePageClient", () => {
             expect(host.textContent).toContain("Other Album");
 
             await act(async () => {
-                late({ ok: false, status: 410, json: async () => ({ error: "Share link has expired", reason: "expired" }) });
+                late({ ok: false, status: 410, json: async () => ({ error: "Share link has expired" }) });
                 await lateAnswer;
             });
 
@@ -333,7 +299,7 @@ describe("SharePageClient", () => {
                 playButton!.click();
             });
             await act(async () => {
-                late({ ok: false, status: 410, json: async () => ({ error: "x", reason: "expired" }) });
+                late({ ok: false, status: 410, json: async () => ({ error: "x" }) });
                 await lateAnswer;
             });
 

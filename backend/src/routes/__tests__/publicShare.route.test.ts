@@ -6,6 +6,7 @@ import request from "supertest";
 import { prisma } from "../../utils/db";
 import shareRoutes from "../share";
 import { mountAsServer } from "./helpers/serverMount";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
 const TAG = "zz-public-share";
 const app = mountAsServer(express(), "/share", shareRoutes, "/api/share");
@@ -167,22 +168,77 @@ it("an edited artist name shows on every artist in a reply, under the same key",
     }
 });
 
-it("unknown, expired, spent and emptied links answer as before", async () => {
+it("unknown, expired and emptied links answer as before", async () => {
     const unknown = await resolve(`${TAG}-no-such-token`);
     expect([unknown.status, unknown.body]).toEqual([404, { error: "Share link not found" }]);
 
     const expiredToken = `${TAG}-expired`;
     await prisma.shareLink.create({ data: { token: expiredToken, entityType: "track", entityId: firstTrack, createdBy: userId, expiresAt: new Date(Date.now() - 1000) } });
     const expired = await resolve(expiredToken);
-    expect([expired.status, expired.body]).toEqual([410, { error: "Share link has expired", reason: "expired" }]);
-
-    const spentToken = `${TAG}-spent`;
-    await prisma.shareLink.create({ data: { token: spentToken, entityType: "track", entityId: firstTrack, createdBy: userId, maxPlays: 2, playCount: 2 } });
-    const spent = await resolve(spentToken);
-    expect([spent.status, spent.body]).toEqual([410, { error: "Share link play limit reached", reason: "play-limit" }]);
+    expect([expired.status, expired.body]).toEqual([410, { error: "Share link has expired" }]);
 
     const gone = await resolve(await link("track", `${TAG}-no-such-track`));
     expect([gone.status, gone.body]).toEqual([404, { error: "Shared content no longer exists" }]);
+});
+
+// The count a Subsonic app shows as the share's visitCount: one for each time the share is opened, as Navidrome counts.
+describe("visits", () => {
+    const visits = async (token: string) => (await prisma.shareLink.findUniqueOrThrow({ where: { token } })).playCount;
+
+    it.each([
+        ["track", () => firstTrack],
+        ["album", () => albumId],
+        ["playlist", () => playlistId],
+    ])("opening a %s share counts one visit, each time", async (type, id) => {
+        const token = await link(type, id());
+        expect(await visits(token)).toBe(0);
+
+        expect((await resolve(token)).status).toBe(200);
+        expect(await visits(token)).toBe(1);
+
+        await resolve(token);
+        await resolve(token);
+        expect(await visits(token)).toBe(3);
+    });
+
+    it("counts none for a link that is unknown, expired or whose content is gone", async () => {
+        const expiredToken = `${TAG}-expired-visits`;
+        await prisma.shareLink.create({ data: { token: expiredToken, entityType: "track", entityId: firstTrack, createdBy: userId, expiresAt: new Date(Date.now() - 1000) } });
+        const goneToken = await link("track", `${TAG}-no-such-track`);
+
+        await resolve(expiredToken);
+        await resolve(goneToken);
+        await resolve(`${TAG}-no-such-token`);
+
+        expect([await visits(expiredToken), await visits(goneToken)]).toEqual([0, 0]);
+    });
+
+    it("counts none for a HEAD request, which opens nothing", async () => {
+        const token = await link("track", firstTrack);
+        expect((await request(app).head(`/share/${token}`)).status).toBe(200);
+        expect(await visits(token)).toBe(0);
+    });
+
+    it("counts none for a cover or a stream of the share", async () => {
+        const token = await link("track", firstTrack);
+        await request(app).get(`/share/${token}/cover-art/native:albums%2Fx.jpg`);
+        await request(app).get(`/share/${token}/stream/${firstTrack}`);
+        expect(await visits(token)).toBe(0);
+    });
+
+    it("still opens the share, and logs it, when the count cannot be saved", async () => {
+        const token = await link("track", firstTrack);
+        const logged = expectLog("warn");
+        const count = jest.spyOn(prisma.shareLink, "updateMany").mockRejectedValueOnce(new Error("db down"));
+        try {
+            const res = await resolve(token);
+            expect([res.status, res.body.entityType]).toEqual([200, "track"]);
+        } finally {
+            count.mockRestore();
+        }
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining("db down"));
+        expect(await visits(token)).toBe(0);
+    });
 });
 
 // A link made before a song stopped playing, or after a like moved nothing, shows only what plays. The song's file is

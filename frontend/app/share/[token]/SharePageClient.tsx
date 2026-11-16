@@ -104,46 +104,26 @@ function getEntitySubtitle(shareData: ShareData): string {
     return "";
 }
 
-/** Why the server answers 410: the link has expired, or it is out of plays. */
-type EndedReason = "expired" | "play-limit";
-
-/** How a share's address failed: the status the server answered with (null when there was no answer) and, for a 410, why. */
+/** How a share's address failed: the status the server answered with, or null when there was no answer. */
 interface ShareFailure {
     status: number | null;
-    reason?: EndedReason;
 }
 
 /** The server answered, and refused. */
 class ShareRefused extends Error {
-    constructor(
-        readonly status: number,
-        readonly reason?: EndedReason,
-    ) {
+    constructor(readonly status: number) {
         super(`Share refused (${status})`);
     }
 }
 
-/** The reason in a 410's body, when it is one the page knows; any other status, an unreadable body or a new reason has none. */
-async function refusalReason(res: Response): Promise<EndedReason | undefined> {
-    if (res.status !== 410) return undefined;
-    const body: unknown = await res.json().catch(() => null);
-    const reason = (body as { reason?: unknown } | null)?.reason;
-    return reason === "expired" || reason === "play-limit" ? reason : undefined;
-}
-
 /**
  * What the page says when the share does not open, from the status the server answered with: 404 unknown link, 410 a
- * link that has ended (its `reason` says whether it expired or is out of plays; with no reason, the combined wording),
- * 429 the per-address limit on opening shares, anything else, or no answer at all, a general failure.
+ * link that has expired, 429 the per-address limit on opening shares, anything else, or no answer at all, a general failure.
  */
 function failureText(failure: ShareFailure): { title: string; hint: string } {
     const askForNew = "Ask whoever shared it for a new link.";
     if (failure.status === 404) return { title: "Share link not found", hint: askForNew };
-    if (failure.status === 410) {
-        if (failure.reason === "expired") return { title: "This link has expired", hint: askForNew };
-        if (failure.reason === "play-limit") return { title: "This link has reached its play limit", hint: askForNew };
-        return { title: "This link has expired or reached its play limit", hint: askForNew };
-    }
+    if (failure.status === 410) return { title: "This link has expired", hint: askForNew };
     if (failure.status === 429) return { title: "Too many requests", hint: "Wait a minute and try again." };
     return { title: "Couldn't open this share", hint: "Try again in a moment." };
 }
@@ -185,7 +165,7 @@ function SharePage({ token }: { token: string }) {
         const request = new AbortController();
         fetch(shareResolvePath(token), { signal: request.signal })
             .then(async (res) => {
-                if (!res.ok) throw new ShareRefused(res.status, await refusalReason(res));
+                if (!res.ok) throw new ShareRefused(res.status);
                 return res.json();
             })
             .then((shared) => {
@@ -193,7 +173,7 @@ function SharePage({ token }: { token: string }) {
             })
             .catch((err) => {
                 if (!request.signal.aborted) {
-                    setFailure(err instanceof ShareRefused ? { status: err.status, reason: err.reason } : { status: null });
+                    setFailure(err instanceof ShareRefused ? { status: err.status } : { status: null });
                 }
             })
             .finally(() => {
@@ -326,7 +306,7 @@ function SharePage({ token }: { token: string }) {
         fetch(shareResolvePath(token), { signal: check.signal })
             .then(async (res) => {
                 if (res.ok) return say("Playback error occurred.");
-                sayFailure({ status: res.status, reason: await refusalReason(res) });
+                sayFailure({ status: res.status });
             })
             // No answer at all: the connection is the likely cause, and the share's own wording for it is about opening.
             .catch(() => say("Playback failed. Check your connection."));

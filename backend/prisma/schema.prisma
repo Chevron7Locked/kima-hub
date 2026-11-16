@@ -1141,7 +1141,6 @@ model ShareLink {
   entityId   String
   createdBy  String
   expiresAt  DateTime?
-  maxPlays   Int?
   playCount  Int       @default(0)
   createdAt  DateTime  @default(now())
   user       User      @relation(fields: [createdBy], references: [id], onDelete: Cascade)
