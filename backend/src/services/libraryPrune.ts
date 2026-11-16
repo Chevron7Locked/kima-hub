@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { deleteAlbums, deleteEmptyArtists } from "./library/albumDelete";
 
 /**
- * Albums with no songs go, then artists with no albums and no keep (an artist holding a keep stays: see
+ * Albums with no songs go, then artists with no albums, with their keeps (see
  * library/albumDelete.ts). It moves no library-changed marker: a client lists an album only while it holds a playable
  * song, and an artist only while one of its albums does, so what goes here was never listed.
  */

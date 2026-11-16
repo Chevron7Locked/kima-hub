@@ -122,8 +122,9 @@ describe("data integrity check", () => {
         await prisma.artist.create({
             data: { id: id("art"), name: "Kept Artist", identityKey: id("k") },
         });
-        // The artist has a live album (a different rgMbid than the keep's),
-        // so the keep is orphaned while its artist is not.
+        // Give the artist a live album (a different rgMbid than the keep's)
+        // so the no-albums artist cleanup removes neither it nor the keep —
+        // this test isolates the orphaned-keep report.
         await prisma.album.create({
             data: {
                 id: id("alb"),
@@ -159,6 +160,10 @@ describe("data integrity check", () => {
     it("hands a merged temp artist's keeps to the real artist, the more protective source standing on a clash", async () => {
         await prisma.artist.create({ data: { id: id("m_real"), name: "Dint m", normalizedName: "dint m", mbid: "0000aaaa-0000-4000-8000-0000000000a1", identityKey: id("m_rk") } });
         await prisma.artist.create({ data: { id: id("m_temp"), name: "Dint m", normalizedName: "dint m", mbid: "temp-dint-m", identityKey: id("m_tk") } });
+        // The real artist has an album, or the no-albums cleanup would remove it after the merge.
+        await prisma.album.create({
+            data: { id: id("m_alb"), rgMbid: id("m_rg"), artistId: id("m_real"), identityKey: id("m_ak"), title: "Dint m Album", primaryType: "Album" },
+        });
         await prisma.ownedAlbum.createMany({
             data: [
                 { artistId: id("m_temp"), rgMbid: id("m_only"), source: "discovery_liked" },
@@ -177,17 +182,15 @@ describe("data integrity check", () => {
         ]);
     });
 
-    it("removes an artist with no albums, but not one that still holds a keep", async () => {
+    it("removes an artist with no albums, with its keeps", async () => {
         await prisma.artist.create({ data: { id: id("o_bare"), name: "Dint bare", identityKey: id("o_bk") } });
-        await prisma.artist.create({ data: { id: id("o_kept"), name: "Dint kept", identityKey: id("o_kk") } });
-        await prisma.ownedAlbum.create({ data: { artistId: id("o_kept"), rgMbid: id("o_rg"), source: "native_scan" } });
+        await prisma.ownedAlbum.create({ data: { artistId: id("o_bare"), rgMbid: id("o_rg"), source: "native_scan" } });
 
         const report = await runDataIntegrityCheck();
 
         expect(report.orphanedArtists).toBeGreaterThanOrEqual(1);
         expect(await prisma.artist.count({ where: { id: id("o_bare") } })).toBe(0);
-        expect(await prisma.artist.count({ where: { id: id("o_kept") } })).toBe(1);
-        expect(await prisma.ownedAlbum.count({ where: { artistId: id("o_kept") } })).toBe(1);
+        expect(await prisma.ownedAlbum.count({ where: { artistId: id("o_bare") } })).toBe(0);
     });
 
     it("still clears rows a re-discovery recreates: expired exclusions and orphaned discovery tracks", async () => {

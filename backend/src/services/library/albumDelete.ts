@@ -15,10 +15,12 @@
  *   album leaves its keep, and the integrity check reports keeps with no album rather than deleting them.
  * - A Discover album has no keep (Discover is not the library; a like moves it, and its keep is written then), so
  *   deleting one has no keep to look at.
- * - A keep lives as long as its artist, which it cannot outlive (the foreign key cascades). So cleanup never removes an
- *   artist that still holds a keep (`deleteEmptyArtists`), and an artist merged into another hands its keeps to the
- *   successor (`deleteArtists` with `keepsTo`); the more protective source stands on a clash (`ownershipRank`).
- * - Only a person deleting an artist on purpose releases that artist's keeps: nothing of it is meant to remain.
+ * - A keep lives as long as its artist, which it cannot outlive (the foreign key cascades). An artist removed because
+ *   nothing of it remains (no album left: `deleteEmptyArtists`) takes its keeps with it, as it always has: the scanner
+ *   writes a keep for every library album, so sparing artists that hold one would leave every emptied artist behind for
+ *   enrichment and search to find. An artist merged into another hands its keeps to the successor (`deleteArtists` with
+ *   `keepsTo`); the more protective source stands on a clash (`ownershipRank`). A person deleting an artist on purpose
+ *   releases its keeps too.
  *
  * Out of this module: the song files and folders (their callers know the music root and what they may touch), and
  * what a deleted album's plays and likes become (the plays go with the songs, as the database does it).
@@ -154,14 +156,10 @@ export async function deleteArtists(ids: string[], options: { within?: Tx; keeps
 }
 
 /**
- * Deletes every artist that has no album and no keep, and answers how many went. An artist holding a keep stays: the
- * keep is a listener's decision and would go with it (see the header).
+ * Deletes every artist that has no album, and answers how many went. Their keeps go with them (see the header).
  */
 export async function deleteEmptyArtists(): Promise<number> {
-    const empty = await prisma.artist.findMany({
-        where: { albums: { none: {} }, ownedAlbums: { none: {} } },
-        select: { id: true, name: true },
-    });
+    const empty = await prisma.artist.findMany({ where: { albums: { none: {} } }, select: { id: true, name: true } });
     if (empty.length === 0) return 0;
     logger.debug(`Removing ${empty.length} artists with no albums: ${empty.map((a) => a.name).join(", ")}`);
     return (await deleteArtists(empty.map((a) => a.id))).artists;

@@ -1,6 +1,6 @@
 /**
- * The prune removes albums with no songs and artists with no albums, but an artist's keep (OwnedAlbum) is the listener's
- * decision and goes only with a deliberate delete, so an artist holding one stays. Real database.
+ * The prune removes albums with no songs and artists with no albums. An album's keep (OwnedAlbum) outlives the album,
+ * but not an artist the prune removes: the keep goes with its artist. Real database.
  */
 import { prisma } from "../../utils/db";
 import { pruneEmptyAlbumsAndArtists } from "../libraryPrune";
@@ -27,10 +27,26 @@ describe("pruneEmptyAlbumsAndArtists", () => {
         expect(await prisma.artist.count({ where: { id: `${P}bare` } })).toBe(0);
     });
 
-    it("keeps the artist whose last album it removed while the artist still holds a keep", async () => {
+    it("takes an emptied artist's keeps with it", async () => {
+        await prisma.artist.create({ data: { id: `${P}gone`, name: `${P}gone`, identityKey: `${P}gone` } });
+        await prisma.ownedAlbum.create({ data: { artistId: `${P}gone`, rgMbid: `${P}rg4`, source: "native_scan" } });
+
+        await pruneEmptyAlbumsAndArtists();
+
+        expect(await prisma.artist.count({ where: { id: `${P}gone` } })).toBe(0);
+        expect(await prisma.ownedAlbum.count({ where: { artistId: `${P}gone` } })).toBe(0);
+    });
+
+    it("leaves the keep of an album it removed while the artist still has another album", async () => {
         await prisma.artist.create({ data: { id: `${P}kept`, name: `${P}kept`, identityKey: `${P}kept` } });
         await prisma.album.create({
             data: { id: `${P}al2`, rgMbid: `${P}rg2`, artistId: `${P}kept`, identityKey: `${P}al2`, title: `${P}al2`, primaryType: "Album" },
+        });
+        await prisma.album.create({
+            data: { id: `${P}al3`, rgMbid: `${P}rg3`, artistId: `${P}kept`, identityKey: `${P}al3`, title: `${P}al3`, primaryType: "Album" },
+        });
+        await prisma.track.create({
+            data: { id: `${P}t3`, albumId: `${P}al3`, title: "x", trackNo: 1, duration: 1, filePath: `/${P}t3.flac`, fileModified: new Date(), fileSize: 1 },
         });
         await prisma.ownedAlbum.create({ data: { artistId: `${P}kept`, rgMbid: `${P}rg2`, source: "discovery_liked" } });
 

@@ -163,7 +163,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
         if (libraryAlbumsMoved > 0) await markLibraryChangedQuietly("temp artists merged into real ones");
     }
 
-    // Artists with no albums go, with their similar-artist links; one holding a keep stays (see services/library/albumDelete.ts).
+    // Artists with no albums go, with their similar-artist links, and their keeps (see services/library/albumDelete.ts).
     report.orphanedArtists = await deleteEmptyArtists();
 
     // Notifications are news, not history: anything older than 30 days goes.

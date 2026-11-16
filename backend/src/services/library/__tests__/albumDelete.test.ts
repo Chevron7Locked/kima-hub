@@ -231,7 +231,7 @@ describe("deleteArtists", () => {
 });
 
 describe("deleteEmptyArtists", () => {
-    it("removes artists with no albums, but not one that still holds a keep", async () => {
+    it("removes artists with no albums, with their keeps, and leaves one that still has an album", async () => {
         const bare = await artist("bare");
         const kept = await artist("kept");
         const busy = await artist("busy");
@@ -240,9 +240,9 @@ describe("deleteEmptyArtists", () => {
 
         const removed = await deleteEmptyArtists();
 
-        expect(removed).toBeGreaterThanOrEqual(1);
-        expect(await prisma.artist.count({ where: { id: bare } })).toBe(0);
-        expect(await prisma.artist.count({ where: { id: { in: [kept, busy] } } })).toBe(2);
-        expect(await prisma.ownedAlbum.count({ where: { artistId: kept } })).toBe(1);
+        expect(removed).toBeGreaterThanOrEqual(2);
+        expect(await prisma.artist.count({ where: { id: { in: [bare, kept] } } })).toBe(0);
+        expect(await prisma.ownedAlbum.count({ where: { artistId: kept } })).toBe(0);
+        expect(await prisma.artist.count({ where: { id: busy } })).toBe(1);
     });
 });
