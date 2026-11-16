@@ -1,3 +1,4 @@
+import type { SystemSettings } from "@prisma/client";
 import { prisma } from "./db";
 import { callSettingsListeners, type SystemSettingsChanges, type SystemSettingsField } from "./systemSettingsListeners";
 import { decryptOrNull, decryptSettings, ENCRYPTED_FIELDS, encryptSettings, noteUnreadableCredentials, type EncryptedField } from "./encryptedFields";
@@ -76,6 +77,19 @@ export async function getSystemSettings() {
 
     const resolved = await (pending && pending.began === generation ? pending.read : startRead());
     return resolved && structuredClone(resolved);
+}
+
+/**
+ * Reads plain (not credential) fields straight from the row, past the cache. For a value that another process may have
+ * just changed and that the caller acts on at once: the sign-up gate (an admin closing registration must take effect
+ * now, not when the cache next expires) and the library change marker (a stale one makes a client miss a change). Null before
+ * the row exists.
+ */
+export async function readSystemSettingsFresh<F extends Exclude<keyof SystemSettings, EncryptedField>>(
+    ...fields: F[]
+): Promise<Pick<SystemSettings, F> | null> {
+    const select = Object.fromEntries(fields.map((field) => [field, true]));
+    return (await prisma.systemSettings.findUnique({ where: { id: "default" }, select })) as Pick<SystemSettings, F> | null;
 }
 
 export { onSystemSettingsChange } from "./systemSettingsListeners";

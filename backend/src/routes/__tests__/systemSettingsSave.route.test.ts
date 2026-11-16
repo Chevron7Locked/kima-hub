@@ -17,6 +17,7 @@ import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import { closeQueue } from "../../__tests__/helpers/closeQueue";
 import { setEnv } from "../../__tests__/helpers/env";
+import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { mountAsServer } from "./helpers/serverMount";
 
 const ADMIN = "zz-settings-save-admin";
@@ -124,6 +125,31 @@ it("turning Audiobookshelf off clears listening progress once; a later save with
     } finally {
         await prisma.audiobookProgress.deleteMany({ where: { userId: ADMIN } });
     }
+});
+
+it("says so in the answer when the listening progress could not be cleared, and the save still stands", async () => {
+    expectLog("error");
+    try {
+        await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: true }).expect(200);
+        const clear = jest.spyOn(prisma.audiobookProgress, "deleteMany").mockRejectedValueOnce(new Error("disk full") as never);
+
+        const res = await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: false });
+        clear.mockRestore();
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ success: true, audiobookProgressCleared: false });
+        expect((await prisma.systemSettings.findUnique({ where: { id: "default" } }))?.audiobookshelfEnabled).toBe(false);
+    } finally {
+        jest.restoreAllMocks();
+    }
+});
+
+it("answers only success when the listening progress cleared, or there was nothing to clear", async () => {
+    await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: true }).expect(200);
+    const off = await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ audiobookshelfEnabled: false });
+    expect(off.body).toEqual({ success: true });
+    const other = await request(app()).post("/system-settings").set("Authorization", asAdmin()).send({ transcodeCacheMaxGb: 12 });
+    expect(other.body).toEqual({ success: true });
 });
 
 it("has no download folder setting: downloads go to the music folder", async () => {

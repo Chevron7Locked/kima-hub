@@ -5,7 +5,7 @@
  */
 import { prisma } from "../db";
 import { encrypt } from "../encryption";
-import { getSystemSettings, invalidateSystemSettingsCache, onSystemSettingsChange, saveSystemSettings } from "../systemSettings";
+import { getSystemSettings, invalidateSystemSettingsCache, onSystemSettingsChange, readSystemSettingsFresh, saveSystemSettings } from "../systemSettings";
 import { logger } from "../logger";
 import { redisClient } from "../redis";
 import { closeClient } from "../closeRedisClient";
@@ -380,5 +380,24 @@ describe("onSystemSettingsChange", () => {
         await saveSystemSettings({ discoverAlbumsSortedAt: new Date(at.getTime()) });
 
         expect(heard).not.toHaveBeenCalled();
+    });
+});
+
+describe("readSystemSettingsFresh", () => {
+    it("sees a change another process just made, which the cached read does not see yet", async () => {
+        expect((await getSystemSettings())?.transcodeCacheMaxGb).toBe(10); // cached
+        await prisma.systemSettings.update({ where: { id: "default" }, data: { transcodeCacheMaxGb: 13 } }); // as another process would
+
+        expect((await getSystemSettings())?.transcodeCacheMaxGb).toBe(10);
+        expect(await readSystemSettingsFresh("transcodeCacheMaxGb")).toEqual({ transcodeCacheMaxGb: 13 });
+    });
+
+    it("answers only the fields asked for, and null before the row exists", async () => {
+        expect(await readSystemSettingsFresh("registrationOpen", "transcodeCacheMaxGb")).toEqual({
+            registrationOpen: expect.any(Boolean),
+            transcodeCacheMaxGb: 10,
+        });
+        await prisma.systemSettings.deleteMany({ where: { id: "default" } });
+        expect(await readSystemSettingsFresh("registrationOpen")).toBeNull();
     });
 });

@@ -15,11 +15,11 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { PLAYABLE_SONG } from "../utils/playableSong";
-import { saveSystemSettings } from "../utils/systemSettings";
+import { readSystemSettingsFresh, saveSystemSettings } from "../utils/systemSettings";
 
 /** The moment of the last change, in milliseconds since the epoch; 0 before settings exist. */
 export async function libraryChangedAt(): Promise<number> {
-    const row = await prisma.systemSettings.findUnique({ where: { id: "default" }, select: { libraryChangedAt: true } });
+    const row = await readSystemSettingsFresh("libraryChangedAt");
     return row?.libraryChangedAt?.getTime() ?? 0;
 }
 

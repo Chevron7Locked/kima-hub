@@ -167,13 +167,16 @@ router.post("/", async (req, res) => {
     const changed = await saveSystemSettings(data);
     if (data.musicPath !== undefined) useMusicFolder(data.musicPath);
 
-    // Audiobookshelf turned off (not merely sent back off): its listening progress goes with it. A failure here does not fail the save.
+    // Audiobookshelf turned off (not merely sent back off): its listening progress goes with it. The save is done
+    // either way, so a failure to clear is told in the answer, not turned into a failed save.
+    let progressCleared = true;
     if (data.audiobookshelfEnabled === false && changed.includes("audiobookshelfEnabled")) {
       try {
         const deletedProgress = await prisma.audiobookProgress.deleteMany({});
         logger.debug(`[SYSTEM SETTINGS] Audiobookshelf off: deleted ${deletedProgress.count} progress entries`);
       } catch (clearError) {
         logger.error("Failed to clear audiobook progress:", clearError);
+        progressCleared = false;
       }
     }
 
@@ -191,7 +194,7 @@ router.post("/", async (req, res) => {
       }
     }
 
-    res.json({ success: true });
+    res.json(progressCleared ? { success: true } : { success: true, audiobookProgressCleared: false });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return invalidRequest(req, res, error);

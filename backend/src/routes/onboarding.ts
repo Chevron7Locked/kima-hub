@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { z } from "zod";
 import axios from "axios";
-import { getSystemSettings, saveSystemSettings, type SystemSettingsChanges, type SystemSettingsField } from "../utils/systemSettings";
+import { getSystemSettings, readSystemSettingsFresh, saveSystemSettings, type SystemSettingsChanges, type SystemSettingsField } from "../utils/systemSettings";
 import { generateRefreshToken, generateToken, signedInUser } from "../middleware/auth";
 import { refusalMessage, signUp } from "../services/users/accounts";
 import { createLidarrClient } from "../services/lidarrClient";
@@ -34,10 +34,8 @@ const soulseekConfigSchema = z.object({
 
 /** Whether someone may create an account now that the first one exists. */
 async function registrationOpen(): Promise<boolean> {
-    const settings = await prisma.systemSettings.findUnique({
-        where: { id: "default" },
-        select: { registrationOpen: true },
-    });
+    // Read past the cache: closing registration must stop sign-ups in every process at once.
+    const settings = await readSystemSettingsFresh("registrationOpen");
     return settings?.registrationOpen ?? false;
 }
 
