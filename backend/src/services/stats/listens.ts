@@ -99,15 +99,41 @@ export interface ListenScope {
 }
 
 /**
- * `nameKey` (nameFold.ts) as SQL, for a column or expression: trimmed, unaccented, lowercased, with everything
- * but letters and digits removed. A name with no letters or digits keeps itself, so "!!!" still finds "!!!" rather than
- * every other name made of symbols. The argument is a fixed column expression written in code, never a value (it is
- * exported only so the fold can be checked against `nameKey` on a real database). Unlike `nameKey` it does not compose
- * decomposed text first: Postgres can only do that on a UTF8 database, and this must run on any.
+ * Punctuation, spaces and invisible marks outside ASCII that `unaccent` leaves alone and a C-ctype database's `[:punct:]` cannot see (it
+ * knows ASCII only). Listed whole, not as a character set: on a database whose encoding is not UTF8 (SQL_ASCII) every
+ * byte is a character, so a set would also take bytes out of other letters, while a whole sequence only matches itself.
+ */
+const WIDE_PUNCTUATION_AND_SPACE = [
+    "\u00a0", // no-break space
+    "\u00b4", // acute accent
+    "\u00b7", // middle dot
+    "\u2000", "\u2001", "\u2002", "\u2003", "\u2004", "\u2005", "\u2006", "\u2007", "\u2008", "\u2009", "\u200a", // spaces
+    "\u200b", "\u200c", "\u200d", // zero-width space, non-joiner, joiner
+    "\u200e", "\u200f", // left-to-right and right-to-left marks
+    "\u2028", "\u2029", // line and paragraph separators
+    "\ufeff", // zero-width no-break space (byte order mark)
+    "\u2022", // bullet
+    "\u202f", // narrow no-break space
+    "\u205f", // medium mathematical space
+    "\u3000", // ideographic space
+    "\u30fb", // katakana middle dot
+].join("|");
+
+/**
+ * `nameKey` (nameFold.ts) as SQL, for a column or expression: trimmed, unaccented, lowercased, with only what is known
+ * to be punctuation or space removed. It never drops a letter it cannot classify: a database with a C ctype (the
+ * all-in-one image's) cannot tell a letter outside ASCII from a symbol, and a fold that deleted whatever it cannot
+ * classify would join names such as "Би-2" and "Ди-2". So a name in another script keeps its letters (and its case, which
+ * `lower` cannot fold there), and a punctuation mark it does not list stays: that can only miss a match, never make a
+ * false one.
+ * A name with nothing left keeps itself, so "!!!" still finds "!!!" rather than every other name made of symbols. The
+ * argument is a fixed column expression written in code, never a value (it is exported only so the fold can be checked
+ * against `nameKey` on a real database). Unlike `nameKey` it does not compose decomposed text first: Postgres can only
+ * do that on a UTF8 database, and this must run on any.
  */
 export function nameKeySql(expr: string): Prisma.Sql {
     return Prisma.raw(
-        `coalesce(nullif(regexp_replace(lower(unaccent(kima_text_trim(${expr}))), '[^[:alnum:]]', '', 'g'), ''), ${expr})`,
+        `coalesce(nullif(regexp_replace(regexp_replace(lower(unaccent(kima_text_trim(${expr}))), '${WIDE_PUNCTUATION_AND_SPACE}', '', 'g'), '[[:space:][:punct:]]', '', 'g'), ''), ${expr})`,
     );
 }
 

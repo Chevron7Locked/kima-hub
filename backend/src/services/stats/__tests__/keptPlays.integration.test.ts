@@ -346,6 +346,22 @@ describe("the readers that find a kept play's song by its stored names", () => {
 
         expect(await listensOf(song)).toBeUndefined();
     });
+
+    it("does not give a kept play to an artist whose name differs only in letters of another script", async () => {
+        await prisma.artist.update({ where: { id: id("art_x") }, data: { name: "Би-2" } });
+        await gone();
+        const other = await copy("n10", { artist: "Ди-2", album: `${P}alb_x`, title: `${P}Song x2` });
+
+        expect(await listensOf(other)).toBeUndefined();
+    });
+
+    it("gives that kept play back to the artist of the same name in the other script", async () => {
+        await prisma.artist.update({ where: { id: id("art_x") }, data: { name: "Би-2" } });
+        await gone();
+        const same = await copy("n11", { artist: "Би 2", album: `${P}alb_x`, title: `${P}Song x2` });
+
+        expect(await listensOf(same)).toBe(1);
+    });
 });
 
 describe("the play-history audit's pages", () => {
