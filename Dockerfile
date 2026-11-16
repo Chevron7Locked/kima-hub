@@ -504,7 +504,10 @@ rm -f /data/postgres/postmaster.pid 2>/dev/null || true
 # Initialize PostgreSQL if not already done
 if [ ! -f /data/postgres/PG_VERSION ]; then
     echo "Initializing PostgreSQL database..."
-    gosu postgres $PG_BIN/initdb -D /data/postgres
+    # A new cluster is UTF8 with the C.UTF-8 locale whatever the container's environment says: without them initdb
+    # takes the container's (POSIX), and the database's text rules (name folding, sorting) then ignore non-Latin names.
+    # A cluster that already exists is never re-created or converted here.
+    gosu postgres $PG_BIN/initdb -D /data/postgres --encoding=UTF8 --locale=C.UTF-8
 
     # Configure PostgreSQL
     echo "host all all 0.0.0.0/0 md5" >> /data/postgres/pg_hba.conf
