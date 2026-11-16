@@ -43,7 +43,8 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-    if (before) await prisma.systemSettings.update({ where: { id: "default" }, data: before as any });
+    // Upsert: a suite running alongside may have deleted the row meanwhile.
+    if (before) await prisma.systemSettings.upsert({ where: { id: "default" }, create: before as any, update: before as any });
     else await prisma.systemSettings.deleteMany({ where: { id: "default" } });
     invalidateSystemSettingsCache();
     await Promise.all(queues.map((q) => closeQueue(q)));

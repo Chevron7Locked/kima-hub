@@ -392,9 +392,10 @@ router.post("/2fa/setup", async (req, res) => {
 
         // Kept on the server for ten minutes; a new setup replaces it. Enable checks its code against this one, so a
         // secret the client names never counts. Written only while it is off, so a setup cannot slip in behind an enable.
+        // Stamped from Date.now(), the clock the ten-minute check reads.
         const kept = await prisma.user.updateMany({
             where: { id: req.user!.id, twoFactorEnabled: false },
-            data: { twoFactorPendingSecret: encrypt(secret.base32), twoFactorPendingAt: new Date() },
+            data: { twoFactorPendingSecret: encrypt(secret.base32), twoFactorPendingAt: new Date(Date.now()) },
         });
         if (kept.count !== 1) {
             return res.status(400).json({ error: ALREADY_ENABLED });
