@@ -16,7 +16,7 @@ import { albumIdentityKey, editionlessKey, isGenericAlbumTitle } from "./albumId
 import { NameIndex } from "./discovery/discoverEvidence";
 import { findAlbumArtwork } from "./artwork";
 import { LIBRARY_LOCATION } from "./libraryFilters";
-import { flushShownPictureChanges, noteGenresChange, notePictureChange, noteYearChange } from "./shownPictureChanges";
+import { flushShownChanges, noteGenresChange, notePictureChange, noteYearChange } from "./shownChanges";
 import { DuplicateMbidError, reassignAlbumRgMbid } from "./mbidReassign";
 import { musicBrainzService, type AlbumCatalogue } from "./musicbrainz";
 import { sourcePauseController } from "./sourcePauseController";
@@ -108,7 +108,7 @@ export type AlbumToFill = {
 /** Fill the album's original year, label and top five genres, each only where
  * still blank, so scan tags and manual edits are never overwritten. A year or genre list
  * that changes what a client shows is noted for the library-changed marker
- * (services/shownPictureChanges.ts); the caller flushes at the end of its run. */
+ * (services/shownChanges.ts); the caller flushes at the end of its run. */
 export async function fillAlbumFromCatalogue(album: AlbumToFill, answer: AlbumFacts): Promise<void> {
     const data: { year?: number; label?: string; genres?: string[] } = {};
     if (album.year == null && answer.originalYear != null) data.year = answer.originalYear;
@@ -204,7 +204,7 @@ export async function identifyAlbumsBySound(windowAlbumIds: string[]): Promise<s
         return await identifyRound(windowAlbumIds);
     } finally {
         // The covers this round found reach Subsonic clients as one change of the library.
-        await flushShownPictureChanges();
+        await flushShownChanges();
     }
 }
 

@@ -9,14 +9,14 @@ import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import * as libraryChanged from "../libraryChanged";
 import * as systemSettings from "../../utils/systemSettings";
 import {
-    PICTURE_CHANGE_WINDOW_MS,
-    flushShownPictureChanges,
+    SHOWN_CHANGE_WINDOW_MS,
+    flushShownChanges,
     noteGenresChange,
     notePictureChange,
     noteYearChange,
     rewritePictureColumn,
     shownPicture,
-} from "../shownPictureChanges";
+} from "../shownChanges";
 
 jest.setTimeout(60_000);
 
@@ -51,12 +51,12 @@ async function cleanup() {
 }
 
 beforeEach(async () => {
-    await flushShownPictureChanges();
+    await flushShownChanges();
     await cleanup();
 });
 afterEach(async () => {
     jest.restoreAllMocks();
-    await flushShownPictureChanges();
+    await flushShownChanges();
 });
 afterAll(async () => {
     await cleanup();
@@ -68,7 +68,7 @@ afterAll(async () => {
 const flushedMoves = (note: () => void) =>
     markerMoves(async () => {
         note();
-        await flushShownPictureChanges();
+        await flushShownChanges();
     });
 
 describe("a found picture that changes what is shown", () => {
@@ -126,7 +126,7 @@ describe("a found picture that changes what is shown", () => {
             notePictureChange("artist", s.artist, { was: null, now: pic("t") });
             // Nothing yet: the marker moves when the window ends.
             expect(await libraryChanged.libraryChangedAt()).toBeLessThanOrEqual(Date.now());
-            const call = scheduled.mock.calls.find((c) => c[1] === PICTURE_CHANGE_WINDOW_MS);
+            const call = scheduled.mock.calls.find((c) => c[1] === SHOWN_CHANGE_WINDOW_MS);
             expect(call).toBeDefined();
             const handle = scheduled.mock.results[scheduled.mock.calls.indexOf(call!)].value as NodeJS.Timeout;
             expect(handle.hasRef()).toBe(false);
@@ -213,18 +213,18 @@ describe("rewritePictureColumn", () => {
 
         expect(await markerMoves(async () => {
             expect(await rewritePictureColumn("artist", "heroUrl", "native:artists/x.jpg", "native:artists/x.jpg?v=0123456789")).toBe(1);
-            await flushShownPictureChanges();
+            await flushShownChanges();
         })).toBe(true);
         expect((await prisma.artist.findUniqueOrThrow({ where: { id: s.artist } })).heroUrl).toBe("native:artists/x.jpg?v=0123456789");
 
         // The found cover rewritten under a person's own cover shows no change; the own cover itself does.
         expect(await markerMoves(async () => {
             await rewritePictureColumn("album", "coverUrl", "native:albums/x.jpg", "native:albums/x.jpg?v=0123456789");
-            await flushShownPictureChanges();
+            await flushShownChanges();
         })).toBe(false);
         expect(await markerMoves(async () => {
             await rewritePictureColumn("album", "userCoverUrl", "native:albums/x.jpg", "native:albums/x.jpg?v=0123456789");
-            await flushShownPictureChanges();
+            await flushShownChanges();
         })).toBe(true);
     });
 });
@@ -244,7 +244,7 @@ describe("a marker that cannot be written", () => {
         const logged = expectLog("error");
         jest.spyOn(systemSettings, "saveSystemSettings").mockRejectedValue(new Error("settings went away"));
         notePictureChange("artist", s.artist, { was: null, now: pic("f") });
-        await expect(flushShownPictureChanges()).resolves.toBeUndefined();
+        await expect(flushShownChanges()).resolves.toBeUndefined();
         expect(logged).toHaveBeenCalled();
     });
 });

@@ -40,7 +40,7 @@ import { enrichmentFailureService } from "../../services/enrichmentFailureServic
 import { artistQueue, createWorkerConnection, QUEUE_NAMES } from "../enrichmentQueues";
 import { entityGoneError, isEntityGone } from "../entityGone";
 import { getSystemSettings } from "../../utils/systemSettings";
-import { noteGenresChange, notePictureChange } from "../../services/shownPictureChanges";
+import { noteGenresChange, notePictureChange } from "../../services/shownChanges";
 
 /** One MusicBrainz genre with its vote count. */
 type GenreVote = { name: string; count?: number };

@@ -4,7 +4,7 @@
  * added, changed, flagged missing, retired or flagged corrupt a library song (workers/processors/scanProcessor.ts), a
  * person or job that deleted or moved library songs, albums or artists (routes/library, the Discover lifecycle, prune,
  * refile, data integrity), a person's edit of a name, a picture or the genres shown (routes/enrichment.ts), and a found
- * picture that replaced the one shown (services/shownPictureChanges.ts). What a client lists is playable
+ * picture that replaced the one shown (services/shownChanges.ts). What a client lists is playable
  * songs and the albums and artists holding one (utils/playableSong.ts), so a change to anything else leaves it: a
  * Discover item, a song that is missing or corrupt, an empty album. Analysis writes, Discover songs and artist syncs do
  * not move it either, and it never goes backwards. It is stored in the system settings, so every process reads the same one.

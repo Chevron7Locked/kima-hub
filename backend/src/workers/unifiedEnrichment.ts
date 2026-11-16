@@ -50,7 +50,7 @@ import { sourcePauseController } from "../services/sourcePauseController";
 import { distributedLock } from "../utils/distributedLock";
 import { embeddingsDeferredForGpu } from "../services/gpuRuntime";
 import { getSystemSettings } from "../utils/systemSettings";
-import { flushShownPictureChanges } from "../services/shownPictureChanges";
+import { flushShownChanges } from "../services/shownChanges";
 
 // ── Per-track stage queue ────────────────────────────────────────────────
 
@@ -1087,7 +1087,7 @@ async function runEnrichmentCycle(): Promise<{
         stopLockRenewal();
         // Whatever the cycle's workers found for a shown picture, year or genre list reaches Subsonic clients now, not
         // when the quiet window ends (it never throws).
-        await flushShownPictureChanges();
+        await flushShownChanges();
         // The cycle settles only after the lease is let go, so a stop that returns leaves the next cycle a free
         // lock; and a release that fails cannot leave the stop waiting forever.
         try {

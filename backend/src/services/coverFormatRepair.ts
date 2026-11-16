@@ -23,7 +23,7 @@ import { prisma } from "../utils/db";
 import { audiobookCoversPath, coversBasePath, MAX_PICTURE_BYTES, replaceWithJpeg, storeAsJpeg, storedCoverValue, versionOfFile } from "./imageStorage";
 import { rewriteCoverValues, storedVersions } from "./coverVersionBackfill";
 import type { StopCheck } from "../utils/stopCheck";
-import { flushShownPictureChanges, rewritePictureColumn } from "./shownPictureChanges";
+import { flushShownChanges, rewritePictureColumn } from "./shownChanges";
 
 export interface CoverRepairResult {
     /** Files that held another format and are JPEGs now. */
@@ -163,7 +163,7 @@ export async function repairCoverFormatsOnce(stop: StopCheck): Promise<CoverRepa
         return await repairCoverFormats(stop);
     } finally {
         // The new versions and addresses it stored change what clients are handed: one change of the library for the pass.
-        await flushShownPictureChanges();
+        await flushShownChanges();
     }
 }
 

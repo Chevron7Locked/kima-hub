@@ -32,7 +32,7 @@ jest.mock("../../utils/logger", () => ({
 import { prisma } from "../../utils/db";
 import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { backfillCoverVersionsOnce, rewriteCoverValues } from "../coverVersionBackfill";
-import { flushShownPictureChanges } from "../shownPictureChanges";
+import { flushShownChanges } from "../shownChanges";
 import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 import { versionOfFile } from "../imageStorage";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -334,7 +334,7 @@ describe("cover versions and the library marker", () => {
         expect(
             await markerMoves(async () => {
                 expect(await rewriteCoverValues(`albums/${P}_r.jpg`, "ba9876543210")).toBe(1);
-                await flushShownPictureChanges();
+                await flushShownChanges();
             }),
         ).toBe(true);
     });

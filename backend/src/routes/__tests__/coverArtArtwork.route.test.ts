@@ -52,7 +52,7 @@ import libraryCoverArtRoutes from "../library/coverArt";
 import { prisma } from "../../utils/db";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { mountAsServer } from "./helpers/serverMount";
-import { flushShownPictureChanges } from "../../services/shownPictureChanges";
+import { flushShownChanges } from "../../services/shownChanges";
 
 function makeApp() {
     const app = express();
@@ -164,7 +164,7 @@ describe("the cover-art route asks every source", () => {
             mockFindAlbumArtwork.mockResolvedValue({ url: FOUND, source: "deezer" });
             mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { "content-type": "image/jpeg" } }));
             await request(makeApp()).get("/library/cover-art/" + encodeURIComponent(NATIVE));
-            await flushShownPictureChanges();
+            await flushShownChanges();
             return mockSaveSystemSettings.mock.calls.filter((c) => "libraryChangedAt" in (c[0] as object)).length;
         };
         const withSong = () =>
@@ -172,7 +172,7 @@ describe("the cover-art route asks every source", () => {
                 data: { id: `${P}_t`, albumId: ALBUM_ID, title: "T", trackNo: 1, duration: 100, filePath: `/m/${P}.flac`, fileModified: new Date(), fileSize: 1 },
             });
         beforeEach(async () => {
-            await flushShownPictureChanges();
+            await flushShownChanges();
             mockSaveSystemSettings.mockClear();
         });
         afterEach(() => prisma.track.deleteMany({ where: { id: `${P}_t` } }));

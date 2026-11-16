@@ -7,7 +7,7 @@
  * routes/enrichment.ts.
  *
  * A writer calls `notePictureChange`, `noteYearChange` or `noteGenresChange` with what it replaced and what it stored. Notes
- * gather for a quiet window (`PICTURE_CHANGE_WINDOW_MS`, from the first note of a run) and then move the library-changed
+ * gather for a quiet window (`SHOWN_CHANGE_WINDOW_MS`, from the first note of a run) and then move the library-changed
  * marker once, and only when at least one noted value really changed what is shown and belongs to an artist or album a
  * client lists (services/libraryChanged.ts). A run that touches a thousand rows costs one marker, not a thousand; a run
  * longer than the window costs one per window. A batch writer, and each enrichment cycle, flushes at its end. A note is held
@@ -20,12 +20,12 @@ import { getEffectiveYear } from "../utils/dateFilters";
 import { getMergedGenres } from "../utils/metadataOverrides";
 import { anyAlbumIsListed, anyArtistIsListed, markLibraryChangedIfListed } from "./libraryChanged";
 
-export const PICTURE_CHANGE_WINDOW_MS = 15_000;
+export const SHOWN_CHANGE_WINDOW_MS = 15_000;
 
 /** How many ids one check of "does a client list any of these" takes. */
 const CHECK_SIZE = 500;
 
-export type PictureKind = "artist" | "album";
+export type ShownKind = "artist" | "album";
 
 /** The picture an artist or album shows: the person's own when set, else the found one; null for none. */
 export const shownPicture = (found: string | null | undefined, own: string | null | undefined): string | null => own || found || null;
@@ -34,7 +34,7 @@ export const shownPicture = (found: string | null | undefined, own: string | nul
 type Field = "picture" | "year" | "genres";
 
 interface Noted {
-    kind: PictureKind;
+    kind: ShownKind;
     field: Field;
     id: string;
     was: string | null;
@@ -44,7 +44,7 @@ interface Noted {
 let pending = new Map<string, Noted>();
 let timer: NodeJS.Timeout | null = null;
 
-function note(kind: PictureKind, field: Field, id: string, was: string | null, now: string | null): void {
+function note(kind: ShownKind, field: Field, id: string, was: string | null, now: string | null): void {
     const key = `${kind}:${field}:${id}`;
     const earlier = pending.get(key);
     // Two changes of one value in a window are judged as one: from what it showed before the first to what it shows now.
@@ -54,8 +54,8 @@ function note(kind: PictureKind, field: Field, id: string, was: string | null, n
     if (!timer) {
         timer = setTimeout(() => {
             timer = null;
-            void flushShownPictureChanges();
-        }, PICTURE_CHANGE_WINDOW_MS);
+            void flushShownChanges();
+        }, SHOWN_CHANGE_WINDOW_MS);
         // A pending note never keeps a process alive: shutdown does not wait for the window.
         timer.unref();
     }
@@ -67,7 +67,7 @@ function note(kind: PictureKind, field: Field, id: string, was: string | null, n
  * what is shown stays the same.
  */
 export function notePictureChange(
-    kind: PictureKind,
+    kind: ShownKind,
     id: string,
     change: { was: string | null | undefined; now: string | null | undefined; own?: string | null },
 ): void {
@@ -87,13 +87,13 @@ export function noteYearChange(albumId: string, change: { was: AlbumYears; now: 
 export type GenreLists = { genres?: unknown; userGenres?: unknown };
 
 /** An artist's or album's genre lists changed: noted when the merged list shown (the person's, else the enriched), compared whole and in order, differs. */
-export function noteGenresChange(kind: PictureKind, id: string, change: { was: GenreLists; now: GenreLists }): void {
+export function noteGenresChange(kind: ShownKind, id: string, change: { was: GenreLists; now: GenreLists }): void {
     const shown = (lists: GenreLists) => JSON.stringify(getMergedGenres(lists));
     note(kind, "genres", id, shown(change.was), shown(change.now));
 }
 
 /** Moves the marker now for the notes held, when any of them shows a client something new. Waits for the marker. */
-export async function flushShownPictureChanges(): Promise<void> {
+export async function flushShownChanges(): Promise<void> {
     if (timer) {
         clearTimeout(timer);
         timer = null;
@@ -102,7 +102,7 @@ export async function flushShownPictureChanges(): Promise<void> {
     pending = new Map();
     if (noted.length === 0) return;
 
-    const listed = async (kind: PictureKind, anyListed: (ids: string[]) => Promise<boolean>) => {
+    const listed = async (kind: ShownKind, anyListed: (ids: string[]) => Promise<boolean>) => {
         const ids = [...new Set(noted.filter((n) => n.kind === kind).map((n) => n.id))];
         for (let i = 0; i < ids.length; i += CHECK_SIZE) if (await anyListed(ids.slice(i, i + CHECK_SIZE))) return true;
         return false;
@@ -124,7 +124,7 @@ export async function flushShownPictureChanges(): Promise<void> {
  * address wherever it stands.
  */
 export async function rewritePictureColumn(
-    model: PictureKind,
+    model: ShownKind,
     column: "heroUrl" | "userHeroUrl" | "coverUrl" | "userCoverUrl",
     from: string,
     to: string,

@@ -39,17 +39,17 @@ jest.mock("../../services/moods/tags", () => ({ writeMoodTags: jest.fn().mockRes
 jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn().mockResolvedValue({ audioAnalyzerWorkers: 2, clapWorkers: 2 }),
 }));
-jest.mock("../../services/shownPictureChanges", () => ({
-    ...jest.requireActual("../../services/shownPictureChanges"),
-    flushShownPictureChanges: jest.fn().mockResolvedValue(undefined),
+jest.mock("../../services/shownChanges", () => ({
+    ...jest.requireActual("../../services/shownChanges"),
+    flushShownChanges: jest.fn().mockResolvedValue(undefined),
 }));
 
 import { mockRedis, enrichmentStateMock } from "../../__tests__/helpers/enrichmentMocks";
-import { flushShownPictureChanges } from "../../services/shownPictureChanges";
+import { flushShownChanges } from "../../services/shownChanges";
 import { triggerEnrichmentNow, startUnifiedEnrichmentWorker, stopUnifiedEnrichmentWorker } from "../unifiedEnrichment";
 
 const state = enrichmentStateMock.enrichmentStateService;
-const flush = flushShownPictureChanges as jest.Mock;
+const flush = flushShownChanges as jest.Mock;
 
 beforeEach(async () => {
     jest.clearAllMocks();

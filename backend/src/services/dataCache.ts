@@ -6,7 +6,7 @@ import { redisClient } from "../utils/redis";
 import { findAlbumArtwork, findArtistArtwork } from "./artwork";
 import { isMbid } from "./artistIdentity";
 import { downloadAndStoreImage } from "./imageStorage";
-import { notePictureChange } from "./shownPictureChanges";
+import { notePictureChange } from "./shownChanges";
 import { withShutdownSignal, type StopCheck } from "../utils/stopCheck";
 
 // Cache TTLs

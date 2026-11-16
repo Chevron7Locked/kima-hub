@@ -5,7 +5,7 @@ import { logger } from "../../utils/logger";
 import { imageLimiter } from "../../middleware/rateLimiter";
 import { USER_AGENT } from "../../config";
 import { findAlbumArtwork } from "../../services/artwork";
-import { notePictureChange } from "../../services/shownPictureChanges";
+import { notePictureChange } from "../../services/shownChanges";
 import { musicBrainzService } from "../../services/musicbrainz";
 import { getSystemSettings } from "../../utils/systemSettings";
 import { BlockedAddressError, InvalidAddressError, fetchChecked } from "../../utils/ssrf";

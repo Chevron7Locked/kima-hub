@@ -9,7 +9,7 @@ import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { downloadAndStoreImage, isNativePath } from "./imageStorage";
 import { redisClient } from "../utils/redis";
-import { flushShownPictureChanges, notePictureChange } from "./shownPictureChanges";
+import { flushShownChanges, notePictureChange } from "./shownChanges";
 import { sleepUnlessStopped, stopSignal, type StopCheck } from "../utils/stopCheck";
 
 const PAGE_SIZE = 500;
@@ -258,6 +258,6 @@ export async function backfillAllImages(stop: StopCheck = {}): Promise<void> {
         release();
         running = false;
         // The pictures this run moved to local copies reach Subsonic clients as one change of the library.
-        await flushShownPictureChanges();
+        await flushShownChanges();
     }
 }

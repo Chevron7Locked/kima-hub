@@ -66,7 +66,7 @@ import { prisma } from "../../../utils/db";
 import { useShutdownCheck } from "../../../utils/stopCheck";
 import { markerMoves } from "../../../__tests__/helpers/libraryMarker";
 import * as systemSettings from "../../../utils/systemSettings";
-import { flushShownPictureChanges } from "../../../services/shownPictureChanges";
+import { flushShownChanges } from "../../../services/shownChanges";
 
 const P = "zz-artEnrich-";
 const REAL_MBID = "11111111-2222-3333-4444-555555555555";
@@ -352,13 +352,13 @@ describe("an artist row holding another artist's MusicBrainz id", () => {
 
 /**
  * A picture the worker finds or replaces for a listed artist or album is a change a Subsonic client shows: the library marker
- * moves once (services/shownPictureChanges.ts), and only when what is shown really changed. Real database, real marker.
+ * moves once (services/shownChanges.ts), and only when what is shown really changed. Real database, real marker.
  */
 describe("the enrichment worker's found pictures and the library marker", () => {
     beforeEach(async () => {
         jest.clearAllMocks();
         await wipe();
-        await flushShownPictureChanges();
+        await flushShownChanges();
         mockFindArtistArtwork.mockResolvedValue(null);
         mockFindAlbumArtwork.mockResolvedValue(null);
         mockDownloadAndStoreImage.mockResolvedValue(null);
@@ -370,7 +370,7 @@ describe("the enrichment worker's found pictures and the library marker", () => 
     });
     afterAll(async () => {
         jest.requireMock("../../../services/imageStorage").nativeFileExists.mockReturnValue(false);
-        await flushShownPictureChanges();
+        await flushShownChanges();
     });
 
     /** The artist with one album (cover `coverUrl`) and one song on it; `location` DISCOVER makes it a Discover album no client lists. */
@@ -386,7 +386,7 @@ describe("the enrichment worker's found pictures and the library marker", () => 
     const enrichAndFlush = (artist: Awaited<ReturnType<typeof seedArtist>>) =>
         markerMoves(async () => {
             await enrichSimilarArtist(artist);
-            await flushShownPictureChanges();
+            await flushShownChanges();
         });
 
     it("moves the marker when an artist image is found", async () => {
@@ -403,7 +403,7 @@ describe("the enrichment worker's found pictures and the library marker", () => 
         const saved = jest.spyOn(systemSettings, "saveSystemSettings");
         saved.mockClear();
         await enrichSimilarArtist(artist);
-        await flushShownPictureChanges();
+        await flushShownChanges();
         const markers = saved.mock.calls.filter((c) => "libraryChangedAt" in (c[0] as object));
         saved.mockRestore();
         expect(markers).toHaveLength(1);

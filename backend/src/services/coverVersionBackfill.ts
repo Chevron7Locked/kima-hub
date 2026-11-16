@@ -24,7 +24,7 @@ import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { prisma } from "../utils/db";
 import { coversBasePath, dropResizedCopies, parseStoredCover, resolveInCoversDir, storedCoverValue, versionOfFile } from "./imageStorage";
 import type { StopCheck } from "../utils/stopCheck";
-import { notePictureChange, rewritePictureColumn, shownPicture, flushShownPictureChanges } from "./shownPictureChanges";
+import { notePictureChange, rewritePictureColumn, shownPicture, flushShownChanges } from "./shownChanges";
 
 export interface CoverVersionResult {
     /** Stored values (each distinct address once) that carry a version now. */
@@ -174,7 +174,7 @@ export async function backfillCoverVersionsOnce(stop: StopCheck): Promise<CoverV
         return await versionCovers(stop);
     } finally {
         // The versions the pass stored change the cover ids clients are handed: one change of the library, however many values.
-        await flushShownPictureChanges();
+        await flushShownChanges();
     }
 }
 

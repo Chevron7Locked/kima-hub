@@ -35,7 +35,7 @@ import { dataCacheService } from "../dataCache";
 import { prisma } from "../../utils/db";
 import { useShutdownCheck } from "../../utils/stopCheck";
 import { markerMoves } from "../../__tests__/helpers/libraryMarker";
-import { flushShownPictureChanges } from "../shownPictureChanges";
+import { flushShownChanges } from "../shownChanges";
 
 const P = "zz-dataCache-";
 const ALBUM = `${P}alb`;
@@ -223,7 +223,7 @@ describe("dataCache asks every source, not just one", () => {
 
 /**
  * A picture the cache finds and stores for a listed artist or album is a change a Subsonic client shows: the library marker
- * moves (once per window, through services/shownPictureChanges.ts), unless a person's own picture covers it or no client lists it.
+ * moves (once per window, through services/shownChanges.ts), unless a person's own picture covers it or no client lists it.
  */
 describe("dataCache found pictures and the library marker", () => {
     const withSong = (kind: "playable" | "discover") =>
@@ -235,20 +235,20 @@ describe("dataCache found pictures and the library marker", () => {
         jest.clearAllMocks();
         await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
         await wipe();
-        await flushShownPictureChanges();
+        await flushShownChanges();
         mockFindAlbumArtwork.mockResolvedValue(null);
         mockFindArtistArtwork.mockResolvedValue(null);
         mockDownloadAndStoreImage.mockResolvedValue(null);
     });
     afterAll(async () => {
         await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
-        await flushShownPictureChanges();
+        await flushShownChanges();
     });
 
     const flushed = (work: () => Promise<unknown>) =>
         markerMoves(async () => {
             await work();
-            await flushShownPictureChanges();
+            await flushShownChanges();
         });
 
     it("moves the marker when an album cover is found for a listed album", async () => {
