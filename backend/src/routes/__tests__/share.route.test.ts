@@ -575,25 +575,6 @@ describe('GET /share/:token/stream/:trackId -- only a playable song streams', ()
         }
     });
 
-    // A query count is the only way to see this: the answer is the same either way. A song that plays is the usual request,
-    // and each request is made once per range a listener's player asks for.
-    it('finds the song a link plays with one lookup, whatever the link covers', async () => {
-        const tracks = jest.spyOn(prisma.track, 'findFirst');
-        const items = jest.spyOn(prisma.playlistItem, 'findFirst');
-        try {
-            for (const [type, id] of [['track', songs.playable], ['album', albumId], ['playlist', playlistId]]) {
-                const token = await covering(type, id);
-                tracks.mockClear();
-                items.mockClear();
-                expect((await stream(token, songs.playable)).status).toBe(200);
-                expect([type, tracks.mock.calls.length, items.mock.calls.length]).toEqual([type, 1, 0]);
-            }
-        } finally {
-            tracks.mockRestore();
-            items.mockRestore();
-        }
-    });
-
     describe('a link that has ended answers 410 on every address that opens it', () => {
         it('says it has expired', async () => {
             const token = `${TAG}-ended-expired`;

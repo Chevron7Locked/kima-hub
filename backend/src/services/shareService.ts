@@ -3,8 +3,7 @@
 import { randomBytes } from "crypto";
 import { prisma } from "../utils/db";
 import { retryOnConflict } from "../utils/dbConflict";
-import { PLAYABLE_SONG } from "../utils/playableSong";
-import { PLAYABLE_ALBUM_WHERE } from "./libraryFilters";
+import { shareTargetExists } from "./shareContents";
 
 type ShareEntityType = "playlist" | "track" | "album";
 
@@ -13,6 +12,8 @@ const SHARE_ENTITY_TYPES: ShareEntityType[] = [
     "track",
     "album",
 ];
+
+const NOT_FOUND_NAME: Record<ShareEntityType, string> = { playlist: "Playlist", track: "Track", album: "Album" };
 
 /** Per-user cap on live share links. */
 const MAX_SHARE_LINKS_PER_USER = 500;
@@ -78,6 +79,10 @@ export async function createShareLink(
         );
     }
 
+    // A song or album with nothing to play (Discover, missing, corrupt) is not found, on the web and Subsonic alike.
+    if (!(await shareTargetExists({ entityType, entityId }))) {
+        throw new ShareError(`${NOT_FOUND_NAME[entityType as ShareEntityType]} not found`, "NOT_FOUND");
+    }
     if (entityType === "playlist") {
         const playlist = await prisma.playlist.findUnique({
             where: { id: entityId },
@@ -87,19 +92,6 @@ export async function createShareLink(
         if (playlist.userId !== userId) {
             throw new ShareError("Not the playlist owner", "FORBIDDEN");
         }
-    } else if (entityType === "track") {
-        // A song or album with nothing to play (Discover, missing, corrupt) is not found, on the web and Subsonic alike.
-        const track = await prisma.track.findFirst({
-            where: { id: entityId, ...PLAYABLE_SONG },
-            select: { id: true },
-        });
-        if (!track) throw new ShareError("Track not found", "NOT_FOUND");
-    } else {
-        const album = await prisma.album.findFirst({
-            where: { id: entityId, ...PLAYABLE_ALBUM_WHERE },
-            select: { id: true },
-        });
-        if (!album) throw new ShareError("Album not found", "NOT_FOUND");
     }
 
     const attempt = () =>

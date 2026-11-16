@@ -1,10 +1,9 @@
 import { Router, Request, Response } from "express";
 import { createShareLink, ShareError } from "../services/shareService";
 import { isTransactionConflict } from "../utils/dbConflict";
-import { loadPublicAlbum, loadPublicPlaylist, loadPublicTrack, shareHoldsCover } from "../services/publicShare";
+import { loadPublicShare, shareHoldsCover, songOfShare } from "../services/shareContents";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
-import { PLAYABLE_SONG } from "../utils/playableSong";
 import { createCoverLimiter, createRateLimiter } from "../middleware/rateLimiter";
 import path from "path";
 import fs from "fs";
@@ -76,40 +75,6 @@ async function countVisit(shareId: string): Promise<void> {
 }
 
 /**
- * What a song must satisfy to be covered by a link, as a `where` on Track: null when the link can never cover that song, `{}`
- * when the link is to the song itself, else the filter (the album, the playlist) the song has to match. The keys stay clear
- * of those of the playable rule it is merged with.
- */
-function coverageOf(link: { entityType: string; entityId: string }, trackId: string) {
-    if (link.entityType === "track") return link.entityId === trackId ? {} : null;
-    if (link.entityType === "album") return { albumId: link.entityId };
-    if (link.entityType === "playlist") return { playlistItems: { some: { playlistId: link.entityId } } };
-    return null;
-}
-
-/**
- * The song a link plays for this id: its file path when the link covers it and it is a playable song, "not-covered" when
- * the link does not hold it (403) and "not-playable" when it holds it but it is missing, corrupt, Discover or has no file
- * path (404). One query answers a song that plays; the second only tells the two refusals apart.
- */
-async function songOfShare(
-    link: { entityType: string; entityId: string },
-    trackId: string,
-): Promise<{ filePath: string } | "not-covered" | "not-playable"> {
-    const coverage = coverageOf(link, trackId);
-    if (coverage === null) return "not-covered";
-    const song = await prisma.track.findFirst({
-        where: { id: trackId, ...coverage, ...PLAYABLE_SONG },
-        select: { filePath: true },
-    });
-    if (song?.filePath) return { filePath: song.filePath };
-    // A link to the song itself covers it by id alone; any other link must hold it for the refusal to be a 404.
-    if (link.entityType === "track") return "not-playable";
-    const held = await prisma.track.findFirst({ where: { id: trackId, ...coverage }, select: { id: true } });
-    return held ? "not-playable" : "not-covered";
-}
-
-/**
  * POST /api/share - Create a share link (authenticated)
  */
 router.post("/", async (req: Request, res: Response) => {
@@ -150,15 +115,7 @@ router.get("/:token", shareResolveLimiter, async (req: Request, res: Response) =
         const shareLink = await loadLiveShareLink(req.params.token, res);
         if (!shareLink) return;
 
-        let entity: object | null = null;
-
-        if (shareLink.entityType === "playlist") {
-            entity = await loadPublicPlaylist(shareLink.entityId);
-        } else if (shareLink.entityType === "track") {
-            entity = await loadPublicTrack(shareLink.entityId);
-        } else if (shareLink.entityType === "album") {
-            entity = await loadPublicAlbum(shareLink.entityId);
-        }
+        const entity = await loadPublicShare(shareLink);
 
         if (!entity) {
             return refuse(res, 404, "Shared content no longer exists");

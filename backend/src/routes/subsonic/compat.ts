@@ -6,6 +6,7 @@ import { planSubsonicSong } from "./streamPlan";
 import { shownGenresOfSongs } from "../../utils/genreSql";
 import { resolveWithinMusicRoot } from "../library/trackPath";
 import { PLAYABLE_SONG } from "../../utils/playableSong";
+import { songsOfShare } from "../../services/shareContents";
 import {
     createShareLink,
     deleteShareLink,
@@ -50,24 +51,9 @@ const SONG_WITH_ALBUM = { album: { include: { artist: true } } } as const;
 
 type ShareEntityType = "track" | "album" | "playlist";
 
-/** The playable songs a share covers, as Subsonic entries: a song itself, an album in disc and track order, a playlist by rank. */
+/** The playable songs a share covers, as Subsonic entries, in the share's order. */
 async function shareEntries(entityType: ShareEntityType, entityId: string) {
-    const tracks =
-        entityType === "track"
-            ? await prisma.track.findMany({ where: { id: entityId, ...PLAYABLE_SONG }, include: SONG_WITH_ALBUM })
-            : entityType === "album"
-            ? await prisma.track.findMany({
-                  where: { albumId: entityId, ...PLAYABLE_SONG },
-                  orderBy: [{ discNumber: { sort: "asc", nulls: "first" } }, { trackNo: "asc" }],
-                  include: SONG_WITH_ALBUM,
-              })
-            : (
-                  await prisma.playlistItem.findMany({
-                      where: { playlistId: entityId, track: PLAYABLE_SONG },
-                      orderBy: { rank: "asc" },
-                      include: { track: { include: SONG_WITH_ALBUM } },
-                  })
-              ).map((item) => item.track);
+    const tracks = await songsOfShare({ entityType, entityId }, SONG_WITH_ALBUM);
     const shown = await shownGenresOfSongs(tracks.map((t) => ({ id: t.id, album: t.album, artist: t.album.artist })));
     return tracks.map((t) => mapSong(t, t.album, t.album.artist.displayName || t.album.artist.name, t.album.artist.id, shown.get(t.id)));
 }

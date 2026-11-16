@@ -10,7 +10,7 @@ import request from "supertest";
 import jwt from "jsonwebtoken";
 import playlistRoutes from "../playlists";
 import { prisma } from "../../utils/db";
-import { loadPublicPlaylist } from "../../services/publicShare";
+import { loadPublicShare } from "../../services/shareContents";
 import { markUnavailable } from "../../services/playlistService";
 import type { SSEEvent } from "../../services/eventBus";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -89,9 +89,9 @@ describe("reading a playlist with a repeated song", () => {
     it("shows every copy on a public share", async () => {
         const [a, b] = songs;
         const id = await playlistWith("shared", [a, b, a]);
-        const shown = await loadPublicPlaylist(id);
-        expect(shown!.items).toHaveLength(3);
-        expect(new Set(shown!.items.map((i) => i.id)).size).toBe(3);
+        const shown = await loadPublicShare({ entityType: "playlist", entityId: id }) as { items: { id: string }[] };
+        expect(shown.items).toHaveLength(3);
+        expect(new Set(shown.items.map((i) => i.id)).size).toBe(3);
     });
 });
 
