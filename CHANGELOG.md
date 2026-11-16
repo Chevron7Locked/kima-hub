@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A library scan can no longer lose a song it is adding.** A song filed into an album at the moment that album was being removed as empty used to be deleted with it.
+- **Deleting an album, artist or song also removes its share links**, instead of leaving links behind that open nothing.
+- **A failed delete no longer leaves entries without their files.** Kima removes the library entries first and the files after.
+- **The nightly data check no longer stops when a placeholder artist holds an album the real artist already has.** The two copies are merged, with their plays, likes and playlist places.
+- **Deleting a single song cleans up after it.** Its Discover records go, and an album left with no songs is removed.
 - **Deleting an album or artist cleans up everything that went with it.** The artist's album and song counts update at once, and Discover's leftover records for those songs go too.
 - **Discover knows what you own after a cleanup.** Clearing Discover albums now updates its list of albums you own, so it doesn't suggest them wrongly afterwards.
 - **Merging a placeholder artist into the real one keeps Discover's record of that artist's albums**, so they aren't suggested or downloaded again.
