@@ -67,9 +67,12 @@ npm run typecheck
 npm run test:unit
 
 cd ../backend
+npm run lint
 npm run typecheck
 npm test
 ```
+
+CI also builds and starts the two split images (`backend/Dockerfile` and `frontend/Dockerfile`) against a throwaway Postgres and Redis. If you change either Dockerfile or `backend/docker-entrypoint.sh`, run `scripts/split-image-check.sh` first; it needs Docker.
 
 The backend tests need Postgres with pgvector and Redis. The test setup creates its own database (SQL_ASCII, like real installs), applies the migrations to it, and clones one copy per worker. Without `DATABASE_URL` it uses the server in `backend/.env` with the database `kima_v1_test`, or `kima:kima@localhost:5455/kima_v1_test` without a `.env`. It refuses any database whose name does not end in `_test`, and a second run on the same database stops until the first is done. `backend/src/__mocks__/test-global-setup.cjs` and `test-db-defaults.cjs` hold the details. CI uses the `pgvector/pgvector:0.8.6-pg16` image for it.
 

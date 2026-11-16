@@ -55,17 +55,18 @@ Follow existing code patterns and TypeScript conventions. Before submitting a PR
 
 ```bash
 cd backend
+npm run lint
 npm run typecheck
 npm test
 ```
 
-The backend tests need Postgres and Redis; [docs/development.md](docs/development.md) says how to start them.
+The backend tests need Postgres and Redis; [docs/development.md](docs/development.md) says how to start them. If your change touches a Dockerfile or `backend/docker-entrypoint.sh`, also run `scripts/split-image-check.sh`, which CI runs too.
 
 ## Pull Request Process
 
 1. **Target the `main` branch**
 2. Fill out the PR template completely
-3. Make sure the checks pass: frontend lint and unit tests, both typechecks, the backend tests, the Python analyzer tests and the Docker build
+3. Make sure the checks pass: frontend and backend lint, frontend unit tests, both typechecks, the backend tests, the Python analyzer tests and the Docker build
 4. Wait for review. You'll get feedback or an approval
 
 ## Questions?
