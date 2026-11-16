@@ -6,6 +6,7 @@
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import { nameKey } from "./nameFold";
+import { SETTLED_STATUSES } from "./downloads/jobStatuses";
 
 /** A download's artist or album name as compared for duplicates: nameKey, or its plain text when that has no letters. */
 const duplicateKey = (name: unknown) =>
@@ -248,7 +249,7 @@ class NotificationPolicyService {
             where: {
                 id: { not: job.id },
                 userId: job.userId,
-                status: { in: ["completed", "failed", "exhausted"] },
+                status: { in: SETTLED_STATUSES },
             },
             select: { id: true, metadata: true },
             orderBy: { completedAt: { sort: "desc", nulls: "last" } },

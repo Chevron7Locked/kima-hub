@@ -716,7 +716,7 @@ class AcquisitionService {
                           userId: context.userId,
                           type: "album",
                           discoveryBatchId: batchId,
-                          status: { in: ["pending", "processing"] },
+                          status: { in: downloadJobs.ACTIVE_STATUSES },
                           subject: `${request.artistName} - ${request.albumTitle}`,
                       },
                       orderBy: { createdAt: "asc" },

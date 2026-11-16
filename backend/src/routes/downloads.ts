@@ -343,20 +343,6 @@ async function processDownload(
     }
 }
 
-/** The jobs about to be removed stop first: Lidarr lets go of them, then they end as cancelled and their batch is told. */
-async function stopJobs(jobs: Awaited<ReturnType<typeof prisma.downloadJob.findMany>>): Promise<void> {
-    try {
-        await simpleDownloadManager.cancelJobs(jobs);
-    } catch (error) {
-        logger.warn("Could not stop the downloads in Lidarr before removing them:", error);
-    }
-    await downloadJobs.cancel(jobs);
-    // The batch reads its jobs as its check starts; the rows are removed right after, so give it that moment.
-    await downloadJobs.whenIdle(CHECK_READS_JOBS_MS);
-}
-
-const CHECK_READS_JOBS_MS = 2000;
-
 // Registered before /:id so "clear-all" is not read as an id.
 router.delete("/clear-all", async (req, res) => {
     try {
@@ -371,13 +357,10 @@ router.delete("/clear-all", async (req, res) => {
             where.status = status;
         }
 
-        await stopJobs(await prisma.downloadJob.findMany({ where }));
-        const result = await prisma.downloadJob.deleteMany({ where });
+        const deleted = await simpleDownloadManager.removeJobs(await prisma.downloadJob.findMany({ where }));
 
-        logger.debug(
-            `Cleared ${result.count} download jobs for user ${userId}`
-        );
-        res.json({ success: true, deleted: result.count });
+        logger.debug(`Cleared ${deleted} download jobs for user ${userId}`);
+        res.json({ success: true, deleted });
     } catch (error) {
         logger.error("Clear downloads error:", error);
         res.status(500).json({ error: "Failed to clear downloads" });
@@ -441,15 +424,9 @@ router.delete("/:id", async (req, res) => {
         const userId = req.user!.id;
 
         const jobs = await prisma.downloadJob.findMany({ where: { id, userId } });
-        await stopJobs(jobs);
-        const result = await prisma.downloadJob.deleteMany({
-            where: {
-                id,
-                userId,
-            },
-        });
+        const deleted = await simpleDownloadManager.removeJobs(jobs);
 
-        res.json({ success: true, deleted: result.count > 0 });
+        res.json({ success: true, deleted: deleted > 0 });
     } catch (error) {
         safeError(res, "Delete download job", error);
     }

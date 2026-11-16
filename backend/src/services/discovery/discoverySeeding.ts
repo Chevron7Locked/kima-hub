@@ -9,6 +9,7 @@ import { LIBRARY_LOCATION } from '../libraryFilters';
 import { hasRealArtistId, sameArtist } from './discoverEvidence';
 import { playCounts } from '../stats/listens';
 import { ownedIndexVersion } from './ownedIndexVersion';
+import { ACTIVE_STATUSES } from '../downloads/jobStatuses';
 
 export interface SeedArtist {
     name: string;
@@ -231,7 +232,7 @@ export class DiscoverySeeding {
         const pendingDownload = await prisma.downloadJob.findFirst({
             where: {
                 targetMbid: albumMbid,
-                status: { in: ['pending', 'processing'] },
+                status: { in: ACTIVE_STATUSES },
             },
         });
         if (pendingDownload) return true;

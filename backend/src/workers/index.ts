@@ -1,6 +1,7 @@
 import { Worker } from "bullmq";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
+import * as downloadJobs from "../services/downloads/jobs";
 import {
     scanQueue,
     discoverQueue,
@@ -216,7 +217,7 @@ async function runReconciliationCycle() {
     reconciliationRunning = true;
     try {
         const activeJobs = await prisma.downloadJob.count({
-            where: { status: { in: ["pending", "processing"] } },
+            where: { status: { in: downloadJobs.ACTIVE_STATUSES } },
         });
         if (activeJobs === 0) return;
 

@@ -540,6 +540,109 @@ describe("what the module says about a job", () => {
     it("lists the statuses a job can have", () => {
         expect([...downloadJobs.JOB_STATUSES]).toEqual(["pending", "processing", "completed", "failed", "exhausted"]);
     });
+
+    it("groups them as active, failed and settled, with every status in one of active or settled", () => {
+        expect(downloadJobs.ACTIVE_STATUSES).toEqual(["pending", "processing"]);
+        expect(downloadJobs.FAILED_STATUSES).toEqual(["failed", "exhausted"]);
+        expect(downloadJobs.SETTLED_STATUSES).toEqual(["completed", "failed", "exhausted"]);
+        expect([...downloadJobs.ACTIVE_STATUSES, ...downloadJobs.SETTLED_STATUSES].sort()).toEqual([...downloadJobs.JOB_STATUSES].sort());
+    });
+});
+
+describe("releaseDownload", () => {
+    it("moves a running job off the download it holds, onto the next, and records the old one once", async () => {
+        await job("dl_release_ok", { lidarrRef: "old", metadata: { keep: "me", previousDownloadIds: ["older"] } });
+
+        expect(await downloadJobs.releaseDownload("dl_release_ok", "old", "new")).toBe(true);
+        expect(await downloadJobs.releaseDownload("dl_release_ok", "old", "new")).toBe(false);
+
+        expect((await row("dl_release_ok")).lidarrRef).toBe("new");
+        expect(await meta("dl_release_ok")).toMatchObject({ keep: "me", previousDownloadIds: ["older", "old"] });
+    });
+
+    it("lets a job go when no next download is given, and leaves one that holds another download alone", async () => {
+        await job("dl_release_none", { lidarrRef: "old", metadata: {} });
+        await job("dl_release_other", { lidarrRef: "other", metadata: {} });
+
+        expect(await downloadJobs.releaseDownload("dl_release_none", "old")).toBe(true);
+        expect(await downloadJobs.releaseDownload("dl_release_other", "old")).toBe(false);
+
+        expect((await row("dl_release_none")).lidarrRef).toBeNull();
+        expect((await row("dl_release_other")).lidarrRef).toBe("other");
+    });
+});
+
+describe("noteArtist", () => {
+    it("records the artist on a job that has none and keeps one it has", async () => {
+        await job("dl_artist_new", { artistMbid: null });
+        await job("dl_artist_old", { artistMbid: "first" });
+
+        await downloadJobs.noteArtist("dl_artist_new", "mbid-a");
+        await downloadJobs.noteArtist("dl_artist_old", "mbid-b");
+
+        expect((await row("dl_artist_new")).artistMbid).toBe("mbid-a");
+        expect((await row("dl_artist_old")).artistMbid).toBe("first");
+    });
+});
+
+describe("countFailedRelease", () => {
+    const counted = { downloadId: "dl-1", reason: "no tracks in the download" };
+
+    it("counts a failed release against a running job, merging what a webhook wrote meanwhile", async () => {
+        await job("dl_count_ok", { lidarrRef: "dl-1", attempts: 1, metadata: { searchCommandId: 4, parked: "tracks missing", keep: "me", previousDownloadIds: ["older"] } });
+
+        const result = await downloadJobs.countFailedRelease({ id: "dl_count_ok", exhausted: false }, counted);
+
+        expect(result).toMatchObject({ attempts: 2 });
+        expect(await row("dl_count_ok")).toMatchObject({ status: "processing", lidarrRef: null, attempts: 2 });
+        const m = await meta("dl_count_ok");
+        expect(m).toMatchObject({ keep: "me", searchCommandId: 4, lastError: counted.reason, previousDownloadIds: ["older", "dl-1"], statusText: "Lidarr #2" });
+        expect(m.parked).toBeUndefined();
+        expect(typeof m.startedAt).toBe("string");
+        expect(result?.metadata).toMatchObject({ statusText: "Lidarr #2" });
+    });
+
+    it("keeps the attempt count and the start time of a job that has used its releases", async () => {
+        await job("dl_count_last", { lidarrRef: "dl-1", attempts: 3, metadata: { startedAt: "2026-11-01T00:00:00.000Z" } });
+
+        const result = await downloadJobs.countFailedRelease({ id: "dl_count_last", exhausted: true }, counted);
+
+        expect(result).toMatchObject({ attempts: 3 });
+        expect(await row("dl_count_last")).toMatchObject({ attempts: 3, lidarrRef: null });
+        expect(await meta("dl_count_last")).toMatchObject({ startedAt: "2026-11-01T00:00:00.000Z", statusText: "Lidarr #3", lastError: counted.reason });
+    });
+
+    it("counts a release once, however many times Lidarr reports it", async () => {
+        await job("dl_count_twice", { lidarrRef: "dl-1", attempts: 1, metadata: {} });
+
+        expect(await downloadJobs.countFailedRelease({ id: "dl_count_twice", exhausted: false }, counted)).not.toBeNull();
+        expect(await downloadJobs.countFailedRelease({ id: "dl_count_twice", exhausted: false }, counted)).toBeNull();
+
+        expect(await row("dl_count_twice")).toMatchObject({ attempts: 2 });
+        expect((await meta("dl_count_twice")).previousDownloadIds).toEqual(["dl-1"]);
+    });
+
+    it("leaves a job that is not running alone", async () => {
+        await job("dl_count_settled", { status: "failed", attempts: 2, metadata: { keep: "me" } });
+
+        expect(await downloadJobs.countFailedRelease({ id: "dl_count_settled", exhausted: false }, counted)).toBeNull();
+
+        expect(await row("dl_count_settled")).toMatchObject({ status: "failed", attempts: 2 });
+        expect(await meta("dl_count_settled")).toEqual({ keep: "me" });
+    });
+
+    it("writes inside the caller's transaction", async () => {
+        await job("dl_count_tx", { lidarrRef: "dl-1", attempts: 1, metadata: {} });
+
+        await expect(
+            prisma.$transaction(async (tx) => {
+                await downloadJobs.countFailedRelease({ id: "dl_count_tx", exhausted: false }, counted, tx);
+                throw new Error("roll back");
+            })
+        ).rejects.toThrow("roll back");
+
+        expect(await row("dl_count_tx")).toMatchObject({ attempts: 1, lidarrRef: "dl-1" });
+    });
 });
 
 describe("telling the user", () => {

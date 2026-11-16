@@ -9,6 +9,7 @@ import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { config } from "../../config";
 import { lidarrService } from "../lidarr";
+import * as downloadJobs from "../downloads/jobs";
 import { artistNamed, isMbid } from "../artistIdentity";
 import { updateArtistCounts } from "../artistCountsService";
 import { markLibraryChangedQuietly } from "../libraryChanged";
@@ -270,7 +271,7 @@ async function isKnownSoulseekAlbum(ref: AlbumRef, rgMbids: string[]): Promise<b
  */
 async function forgetDiscoverDownloads(ref: AlbumRef, rgMbids: string[]): Promise<void> {
     const jobs = await prisma.downloadJob.findMany({
-        where: { discoveryBatchId: { not: null }, status: { notIn: ["pending", "processing"] } },
+        where: { discoveryBatchId: { not: null }, status: { notIn: downloadJobs.ACTIVE_STATUSES } },
         select: { id: true, targetMbid: true, subject: true, metadata: true, artistMbid: true },
     });
     // A job that names a release group is this album's only by that id: another album of the same name keeps its own.

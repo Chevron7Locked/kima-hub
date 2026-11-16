@@ -196,7 +196,7 @@ router.get(
             const downloads = await prisma.downloadJob.findMany({
                 where: {
                     userId: req.user!.id,
-                    status: { in: ["completed", "failed", "exhausted"] },
+                    status: { in: downloadJobs.SETTLED_STATUSES },
                     cleared: false,
                 },
                 orderBy: { updatedAt: "desc" },
@@ -231,7 +231,7 @@ router.get(
             const downloads = await prisma.downloadJob.findMany({
                 where: {
                     userId: req.user!.id,
-                    status: { in: ["pending", "processing"] },
+                    status: { in: downloadJobs.ACTIVE_STATUSES },
                 },
                 orderBy: { createdAt: "desc" },
             });
@@ -293,7 +293,7 @@ router.post(
                 where: {
                     id: req.params.id,
                     userId: req.user!.id,
-                    status: { in: ["failed", "exhausted"] },
+                    status: { in: downloadJobs.FAILED_STATUSES },
                 },
             });
 

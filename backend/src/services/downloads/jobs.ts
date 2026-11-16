@@ -13,7 +13,9 @@
  * count is kept through a retry: start sets it to 1 only for a job that has none. Create opens a job
  * (pending, or processing for a download already under way), in the caller's transaction when it has
  * one. Grab gives the jobs waiting for an album the Lidarr download that took it, hold puts a job back
- * to pending while Lidarr is away, and resume claims a held job for its next start.
+ * to pending while Lidarr is away, and resume claims a held job for its next start. Three writes leave the
+ * status alone and still belong here, because they change what the job holds: `countFailedRelease` and
+ * `releaseDownload` (a job's download and the releases it has used) and `noteArtist`.
  *
  * A move answers once the rows and the user's notice are written. The Discover batch's
  * and the import's completion checks run after it, detached (a batch check can wait
@@ -26,7 +28,7 @@
  * kind, album or song id and Discover batch, a dismissed job included; albums and pending-song retries have one each);
  * `createOnce` opens a job unless that lookup finds one running; `retryOnce` clears a failed job and makes its replacement
  * in one transaction, or answers the job already running, or that another retry was here first; `dismiss` and `dismissAllSettled` take settled jobs off the
- * list and leave running ones.
+ * list and leave running ones; `remove` cancels running ones and deletes the rows once the checks that read them have.
  *
  * Lidarr and slskd are not talked to here: that stays with the download manager.
  * The move returns the jobs it settled, with the metadata as it now is, so a caller
@@ -40,6 +42,7 @@ import { yieldToEventLoop } from "../../utils/async";
 import { eventBus } from "../eventBus";
 import { notificationService } from "../notificationService";
 import { notificationPolicyService } from "../notificationPolicyService";
+import { ACTIVE_STATUSES, FAILED_STATUSES, SETTLED_STATUSES } from "./jobStatuses";
 
 /** What a caller holds of a job it wants to move: only the id is read. */
 export type JobRef = { id: string };
@@ -64,13 +67,7 @@ export type StartInput = {
     metadata?: Record<string, unknown>;
 };
 
-/** Every status a download job can have. */
-export const JOB_STATUSES: readonly string[] = ["pending", "processing", "completed", "failed", "exhausted"];
-
-const ACTIVE = ["pending", "processing"];
-const FAILED = ["failed", "exhausted"];
-/** A settled job has left pending and processing: completed or failed. */
-const SETTLED = ["completed", ...FAILED];
+export { JOB_STATUSES, ACTIVE_STATUSES, FAILED_STATUSES, SETTLED_STATUSES } from "./jobStatuses";
 
 /** Whether a settled job ended because the user stopped it, not because the download failed. */
 export function isCancelled(job: { metadata: Prisma.JsonValue }): boolean {
@@ -120,7 +117,7 @@ export function findActive(key: ActiveKey, db: JobDb = prisma) {
             type: key.type,
             targetMbid: key.targetMbid,
             discoveryBatchId: key.discoveryBatchId ?? null,
-            status: { in: ACTIVE },
+            status: { in: ACTIVE_STATUSES },
         },
         orderBy: { createdAt: "asc" },
     });
@@ -160,11 +157,11 @@ export type DismissResult = "dismissed" | "running" | "missing";
  * flag on the list.
  */
 export async function dismiss(userId: string, id: string): Promise<DismissResult> {
-    const settled = { where: { id, userId, status: { in: SETTLED } }, data: { cleared: true } };
+    const settled = { where: { id, userId, status: { in: SETTLED_STATUSES } }, data: { cleared: true } };
     if ((await prisma.downloadJob.updateMany(settled)).count > 0) return "dismissed";
     const stays = await prisma.downloadJob.findFirst({ where: { id, userId }, select: { status: true } });
     if (!stays) return "missing";
-    if (ACTIVE.includes(stays.status)) return "running";
+    if (ACTIVE_STATUSES.includes(stays.status)) return "running";
     // It settled between the two reads.
     await prisma.downloadJob.updateMany(settled);
     return "dismissed";
@@ -173,7 +170,7 @@ export async function dismiss(userId: string, id: string): Promise<DismissResult
 /** Takes every settled job off the person's list and leaves the running ones. Returns how many it took. */
 export async function dismissAllSettled(userId: string): Promise<number> {
     const { count } = await prisma.downloadJob.updateMany({
-        where: { userId, status: { in: SETTLED }, cleared: false },
+        where: { userId, status: { in: SETTLED_STATUSES }, cleared: false },
         data: { cleared: true },
     });
     return count;
@@ -283,7 +280,7 @@ export async function start(id: string, started: StartInput):Promise<boolean> {
                 patch,
                 Prisma.sql` || jsonb_build_object('downloadType', coalesce(nullif(metadata->>'downloadType', ''), 'library'))`
             )}
-        WHERE id = ${id} AND status = ANY(${ACTIVE}::text[])
+        WHERE id = ${id} AND status = ANY(${ACTIVE_STATUSES}::text[])
     `;
     return count > 0;
 }
@@ -314,7 +311,7 @@ export function park(jobs: JobRef[], reason: string): Promise<SettledJob[]> {
  * metadata. A job already settled is left alone. Nobody is told: nothing has happened to the download.
  */
 export async function hold(jobs: JobRef[], patch: Record<string, unknown> = {}): Promise<SettledJob[]> {
-    return settle(jobs, ACTIVE, Prisma.sql`status = 'pending'`, {
+    return settle(jobs, ACTIVE_STATUSES, Prisma.sql`status = 'pending'`, {
         statusText: "Waiting for Lidarr",
         ...patch,
         waitingForLidarr: true,
@@ -347,7 +344,7 @@ export async function grab(
     const { downloadId, lidarrAlbumId, albumMbid, bundle } = grabbed;
     return settle(
         jobs,
-        ACTIVE,
+        ACTIVE_STATUSES,
         Prisma.sql`status = 'processing',
             "lidarrRef" = ${downloadId}::text,
             "lidarrAlbumId" = coalesce(${lidarrAlbumId || null}::int, "lidarrAlbumId"),
@@ -366,6 +363,67 @@ export async function grab(
 }
 
 /**
+ * Counts a failed release against a running job: it lets go of the download (`downloadId`, which it keeps on record
+ * among its previous ones), uses one of its attempts unless `exhausted` (a job at its limit keeps its count and its
+ * start time), and says why in its status text. A report of a release the job already counted, or of a job that is no
+ * longer running, changes nothing and answers null. The fields merge into the metadata as the row holds it, so a
+ * webhook that wrote in between keeps what it wrote. Pass the transaction's client to count inside one. Answers the
+ * attempts and metadata as the row now has them.
+ */
+export async function countFailedRelease(
+    job: { id: string; exhausted: boolean },
+    release: { downloadId: string; reason: string },
+    db: Pick<Prisma.TransactionClient, "$queryRaw"> = prisma
+): Promise<{ attempts: number; metadata: Prisma.JsonValue } | null> {
+    const { downloadId, reason } = release;
+    const attempts = job.exhausted ? Prisma.sql`attempts` : Prisma.sql`attempts + 1`;
+    const patch = { parked: null, lastError: reason, ...(job.exhausted ? {} : { startedAt: new Date().toISOString() }) };
+    const rows = await db.$queryRaw<{ attempts: number; metadata: Prisma.JsonValue }[]>`
+        UPDATE "DownloadJob"
+        SET "lidarrRef" = NULL,
+            attempts = ${attempts},
+            metadata = ${mergedMetadata(
+                patch,
+                Prisma.sql` || jsonb_build_object(
+                    'previousDownloadIds', coalesce(metadata->'previousDownloadIds', '[]'::jsonb) || to_jsonb(${downloadId}::text),
+                    'statusText', 'Lidarr #' || (${attempts})
+                )`
+            )}
+        WHERE id = ${job.id}
+          AND status = 'processing'
+          AND NOT (coalesce(metadata->'previousDownloadIds', '[]'::jsonb) ? ${downloadId})
+        RETURNING attempts, metadata
+    `;
+    return rows[0] ?? null;
+}
+
+/**
+ * Moves a running job off the download it holds (`downloadId`) onto `next` (none, when it is let go), recording the
+ * download among its previous ones. Only while the job still holds it, so a job another path already moved is left
+ * alone. Returns whether this call moved it.
+ */
+export async function releaseDownload(id: string, downloadId: string, next: string | null = null): Promise<boolean> {
+    const released = await prisma.$executeRaw`
+        UPDATE "DownloadJob"
+        SET "lidarrRef" = ${next}::text,
+            metadata = jsonb_set(
+                coalesce(metadata, '{}'::jsonb),
+                '{previousDownloadIds}',
+                CASE WHEN coalesce(metadata->'previousDownloadIds', '[]'::jsonb) ? ${downloadId}
+                     THEN metadata->'previousDownloadIds'
+                     ELSE coalesce(metadata->'previousDownloadIds', '[]'::jsonb) || to_jsonb(${downloadId}::text) END
+            )
+        WHERE id = ${id} AND status = 'processing' AND "lidarrRef" = ${downloadId}
+    `;
+    return released > 0;
+}
+
+/** Records the artist a job's album belongs to, unless the job already has one. */
+export async function noteArtist(id: string, artistMbid: string): Promise<void> {
+    await prisma.downloadJob.updateMany({ where: { id, artistMbid: null }, data: { artistMbid } });
+}
+
+/**
  * The jobs complete. A job another path already settled is left alone, so nobody is
  * told twice. `extra` joins the jobs' metadata.
  */
@@ -374,7 +432,7 @@ export function complete(jobs: JobRef[], extra: Record<string, unknown> = {}): P
         const completedAt = new Date();
         const settled = await settle(
             jobs,
-            ACTIVE,
+            ACTIVE_STATUSES,
             Prisma.sql`status = 'completed', error = NULL, "completedAt" = ${completedAt}`,
             { ...extra, parked: null, completedAt: completedAt.toISOString() }
         );
@@ -391,7 +449,7 @@ export function fail(jobs: JobRef[], error: string, patch: Record<string, unknow
     return moving(async () => {
         const settled = await settle(
             jobs,
-            ACTIVE,
+            ACTIVE_STATUSES,
             Prisma.sql`status = 'failed', error = ${error}, "completedAt" = now()`,
             { statusText: error, ...patch, failedAt: new Date().toISOString() }
         );
@@ -410,13 +468,59 @@ export function cancel(jobs: JobRef[], reason = "Cancelled by user"): Promise<Se
     return moving(async () => {
         const settled = await settle(
             jobs,
-            ACTIVE,
+            ACTIVE_STATUSES,
             Prisma.sql`status = 'failed', error = ${reason}, "completedAt" = now()`,
             { statusText: "Cancelled", cancelled: true, failedAt: new Date().toISOString() }
         );
         await tell(settled, "cancel", reason);
         return settled;
     });
+}
+
+/**
+ * Removes jobs for good: running ones are cancelled first (`cancel`, which tells their batch or import), then the rows
+ * go off the person's list at once and are deleted. A batch or import check reads its jobs when it starts, so a row
+ * that belongs to one is deleted in that batch's or import's lane, after the checks already queued there have read
+ * it; the caller does not wait for them. Returns how many rows it took off the list. The caller stops the Lidarr side first.
+ */
+export async function remove(jobs: JobRef[]): Promise<number> {
+    const ids = jobs.map((job) => job.id);
+    if (ids.length === 0) return 0;
+    await cancel(jobs);
+    const { count } = await prisma.downloadJob.updateMany({ where: { id: { in: ids } }, data: { cleared: true } });
+    const rows = await prisma.downloadJob.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, discoveryBatchId: true, metadata: true },
+    });
+
+    const deleteAtOnce: string[] = [];
+    const deletionsInLanes: Promise<void>[] = [];
+    for (const row of rows) {
+        const importId = (row.metadata as { spotifyImportJobId?: string } | null)?.spotifyImportJobId;
+        const lanes = [row.discoveryBatchId && `batch:${row.discoveryBatchId}`, importId && `import:${importId}`].filter(
+            (key): key is string => !!key
+        );
+        if (lanes.length === 0) {
+            deleteAtOnce.push(row.id);
+            continue;
+        }
+        const deleteRow = async () => {
+            try {
+                await prisma.downloadJob.deleteMany({ where: { id: row.id } });
+            } catch (error) {
+                logger.error(`Could not delete download job ${row.id} after its checks:`, error);
+            }
+        };
+        // A job in both a batch and an import waits for both lanes: reduceRight nests the first lane outermost.
+        deletionsInLanes.push(lanes.reduceRight<() => Promise<void>>((task, key) => () => inLane(key, task), deleteRow)());
+    }
+    if (deleteAtOnce.length > 0) await prisma.downloadJob.deleteMany({ where: { id: { in: deleteAtOnce } } });
+    if (deletionsInLanes.length > 0) {
+        const run = Promise.all(deletionsInLanes).then(() => undefined);
+        inFlight.add(run);
+        void run.finally(() => inFlight.delete(run));
+    }
+    return count;
 }
 
 /**
@@ -427,7 +531,7 @@ export function cancel(jobs: JobRef[], reason = "Cancelled by user"): Promise<Se
 export async function retry(jobs: JobRef[], patch: Record<string, unknown> = {}): Promise<SettledJob[]> {
     return settle(
         jobs,
-        FAILED,
+        FAILED_STATUSES,
         Prisma.sql`status = 'pending', error = NULL, "completedAt" = NULL`,
         {
             statusText: "Retrying",
@@ -491,9 +595,7 @@ async function moving<T>(move: () => Promise<T>): Promise<T> {
 
 /**
  * Resolves when every move and every batch and import check it started has ended, or after `timeoutMs` when one is
- * given. For tests, for shutdown (before the database closes), and for a route that removes the rows a check reads: a check
- * reads its jobs as it starts, so a short wait lets it see them while one that goes on to wait for Lidarr does not
- * hold the route.
+ * given. For tests and for shutdown (before the database closes).
  */
 export async function whenIdle(timeoutMs?: number): Promise<void> {
     const idle = (async () => {

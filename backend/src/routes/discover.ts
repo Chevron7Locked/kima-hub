@@ -74,7 +74,7 @@ router.get("/batch-status", async (req, res) => {
             (j) => j.status === "completed"
         ).length;
         const failedJobs = activeBatch.jobs.filter(
-            (j) => j.status === "failed" || j.status === "exhausted"
+            (j) => downloadJobs.FAILED_STATUSES.includes(j.status)
         ).length;
         const totalJobs = activeBatch.jobs.length;
         const progress =
@@ -144,7 +144,7 @@ router.delete("/batch", async (req, res) => {
                 },
             });
 
-            const unfinished = batch.jobs.filter((j) => j.status === "pending" || j.status === "processing");
+            const unfinished = batch.jobs.filter((j) => downloadJobs.ACTIVE_STATUSES.includes(j.status));
             try {
                 await simpleDownloadManager.cancelJobs(unfinished);
             } catch (lidarrError) {
@@ -320,7 +320,7 @@ async function unavailableStillMissing(
  * The playable-song rule for a suggestion's songs: a liked suggestion's album is in the library now, any other's is
  * still a Discover album.
  */
-const suggestionSongRule = (status: string) => (status === "LIKED" ? PLAYABLE_SONG : PLAYABLE_DISCOVER_SONG);
+const suggestionSongRule = (liked: boolean) => (liked ? PLAYABLE_SONG : PLAYABLE_DISCOVER_SONG);
 
 type SuggestionRow = Awaited<ReturnType<typeof prisma.discoveryAlbum.findMany>>[number];
 
@@ -385,7 +385,7 @@ async function suggestionSongs(suggestions: SuggestionWithSongs[]) {
 
 /** The playable songs of suggestions that are all liked, or all not, by suggestion id: recorded songs, else the stand-in. */
 async function songsOfGroup(group: SuggestionWithSongs[], liked: boolean) {
-    const rule = suggestionSongRule(liked ? "LIKED" : "ACTIVE");
+    const rule = suggestionSongRule(liked);
     const ids = group.flatMap((s) => s.tracks.map((dt) => dt.trackId).filter((id): id is string => id !== null));
     const recorded = new Map<string, RecordedSong>((await recordedSongs(rule, ids)).map((song) => [song.id, song]));
     const recordedOf = (s: SuggestionWithSongs) =>
@@ -707,7 +707,7 @@ router.post("/retry-unavailable", requireAcquirePermission, async (req, res) => 
         // already working on, from any batch, is left alone.
         const inFlight = new Set(
             (await prisma.downloadJob.findMany({
-                where: { targetMbid: { in: unavailableAlbums.map((a) => a.albumMbid) }, status: { in: ["pending", "processing"] } },
+                where: { targetMbid: { in: unavailableAlbums.map((a) => a.albumMbid) }, status: { in: downloadJobs.ACTIVE_STATUSES } },
                 select: { targetMbid: true },
             })).map((j) => j.targetMbid)
         );

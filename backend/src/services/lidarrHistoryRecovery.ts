@@ -5,6 +5,7 @@
  */
 
 import { prisma } from "../utils/db";
+import * as downloadJobs from "./downloads/jobs";
 import { getHistorySince, getImportedFiles } from "./lidarr";
 import { webhookEventStore } from "./webhookEventStore";
 import { processStoredEvent } from "./webhookHandlers";
@@ -55,7 +56,7 @@ export async function recoverMissedEvents(lidarrUrl: string, apiKey: string): Pr
         select: { createdAt: true },
     });
     const oldestActive = await prisma.downloadJob.findFirst({
-        where: { status: { in: ["pending", "processing"] } },
+        where: { status: { in: downloadJobs.ACTIVE_STATUSES } },
         orderBy: { createdAt: "asc" },
         select: { createdAt: true },
     });

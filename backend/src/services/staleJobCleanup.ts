@@ -85,7 +85,7 @@ class StaleJobCleanupService {
         const batchJobs = await prisma.downloadJob.findMany({
             where: {
                 discoveryBatchId: { in: ids },
-                status: { in: ["pending", "processing"] },
+                status: { in: downloadJobs.ACTIVE_STATUSES },
             },
             select: { id: true },
         });
@@ -100,7 +100,7 @@ class StaleJobCleanupService {
         // Find stale jobs (not already handled by batch cleanup)
         const staleJobs = await prisma.downloadJob.findMany({
             where: {
-                status: { in: ["pending", "processing"] },
+                status: { in: downloadJobs.ACTIVE_STATUSES },
                 createdAt: { lt: cutoff },
             },
             select: { id: true },

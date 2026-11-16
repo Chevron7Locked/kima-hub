@@ -130,6 +130,29 @@ describe("DELETE /downloads/clear-all", () => {
         await downloadJobs.whenIdle();
     }, 15_000);
 
+    it("keeps the rows until a check queued behind a slow one has read them, however long the slow one takes", async () => {
+        await job("dld_first", "processing", { discoveryBatchId: batchId });
+        await job("dld_second", "processing", { discoveryBatchId: batchId });
+        let release!: () => void;
+        const seen: string[] = [];
+        mockCheckBatchCompletion.mockImplementationOnce(() => new Promise<void>((resolve) => (release = resolve)));
+        mockCheckBatchCompletion.mockImplementation(async () => {
+            for (const row of await prisma.downloadJob.findMany({ where: { userId: USER } })) seen.push(row.id);
+        });
+        // A first settle starts the batch's check, which is still running when the user clears everything.
+        await downloadJobs.fail([{ id: "dld_first" }], "Import failed");
+
+        const res = await request(app).delete("/downloads/clear-all");
+
+        expect(res.body).toEqual({ success: true, deleted: 2 });
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(2);
+        expect(await prisma.downloadJob.count({ where: { userId: USER, cleared: true } })).toBe(2);
+        release();
+        await downloadJobs.whenIdle();
+        expect(seen.sort()).toEqual(["dld_first", "dld_second"]);
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
+    });
+
     it("refuses a status that is not one a job can have, and removes nothing", async () => {
         await job("dld_keep", "completed");
 

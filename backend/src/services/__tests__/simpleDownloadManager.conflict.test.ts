@@ -4,8 +4,8 @@
  * the event's transaction waits for it, and the holder's commit makes Postgres refuse the waiter.
  */
 
-import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
+import { isSerializationFailure } from "../../utils/dbConflict";
 import { useLidarrCancelScenario } from "../../__tests__/helpers/lidarrCancelScenario";
 import { simpleDownloadManager } from "../simpleDownloadManager";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -17,8 +17,8 @@ jest.setTimeout(60_000);
 const USER = "sdm_conflict_user";
 const JOB = "sdm_conflict_job";
 const TX = { timeout: 30_000, maxWait: 30_000 };
-/** Prisma writes a model update as `UPDATE "public"."DownloadJob" SET ...`; the holders' own statements never match. */
-const EVENT_WRITE = `."DownloadJob" SET`;
+/** The statement the jobs module counts a failed release with; the holders' own statements never match. */
+const EVENT_WRITE = `SET "lidarrRef" = NULL`;
 
 beforeAll(async () => {
     await prisma.user.deleteMany({ where: { id: USER } });
@@ -134,8 +134,8 @@ describe("onImportFailed meeting another transaction's write", () => {
         const error = await outcome;
 
         expect(runs()).toBe(3);
-        expect(error).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
-        expect((error as { code?: string }).code).toBe("P2034");
+        expect(error).toBeInstanceOf(Error);
+        expect(isSerializationFailure(error)).toBe(true);
         expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: JOB } })).attempts).toBe(1);
     });
 });

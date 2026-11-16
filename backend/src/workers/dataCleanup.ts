@@ -4,6 +4,7 @@
  */
 
 import { logger } from "../utils/logger";
+import * as downloadJobs from "../services/downloads/jobs";
 import cron, { ScheduledTask } from "node-cron";
 import { prisma } from "../utils/db";
 
@@ -21,7 +22,7 @@ async function cleanupDownloadJobs(): Promise<number> {
 
     const result = await prisma.downloadJob.deleteMany({
         where: {
-            status: { in: ["completed", "failed"] },
+            status: { in: downloadJobs.SETTLED_STATUSES },
             completedAt: {
                 lt: cutoffDate,
             },

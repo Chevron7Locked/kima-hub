@@ -120,26 +120,6 @@ class SimpleDownloadManager {
     }
 
     /**
-     * Moves a job off a download in one write, recording it among the job's
-     * previous downloads, and only while the job still holds it.
-     */
-    private async releaseDownload(id: string, downloadId: string, next: string | null = null): Promise<boolean> {
-        const released = await prisma.$executeRaw`
-            UPDATE "DownloadJob"
-            SET "lidarrRef" = ${next}::text,
-                metadata = jsonb_set(
-                    coalesce(metadata, '{}'::jsonb),
-                    '{previousDownloadIds}',
-                    CASE WHEN coalesce(metadata->'previousDownloadIds', '[]'::jsonb) ? ${downloadId}
-                         THEN metadata->'previousDownloadIds'
-                         ELSE coalesce(metadata->'previousDownloadIds', '[]'::jsonb) || to_jsonb(${downloadId}::text) END
-                )
-            WHERE id = ${id} AND status = 'processing' AND "lidarrRef" = ${downloadId}
-        `;
-        return released > 0;
-    }
-
-    /**
      * Starts a download and returns the correlation id webhooks are matched by.
      * `isDiscovery` tags the artist in Lidarr so discovery cleanup can find it.
      */
@@ -172,12 +152,7 @@ class SimpleDownloadManager {
                     lidarrMbid = rgOutcome.value.id;
                     logger.debug(`   ${albumMbid} was merged into ${lidarrMbid}`);
                 }
-                if (artistMbid) {
-                    await prisma.downloadJob.updateMany({
-                        where: { id: jobId, artistMbid: null },
-                        data: { artistMbid },
-                    });
-                }
+                if (artistMbid) await downloadJobs.noteArtist(jobId, artistMbid);
             } else if (rgOutcome.kind === "absent") {
                 logger.warn(`   Release group ${albumMbid} is not on MusicBrainz`);
             } else {
@@ -387,7 +362,7 @@ class SimpleDownloadManager {
         logger.debug(`[DOWNLOAD] Grabbed: ${artistName} - ${albumTitle} (${downloadId})`);
 
         const waiting = await prisma.downloadJob.findMany({
-            where: { status: { in: ["pending", "processing"] }, lidarrRef: null },
+            where: { status: { in: downloadJobs.ACTIVE_STATUSES }, lidarrRef: null },
             orderBy: { createdAt: "asc" },
         });
         const jobs = this.jobsForAlbum(waiting, { albumMbid, lidarrAlbumId });
@@ -458,7 +433,7 @@ class SimpleDownloadManager {
                 if (done) return { replayed: [done], matched: [] };
 
                 const active = await tx.downloadJob.findMany({
-                    where: { status: { in: ["pending", "processing"] } },
+                    where: { status: { in: downloadJobs.ACTIVE_STATUSES } },
                     orderBy: { createdAt: "asc" },
                 });
                 const byDownload = active.filter(
@@ -500,7 +475,7 @@ class SimpleDownloadManager {
         if (partial.length > 0) {
             // Lidarr is done with the download; the job now waits for the album's
             // missing tracks, and completes when Lidarr holds it whole.
-            for (const job of partial) await this.releaseDownload(job.id, downloadId);
+            for (const job of partial) await downloadJobs.releaseDownload(job.id, downloadId);
             await this.onImportParked(downloadId, "Tracks missing", partial.map((j) => j.id));
         }
 
@@ -628,20 +603,8 @@ class SimpleDownloadManager {
                         continue;
                     }
                     const exhausted = job.attempts >= (await this.maxAttempts(job.userId));
-                    const attempts = exhausted ? job.attempts : job.attempts + 1;
-                    const { parked: _, ...rest } = metadata;
-                    const updated = {
-                        ...rest,
-                        ...(exhausted ? {} : { startedAt: new Date().toISOString() }),
-                        lastError: reason,
-                        previousDownloadIds: [...(metadata.previousDownloadIds || []), downloadId],
-                        statusText: `Lidarr #${attempts}`,
-                    };
-                    await tx.downloadJob.update({
-                        where: { id: job.id },
-                        data: { lidarrRef: null, attempts, metadata: updated },
-                    });
-                    results.push({ job, metadata: updated, exhausted });
+                    const release = await downloadJobs.countFailedRelease({ id: job.id, exhausted }, { downloadId, reason }, tx);
+                    if (release) results.push({ job, metadata: release.metadata, exhausted });
                 }
                 return results;
             },
@@ -685,11 +648,11 @@ class SimpleDownloadManager {
      * The caller deletes the rows.
      */
     async cancelJobs(jobs: { id: string; status: string; lidarrRef: string | null; lidarrAlbumId: number | null }[]): Promise<void> {
-        const active = jobs.filter((j) => j.status === "pending" || j.status === "processing");
+        const active = jobs.filter((j) => downloadJobs.ACTIVE_STATUSES.includes(j.status));
         const cancelled = active.map((j) => j.id);
         const stillWanted = (where: Prisma.DownloadJobWhereInput) =>
             prisma.downloadJob.count({
-                where: { ...where, status: { in: ["pending", "processing"] }, id: { notIn: cancelled } },
+                where: { ...where, status: { in: downloadJobs.ACTIVE_STATUSES }, id: { notIn: cancelled } },
             });
 
         // Another user's job can share the download or the album; theirs keeps it.
@@ -701,6 +664,19 @@ class SimpleDownloadManager {
         for (const albumId of new Set(active.map((j) => j.lidarrAlbumId).filter((id): id is number => !!id))) {
             if ((await stillWanted({ lidarrAlbumId: albumId })) === 0) await lidarrService.unmonitorAlbum(albumId);
         }
+    }
+
+    /**
+     * The user removes these jobs: Lidarr lets go of the running ones (a Lidarr that cannot be reached does not stop the
+     * removal), then the rows go (`downloadJobs.remove`). Returns how many rows came off the list.
+     */
+    async removeJobs(jobs: { id: string; status: string; lidarrRef: string | null; lidarrAlbumId: number | null }[]): Promise<number> {
+        try {
+            await this.cancelJobs(jobs);
+        } catch (error) {
+            logger.warn("Could not stop the downloads in Lidarr before removing them:", error);
+        }
+        return downloadJobs.remove(jobs);
     }
 
     /** Lidarr was turned off or its settings cleared: downloads held for it fail with that reason. */
@@ -717,7 +693,7 @@ class SimpleDownloadManager {
      */
     async onAlbumDeleted(lidarrAlbumId: number): Promise<string | undefined> {
         const jobs = await prisma.downloadJob.findMany({
-            where: { lidarrAlbumId, status: { in: ["pending", "processing"] } },
+            where: { lidarrAlbumId, status: { in: downloadJobs.ACTIVE_STATUSES } },
             orderBy: { createdAt: "asc" },
         });
         const settled = new Set((await downloadJobs.fail(jobs, "Album removed from Lidarr")).map((j) => j.id));
@@ -749,7 +725,7 @@ class SimpleDownloadManager {
     async checkWaitingJobs(snapshot: ReconciliationSnapshot | null): Promise<number> {
         const now = Date.now();
         const active = await prisma.downloadJob.findMany({
-            where: { status: { in: ["pending", "processing"] } },
+            where: { status: { in: downloadJobs.ACTIVE_STATUSES } },
             orderBy: { createdAt: "asc" },
         });
 
@@ -888,7 +864,7 @@ class SimpleDownloadManager {
             );
             if (replacement) {
                 logger.debug(`   Job ${job.id}: Lidarr replaced its download with ${replacement.downloadId}`);
-                if (await this.releaseDownload(job.id, job.lidarrRef!, replacement.downloadId)) {
+                if (await downloadJobs.releaseDownload(job.id, job.lidarrRef!, replacement.downloadId)) {
                     await downloadJobs.mergeMetadata(job.id, {
                         downloadId: replacement.downloadId,
                         parked: null,

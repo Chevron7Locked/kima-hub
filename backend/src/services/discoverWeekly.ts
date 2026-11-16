@@ -97,7 +97,7 @@ function discoveryAlbumDetails(
 /** Fails a batch's downloads that are still waiting or running, with the reason. */
 async function failBatchDownloads(batchId: string, error: string) {
     const waiting = await prisma.downloadJob.findMany({
-        where: { discoveryBatchId: batchId, status: { in: ["pending", "processing"] } },
+        where: { discoveryBatchId: batchId, status: { in: downloadJobs.ACTIVE_STATUSES } },
         select: { id: true },
     });
     return downloadJobs.fail(waiting, error);
@@ -337,7 +337,7 @@ class DiscoverWeeklyService {
                         where: {
                             userId,
                             targetMbid: album.albumMbid,
-                            status: { in: ["pending", "processing"] },
+                            status: { in: downloadJobs.ACTIVE_STATUSES },
                         },
                     });
 
@@ -547,7 +547,7 @@ class DiscoverWeeklyService {
                 (j) => j.status === "completed"
             );
             const pendingJobs = batch.jobs.filter(
-                (j) => j.status === "pending" || j.status === "processing"
+                (j) => downloadJobs.ACTIVE_STATUSES.includes(j.status)
             );
 
             if (batchAge > ABSOLUTE_MAX_TIMEOUT) {
@@ -665,14 +665,14 @@ class DiscoverWeeklyService {
             (j) => j.status === "completed"
         );
         const settledAsFailed = batch.jobs.filter(
-            (j) => j.status === "failed" || j.status === "exhausted"
+            (j) => downloadJobs.FAILED_STATUSES.includes(j.status)
         );
         // A job the user cancelled is not a failed album: it is never recorded as unavailable
         // and does not count toward "All downloads failed".
         const cancelledJobs = settledAsFailed.filter(downloadJobs.isCancelled);
         const failedJobs = settledAsFailed.filter((j) => !downloadJobs.isCancelled(j));
         const pendingJobs = batch.jobs.filter(
-            (j) => j.status === "pending" || j.status === "processing"
+            (j) => downloadJobs.ACTIVE_STATUSES.includes(j.status)
         );
 
         const completed = completedJobs.length;

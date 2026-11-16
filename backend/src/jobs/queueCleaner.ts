@@ -133,7 +133,7 @@ class QueueCleanerService {
         // A job Lidarr is fetching is settled by what Lidarr says about its album.
         const wanted = (
             await prisma.downloadJob.findMany({
-                where: { status: { in: ["pending", "processing"] }, lidarrAlbumId: null },
+                where: { status: { in: downloadJobs.ACTIVE_STATUSES }, lidarrAlbumId: null },
             })
         ).filter((job) => {
             const meta = (job.metadata as any) ?? {};
