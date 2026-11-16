@@ -144,7 +144,7 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
             const realArtist = realArtistByNormalizedName.get(tempArtist.normalizedName);
 
             if (realArtist) {
-                libraryAlbumsMoved += await prisma.album.count({ where: { artistId: tempArtist.id, tracks: { some: PLAYABLE_SONG } } });
+                const listedBefore = await prisma.album.count({ where: { artistId: tempArtist.id, tracks: { some: PLAYABLE_SONG } } });
                 // One transaction per artist: an album the real artist already holds merges into it (its songs and their
                 // history move over), the rest move, and the temp artist goes with its keeps handed on (a keep cannot
                 // outlive its artist). An album a person edited, or Discover's, is not merged: it stays, and so does the
@@ -154,6 +154,8 @@ export async function runDataIntegrityCheck(): Promise<IntegrityReport> {
                     { timeout: 60_000 },
                 );
                 for (const settle of afterCommit) await settle();
+                // Only the albums that left count: one kept under the temp artist is listed as it was.
+                libraryAlbumsMoved += listedBefore - (await prisma.album.count({ where: { artistId: tempArtist.id, tracks: { some: PLAYABLE_SONG } } }));
 
                 if (merged) {
                     report.consolidatedArtists++;

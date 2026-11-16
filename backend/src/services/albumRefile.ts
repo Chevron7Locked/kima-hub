@@ -18,7 +18,7 @@ import { pruneEmptyAlbumsAndArtists } from "./libraryPrune";
 import { deleteAlbums, deleteArtists } from "./library/albumDelete";
 import { artistIsListed, markLibraryChangedQuietly } from "./libraryChanged";
 import { PLAYABLE_SONG } from "../utils/playableSong";
-import { backfillAllArtistCounts } from "./artistCountsService";
+import { backfillAllArtistCounts, updateArtistCounts } from "./artistCountsService";
 import type { StopCheck } from "../utils/stopCheck";
 import { musicBrainzService } from "./musicbrainz";
 import { JointCreditFiler, type JointFiling } from "./jointCredit";
@@ -300,7 +300,7 @@ async function restoreCutName(mbid: string, filesName: string): Promise<string |
                 // Every ownership record of the twin, with an album row or not, goes to the artist that stays. Its albums
                 // are all moved or retired by now, so the delete owes no one a word: the run's end rebuilds Discover's
                 // snapshot and recounts the artists.
-                afterCommit.push((await deleteArtists([twin.id], { within: tx, keepsTo: current.id })).settle);
+                afterCommit.push((await deleteArtists([twin.id], { within: tx, keepsTo: current.id, onlyEmpty: true })).settle);
             }
             await tx.artist.update({
                 where: { id: current.id },
@@ -451,8 +451,8 @@ async function retireIfEmpty(
     const row = await tx.album.findUnique({ where: { id: staleRow.id }, select: ALBUM_FIELDS });
     if (!row || (await tx.track.count({ where: { albumId: row.id } })) > 0) return keeper;
 
-    // Its songs are gone, so it was listed to no one and holds no playlist entry: nothing to tell afterwards, and the run's
-    // end rebuilds Discover's snapshot and recounts the artists.
+    // Its songs are gone, so it was listed to no one and holds no playlist entry: the delete owes little (the owned-album
+    // index), which the caller settles after the commit; the run's end rebuilds Discover's snapshot and recounts the artists.
     // Share links name an album by id with no foreign key: they follow the album to the survivor, before the delete
     // that would remove every link naming the row.
     await tx.shareLink.updateMany({ where: { entityType: "album", entityId: row.id }, data: { entityId: keeper.id } });
@@ -510,8 +510,15 @@ export async function mergeArtistInto(
         }
     }
     // Counted after the moves: a song filed in meanwhile keeps its album, and the artist stays with it.
-    const kept = await tx.album.count({ where: { artistId: fromArtistId } });
-    if (kept > 0) return { merged: false, kept, afterCommit };
-    afterCommit.push((await deleteArtists([fromArtistId], { within: tx, keepsTo: toArtistId })).settle);
-    return { merged: true, kept: 0, afterCommit };
+    // `onlyEmpty` locks the artist row and re-checks, so an album a scan files under it in between is kept, not deleted.
+    const deletion = await deleteArtists([fromArtistId], { within: tx, keepsTo: toArtistId, onlyEmpty: true });
+    afterCommit.push(deletion.settle);
+    if (deletion.artists > 0) return { merged: true, kept: 0, afterCommit };
+    // The artist stays with the albums left under it: both artists' counts changed by what moved.
+    afterCommit.push(async () => {
+        for (const id of [fromArtistId, toArtistId]) {
+            await updateArtistCounts(id).catch((error) => logger.warn(`[Refile] Artist counts not updated after a merge:`, error));
+        }
+    });
+    return { merged: false, kept: await tx.album.count({ where: { artistId: fromArtistId } }), afterCommit };
 }
