@@ -221,8 +221,8 @@ export default function PlaylistDetailPage() {
             await api.retryPendingTrack(playlistId, pendingId);
             showRetryProgress(10000);
         } catch (error) {
-            console.error("Failed to retry download:", error);
-            const { title, message } = retryNotice(error, "Failed to retry download");
+            const { title, message, expected } = retryNotice(error, "Failed to retry download");
+            if (!expected) console.error("Failed to retry download:", error);
             notify.error(title, { message });
         } finally {
             setRetryingTrackId(null);

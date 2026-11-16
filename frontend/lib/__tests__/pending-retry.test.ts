@@ -9,6 +9,7 @@ describe("retryNotice", () => {
         expect(retryNotice(err, "Failed to retry download")).toEqual({
             title: "Track not found on Soulseek",
             message: "Nothing found for this song",
+            expected: true,
         });
     });
 

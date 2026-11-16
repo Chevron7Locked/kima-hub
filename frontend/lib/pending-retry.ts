@@ -4,6 +4,8 @@ const NO_SOURCES_CODE = "NO_SOURCES";
 export interface RetryNotice {
     title: string;
     message?: string;
+    /** True when Soulseek simply has nothing for the song: an answer, not a fault, so not worth an error in the console. */
+    expected?: boolean;
 }
 
 /**
@@ -14,7 +16,7 @@ export interface RetryNotice {
 export function retryNotice(error: unknown, generic: string): RetryNotice {
     const { status, data } = (error ?? {}) as { status?: number; data?: { code?: unknown; message?: unknown; error?: unknown } };
     if (status === 404 && data?.code === NO_SOURCES_CODE) {
-        return { title: "Track not found on Soulseek", message: typeof data.message === "string" ? data.message : undefined };
+        return { title: "Track not found on Soulseek", message: typeof data.message === "string" ? data.message : undefined, expected: true };
     }
     if (status === 502) {
         return { title: "Soulseek is not answering", message: typeof data?.error === "string" ? data.error : undefined };
