@@ -149,81 +149,73 @@ describe("reassignAlbumRgMbid against Postgres", () => {
     });
 });
 
-/**
- * A client whose ownership reads see the rows, then a concurrent deleter removes `vanishing` before the write: after the
- * first read that finds a row, or after the `seen`th.
- */
-function ownershipVanishingAfterRead(vanishing: Array<{ artistId: string; rgMbid: string }>, seen = 1) {
-    let gone = false;
-    let found = 0;
-    const vanish = async () => {
-        if (gone || ++found < seen) return;
-        gone = true;
-        for (const key of vanishing) await prisma.ownedAlbum.deleteMany({ where: key });
-    };
-    return {
-        ownedAlbum: new Proxy(prisma.ownedAlbum, {
-            get(target, prop, receiver) {
-                const value = Reflect.get(target, prop, receiver);
-                if (prop !== "findUnique" && prop !== "findMany") return typeof value === "function" ? value.bind(target) : value;
-                return async (...args: unknown[]) => {
-                    const result = await (value as (...a: unknown[]) => Promise<unknown>).apply(target, args);
-                    // The first read that sees a row is the one the write follows; a second read must see it gone.
-                    if (prop === "findUnique" && result === null) return result;
-                    await vanish();
-                    return result;
-                };
-            },
-        }),
-    } as unknown as Parameters<typeof moveOwnerArtist>[0];
-}
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe("moving ownership when a row is deleted between the read and the write", () => {
-    it("moveOwnerArtist leaves nothing to do for a row that vanished, with or without a clash", async () => {
-        await seed({ owned: [[id("art"), "native_scan"], [id("art2"), "enrichment"]] });
-        // art's row moves to art2, which already holds the album, so the clash branch runs; art's row is the one that vanishes.
-        const tx = ownershipVanishingAfterRead([{ artistId: id("art"), rgMbid: OLD }]);
+describe("moving ownership is one idempotent write", () => {
+    it("moveOwnership folds a clash by the more protective source, and a second call changes nothing", async () => {
+        await seed({ owned: [[id("art"), "enrichment"], [id("art2"), "native_scan"]] });
+        await prisma.ownedAlbum.create({ data: { artistId: id("art"), rgMbid: NEW, source: "discovery_liked" } });
+        await prisma.ownedAlbum.create({ data: { artistId: id("art2"), rgMbid: NEW, source: "enrichment" } });
+        const expected = [
+            { artistId: id("art"), rgMbid: NEW, source: "discovery_liked" },
+            { artistId: id("art2"), rgMbid: NEW, source: "native_scan" },
+        ];
 
-        await expect(moveOwnerArtist(tx, id("art"), id("art2"), OLD)).resolves.toBeUndefined();
-        expect(await owned()).toEqual([{ artistId: id("art2"), rgMbid: OLD, source: "enrichment" }]);
+        await prisma.$transaction((tx) => moveOwnership(tx, OLD, NEW));
+        expect(await owned()).toEqual(expected);
+
+        await prisma.$transaction((tx) => moveOwnership(tx, OLD, NEW));
+        expect(await owned()).toEqual(expected);
     });
 
-    it("moveOwnerArtist leaves nothing to do for a row that vanished with no clash", async () => {
+    it("moveOwnerArtist hands a row to another artist, and a second call changes nothing", async () => {
         await seed({ owned: [[id("art"), "native_scan"]] });
-        const tx = ownershipVanishingAfterRead([{ artistId: id("art"), rgMbid: OLD }]);
 
-        await expect(moveOwnerArtist(tx, id("art"), id("art2"), OLD)).resolves.toBeUndefined();
-        expect(await owned()).toEqual([]);
-    });
-
-    it("moveOwnership leaves nothing to do for a row that vanished", async () => {
-        await seed({ owned: [[id("art"), "native_scan"]] });
-        await prisma.ownedAlbum.create({ data: { artistId: id("art"), rgMbid: NEW, source: "enrichment" } });
-        const tx = ownershipVanishingAfterRead([{ artistId: id("art"), rgMbid: OLD }]);
-
-        await expect(moveOwnership(tx as never, OLD, NEW)).resolves.toBeUndefined();
-        expect(await owned()).toEqual([{ artistId: id("art"), rgMbid: NEW, source: "enrichment" }]);
-    });
-
-    it("moveOwnerArtist keeps the album owned when the row it folds into vanishes", async () => {
-        await seed({ owned: [[id("art"), "native_scan"], [id("art2"), "enrichment"]] });
-        // The first read finds art's row, the second finds art2's; art2's then vanishes before the write.
-        const tx = ownershipVanishingAfterRead([{ artistId: id("art2"), rgMbid: OLD }], 2);
-
-        await moveOwnerArtist(tx, id("art"), id("art2"), OLD);
+        await prisma.$transaction((tx) => moveOwnerArtist(tx, id("art"), id("art2"), OLD));
+        await prisma.$transaction((tx) => moveOwnerArtist(tx, id("art"), id("art2"), OLD));
 
         expect(await owned()).toEqual([{ artistId: id("art2"), rgMbid: OLD, source: "native_scan" }]);
     });
 
-    it("moveOwnership keeps the album owned when the row it folds into vanishes", async () => {
-        await seed({ owned: [[id("art"), "enrichment"]] });
-        await prisma.ownedAlbum.create({ data: { artistId: id("art"), rgMbid: NEW, source: "native_scan" } });
-        // findMany sees the old row, findUnique the held one; the held one vanishes before the write.
-        const tx = ownershipVanishingAfterRead([{ artistId: id("art"), rgMbid: NEW }], 2);
+    it("moveOwnerArtist keeps the more protective source when the other artist already holds the album", async () => {
+        await seed({ owned: [[id("art"), "native_scan"], [id("art2"), "enrichment"]] });
 
-        await moveOwnership(tx as never, OLD, NEW);
+        await prisma.$transaction((tx) => moveOwnerArtist(tx, id("art"), id("art2"), OLD));
 
-        expect(await owned()).toEqual([{ artistId: id("art"), rgMbid: NEW, source: "enrichment" }]);
+        expect(await owned()).toEqual([{ artistId: id("art2"), rgMbid: OLD, source: "native_scan" }]);
+    });
+
+    it("moveOwnership neither fails nor loses ownership when the new row is being written by another transaction", async () => {
+        await seed({ owned: [[id("art"), "native_scan"]] });
+        let release!: () => void;
+        let written!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        const hasWritten = new Promise<void>((resolve) => (written = resolve));
+        const writer = prisma.$transaction(async (tx) => {
+            await tx.ownedAlbum.create({ data: { artistId: id("art"), rgMbid: NEW, source: "enrichment" } });
+            written();
+            await gate;
+        });
+        await hasWritten;
+
+        const mover = prisma.$transaction((tx) => moveOwnership(tx, OLD, NEW));
+        await pause(200);
+        release();
+        await writer;
+        await expect(mover).resolves.toBeUndefined();
+
+        expect(await owned()).toEqual([{ artistId: id("art"), rgMbid: NEW, source: "native_scan" }]);
+    });
+
+    it("two moves of the same row at once leave it owned once, whichever runs first", async () => {
+        await seed({ owned: [[id("art"), "native_scan"]] });
+
+        await Promise.all([
+            prisma.$transaction((tx) => moveOwnership(tx, OLD, NEW)),
+            prisma.$transaction((tx) => moveOwnership(tx, OLD, NEW)),
+        ]);
+
+        expect(await owned()).toEqual([{ artistId: id("art"), rgMbid: NEW, source: "native_scan" }]);
     });
 });
 

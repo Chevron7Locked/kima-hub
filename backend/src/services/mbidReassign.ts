@@ -3,7 +3,7 @@
  * violations become DuplicateMbidError (409); an unchanged value or a missing row is a no-op.
  */
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { forgetOwnedIndex } from "./discovery/ownedIndexVersion";
@@ -41,7 +41,7 @@ export const isKimaChosen = (source: string | null | undefined): boolean =>
 const sourceStrength = (source: string | null | undefined) =>
     source === "editor" ? 3 : source == null || source === "tag" ? 2 : 1;
 
-export type MoveClient = Pick<Prisma.TransactionClient, "album" | "ownedAlbum" | "discoveryAlbum" | "discoverExclusion">;
+export type MoveClient = Pick<Prisma.TransactionClient, "album" | "ownedAlbum" | "discoveryAlbum" | "discoverExclusion" | "$executeRaw">;
 
 /** Which ownership source protects an artist best (dataIntegrity, discover's fix-tagging). */
 const OWNERSHIP_RANK = ["native_scan", "discovery_liked"];
@@ -110,57 +110,47 @@ export async function moveAlbumRgMbid(
     return true;
 }
 
+/** `ownershipRank` as SQL over an `OwnedAlbum` source column, so a clash is settled inside the write that meets it. */
+const ownershipRankSql = (source: Prisma.Sql) =>
+    Prisma.sql`(CASE ${source} ${Prisma.join(OWNERSHIP_RANK.map((name, rank) => Prisma.sql`WHEN ${name} THEN ${rank}::int`), " ")} ELSE ${OWNERSHIP_RANK.length}::int END)`;
+
 /**
- * Folds an ownership row into the one that already holds its place: `row` is removed, and the more protective source
- * (`ownershipRank`) stands. The delete comes first and says whether this writer took the row: one a concurrent deleter
- * removed has nothing to hand on. If the holder was removed meanwhile, `row`'s source is written in its place, so the
- * album is never left with no ownership.
+ * One write for an ownership move: the rows are deleted and put back under their new key in a single statement. The
+ * delete says what this writer took, so a row a concurrent writer removed or already moved hands nothing on and a second
+ * call finds nothing. A row at the new key (held before, or written by another transaction meanwhile) is not an error:
+ * the more protective source (`ownershipRank`) stands. `taken` is the CTE that names the rows deleted.
  */
-async function handOwnership(
-    tx: Pick<MoveClient, "ownedAlbum">,
-    row: { artistId: string; rgMbid: string; source: string },
-    toArtistId: string,
-    toRgMbid: string,
-    heldSource: string,
-): Promise<void> {
-    const taken = await tx.ownedAlbum.deleteMany({ where: { artistId: row.artistId, rgMbid: row.rgMbid } });
-    if (taken.count === 0) return;
-    if (ownershipRank(row.source) < ownershipRank(heldSource)) {
-        const better = await tx.ownedAlbum.updateMany({ where: { artistId: toArtistId, rgMbid: toRgMbid }, data: { source: row.source } });
-        if (better.count > 0) return;
-    }
-    await tx.ownedAlbum.createMany({ data: [{ artistId: toArtistId, rgMbid: toRgMbid, source: row.source }], skipDuplicates: true });
+function moveOwnedRows(tx: Pick<MoveClient, "$executeRaw">, taken: Prisma.Sql, artistId: Prisma.Sql, rgMbid: string) {
+    const held = Prisma.raw('"OwnedAlbum".source');
+    const arriving = Prisma.raw("EXCLUDED.source");
+    return tx.$executeRaw`
+        WITH taken AS (${taken})
+        INSERT INTO "OwnedAlbum" ("artistId", "rgMbid", source)
+        SELECT ${artistId}, ${rgMbid}::text, taken.source FROM taken
+        ON CONFLICT ("artistId", "rgMbid") DO UPDATE
+        SET source = CASE WHEN ${ownershipRankSql(arriving)} < ${ownershipRankSql(held)} THEN EXCLUDED.source ELSE "OwnedAlbum".source END`;
 }
 
-/** Every artist's ownership row for the old id moves, keeping its source. */
-export async function moveOwnership(tx: MoveClient, oldRgMbid: string, newRgMbid: string): Promise<void> {
-    const rows = await tx.ownedAlbum.findMany({ where: { rgMbid: oldRgMbid } });
-    for (const row of rows) {
-        const clash = await tx.ownedAlbum.findUnique({
-            where: { artistId_rgMbid: { artistId: row.artistId, rgMbid: newRgMbid } },
-        });
-        if (clash) {
-            await handOwnership(tx, row, row.artistId, newRgMbid, clash.source);
-        } else {
-            await tx.ownedAlbum.updateMany({
-                where: { artistId: row.artistId, rgMbid: oldRgMbid },
-                data: { rgMbid: newRgMbid },
-            });
-        }
-    }
+/** Every artist's ownership row for the old id moves to the new one, keeping its source; on a clash the more protective stays. */
+export async function moveOwnership(tx: Pick<MoveClient, "$executeRaw">, oldRgMbid: string, newRgMbid: string): Promise<void> {
+    if (oldRgMbid === newRgMbid) return;
+    await moveOwnedRows(
+        tx,
+        Prisma.sql`DELETE FROM "OwnedAlbum" WHERE "rgMbid" = ${oldRgMbid} RETURNING "artistId", source`,
+        Prisma.sql`taken."artistId"`,
+        newRgMbid,
+    );
 }
 
 /** One artist's ownership of an album id becomes another's; on a clash the more protective source stays. */
-export async function moveOwnerArtist(tx: Pick<MoveClient, "ownedAlbum">, fromArtistId: string, toArtistId: string, rgMbid: string): Promise<void> {
+export async function moveOwnerArtist(tx: Pick<MoveClient, "$executeRaw">, fromArtistId: string, toArtistId: string, rgMbid: string): Promise<void> {
     if (fromArtistId === toArtistId) return;
-    const row = await tx.ownedAlbum.findUnique({ where: { artistId_rgMbid: { artistId: fromArtistId, rgMbid } } });
-    if (!row) return;
-    const clash = await tx.ownedAlbum.findUnique({ where: { artistId_rgMbid: { artistId: toArtistId, rgMbid } } });
-    if (clash) {
-        await handOwnership(tx, row, toArtistId, rgMbid, clash.source);
-    } else {
-        await tx.ownedAlbum.updateMany({ where: { artistId: fromArtistId, rgMbid }, data: { artistId: toArtistId } });
-    }
+    await moveOwnedRows(
+        tx,
+        Prisma.sql`DELETE FROM "OwnedAlbum" WHERE "artistId" = ${fromArtistId} AND "rgMbid" = ${rgMbid} RETURNING source`,
+        Prisma.sql`${toArtistId}::text`,
+        rgMbid,
+    );
 }
 
 /**
