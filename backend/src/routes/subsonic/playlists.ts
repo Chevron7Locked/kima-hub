@@ -3,7 +3,7 @@ import { rankForPosition } from "../../utils/lexoRank";
 import { allocateAppendRanks, lockPlaylist, replaceItems } from "../../services/playlistService";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { ownSongGenres, shownSongGenres } from "../../utils/genreSql";
+import { shownGenresOfSongs } from "../../utils/genreSql";
 import { mapSong, wrap } from "./mappers";
 import { announcePlaylistChange } from "../../services/playlistEvents";
 import { PLAYABLE_SONG } from "../../utils/playableSong";
@@ -64,10 +64,10 @@ function loadPlaylist(id: string) {
 }
 
 async function playlistReply(playlist: NonNullable<Awaited<ReturnType<typeof loadPlaylist>>>) {
-    const own = await ownSongGenres(playlist.items.map(({ track }) => track.id));
+    const shown = await shownGenresOfSongs(playlist.items.map(({ track }) => ({ id: track.id, album: track.album, artist: track.album.artist })));
     const entries = playlist.items.map(({ track }) => {
         const { album } = track;
-        return mapSong(track, album, album.artist.displayName || album.artist.name, album.artist.id, shownSongGenres(own.get(track.id), album, album.artist));
+        return mapSong(track, album, album.artist.displayName || album.artist.name, album.artist.id, shown.get(track.id));
     });
     return {
         "@_id": playlist.id,

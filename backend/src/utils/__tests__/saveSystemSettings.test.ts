@@ -86,6 +86,105 @@ describe("saveSystemSettings", () => {
         expect((await getSystemSettings())?.transcodeCacheMaxGb).toBe(12);
     });
 
+    // The save's commit reaches the database before its code carries on to drop the cache; this holds it in between.
+    function holdAfterCommit() {
+        const real = prisma.$transaction.bind(prisma) as (...args: unknown[]) => Promise<unknown>;
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        let committed!: () => void;
+        const commitSeen = new Promise<void>((resolve) => { committed = resolve; });
+        const spy = jest.spyOn(prisma, "$transaction").mockImplementationOnce(((...args: unknown[]) => (async () => {
+            const result = await real(...args);
+            committed();
+            await gate;
+            return result;
+        })()) as never);
+        return { release, commitSeen, restore: () => spy.mockRestore() };
+    }
+
+    it("a read made after the commit, before the save has carried on, sees the save, not a cached copy", async () => {
+        expect((await getSystemSettings())?.transcodeCacheMaxGb).toBe(10); // warms the cache
+        const held = holdAfterCommit();
+        try {
+            const saving = saveSystemSettings({ transcodeCacheMaxGb: 14 });
+            await held.commitSeen;
+
+            expect((await getSystemSettings())?.transcodeCacheMaxGb).toBe(14);
+            held.release();
+            await saving;
+        } finally {
+            held.restore();
+        }
+        expect((await getSystemSettings())?.transcodeCacheMaxGb).toBe(14);
+    });
+
+    it("a save that fails after its commit still drops the cache, and reads are cached again afterwards", async () => {
+        expect((await getSystemSettings())?.transcodeCacheMaxGb).toBe(10); // warms the cache
+        const real = prisma.$transaction.bind(prisma) as (...args: unknown[]) => Promise<unknown>;
+        const spy = jest.spyOn(prisma, "$transaction").mockImplementationOnce((async (...args: unknown[]) => {
+            await real(...args);
+            throw new Error("connection lost at commit");
+        }) as never);
+        try {
+            await expect(saveSystemSettings({ transcodeCacheMaxGb: 16 })).rejects.toThrow("connection lost at commit");
+        } finally {
+            spy.mockRestore();
+        }
+
+        const reads = jest.spyOn(prisma.systemSettings, "findUnique");
+        try {
+            expect((await getSystemSettings())?.transcodeCacheMaxGb).toBe(16);
+            await getSystemSettings();
+            expect(reads).toHaveBeenCalledTimes(1); // the second read is the cache's: no save is left open
+        } finally {
+            reads.mockRestore();
+        }
+    });
+
+    it("a read made after the commit does not join a read that began before it", async () => {
+        const read = prisma.systemSettings.findUnique.bind(prisma.systemSettings);
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        let sawOldRow!: () => void;
+        const oldRowSeen = new Promise<void>((resolve) => { sawOldRow = resolve; });
+        const slow = jest.spyOn(prisma.systemSettings, "findUnique").mockImplementationOnce(((args: never) => (async () => {
+            const row = await read(args);
+            sawOldRow();
+            await gate;
+            return row;
+        })()) as never);
+        const held = holdAfterCommit();
+        try {
+            const stale = getSystemSettings();
+            await oldRowSeen;
+            const saving = saveSystemSettings({ transcodeCacheMaxGb: 16 });
+            await held.commitSeen;
+
+            expect((await getSystemSettings())?.transcodeCacheMaxGb).toBe(16);
+            held.release();
+            release();
+            await saving;
+            expect((await stale)?.transcodeCacheMaxGb).toBe(10);
+        } finally {
+            held.restore();
+            slow.mockRestore();
+        }
+        expect((await getSystemSettings())?.transcodeCacheMaxGb).toBe(16);
+    });
+
+    it("reports a text setting blanked, and one set after being blank, as changes", async () => {
+        expect(await saveSystemSettings({ lidarrUrl: "" })).toEqual(["lidarrUrl"]);
+        expect((await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).lidarrUrl).toBe("");
+        expect(await saveSystemSettings({ lidarrUrl: "http://lidarr.test:8686" })).toEqual(["lidarrUrl"]);
+        expect(await saveSystemSettings({ lidarrUrl: null })).toEqual(["lidarrUrl"]);
+    });
+
+    it("says nothing changed when a text setting that was never set is saved blank", async () => {
+        await prisma.systemSettings.update({ where: { id: "default" }, data: { lidarrUrl: null } });
+        invalidateSystemSettingsCache();
+        expect(await saveSystemSettings({ lidarrUrl: "" })).toEqual([]);
+    });
+
     it("encrypts a credential in the row and reads it back plain", async () => {
         await saveSystemSettings({ fanartApiKey: "fa-key" });
 
@@ -140,6 +239,17 @@ describe("saveSystemSettings", () => {
 
         const row = await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } });
         expect([row.transcodeCacheMaxGb, row.fanartEnabled]).toEqual([5, true]);
+    });
+
+    it("stores the time a save gives for the library marker when the save creates the row, not the database's default time", async () => {
+        // The default time comes from the database's clock, which may run ahead of the server's; it is no earlier marker.
+        await prisma.systemSettings.deleteMany({ where: { id: "default" } });
+        invalidateSystemSettingsCache();
+        const past = new Date(Date.now() - 60_000);
+
+        await saveSystemSettings({ libraryChangedAt: past });
+
+        expect((await prisma.systemSettings.findUniqueOrThrow({ where: { id: "default" } })).libraryChangedAt?.getTime()).toBe(past.getTime());
     });
 
     it("keeps an unreadable credential when a blank is saved over it, and says nothing changed", async () => {

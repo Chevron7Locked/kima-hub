@@ -7,7 +7,7 @@ import { LEADING_ARTICLES, unaccent } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { listenRows } from "../../services/stats/listens";
-import { libraryGenreTotals, libraryAlbumIdsOfGenre, ownSongGenres, shownAlbumGenres, shownSongGenres } from "../../utils/genreSql";
+import { librarySongGenreTotals, libraryAlbumIdsOfGenre, shownAlbumGenres, shownGenresOfSongs } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
 import { libraryChangedAt } from "../../services/libraryChanged";
 
@@ -208,7 +208,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
     }
 
     const artistName = album.artist.displayName || album.artist.name;
-    const own = await ownSongGenres(album.tracks.map((t) => t.id));
+    const shown = await shownGenresOfSongs(album.tracks.map((t) => ({ id: t.id, album, artist: album.artist })));
 
     return subsonicOk(req, res, {
         directory: {
@@ -218,7 +218,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
             ...(album.tracks.length > 0
                 ? {
                       child: album.tracks.map((track) =>
-                          mapSong(track, album, artistName, album.artist.id, shownSongGenres(own.get(track.id), album, album.artist))
+                          mapSong(track, album, artistName, album.artist.id, shown.get(track.id))
                       ),
                   }
                 : {}),
@@ -251,14 +251,14 @@ libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
 
     const artistName = album.artist.displayName || album.artist.name;
     const genres = shownAlbumGenres(album, album.artist);
-    const own = await ownSongGenres(album.tracks.map((t) => t.id));
+    const shown = await shownGenresOfSongs(album.tracks.map((t) => ({ id: t.id, album, artist: album.artist })));
     const totalDuration = album.tracks.reduce((sum, t) => sum + (t.duration ?? 0), 0);
 
     subsonicOk(req, res, {
         album: {
             ...mapAlbum({ ...album, songCount: album.tracks.length, duration: totalDuration, genres }, artistName),
             song: album.tracks.map((t) =>
-                mapSong(t, album, artistName, album.artist.id, shownSongGenres(own.get(t.id), album, album.artist))
+                mapSong(t, album, artistName, album.artist.id, shown.get(t.id))
             ),
         },
     });
@@ -287,9 +287,9 @@ libraryRouter.all("/getSong.view", wrap(async (req, res) => {
     }
 
     const artistName = track.album.artist.displayName || track.album.artist.name;
-    const own = (await ownSongGenres([track.id])).get(track.id);
+    const shown = await shownGenresOfSongs([{ id: track.id, album: track.album, artist: track.album.artist }]);
     subsonicOk(req, res, {
-        song: mapSong(track, track.album, artistName, track.album.artist.id, shownSongGenres(own, track.album, track.album.artist)),
+        song: mapSong(track, track.album, artistName, track.album.artist.id, shown.get(track.id)),
     });
 }));
 
@@ -506,9 +506,9 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 // ===================== GENRES =====================
 
 libraryRouter.all("/getGenres.view", wrap(async (req, res) => {
-    // libraryGenreTotals is the one shared list, counted from the playable songs under the genres their albums show.
-    const sorted = (await libraryGenreTotals())
-        .sort((x, y) => x.name.localeCompare(y.name))
+    // librarySongGenreTotals counts the playable songs under the genres they show: their own tags, else their album's.
+    const sorted = (await librarySongGenreTotals())
+        .sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0)) // code units, not localeCompare: the same order on every host
         .map(({ name, albums, songs }) => ({
             "@_songCount": songs,
             "@_albumCount": albums,

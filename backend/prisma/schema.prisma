@@ -790,6 +790,8 @@ model Track {
 model TrackGenre {
   trackId String
   genreId String
+  // Place in the recording's answer, 0 the most voted. Null: stored before places were kept.
+  rank    Int?
   genre   Genre  @relation(fields: [genreId], references: [id], onDelete: Cascade)
   track   Track  @relation(fields: [trackId], references: [id], onDelete: Cascade)
 

@@ -331,9 +331,9 @@ describe("getArtists' lastModified follows the library a client lists", () => {
         await getSystemSettings(); // the cache is warm, as in a server that has just answered a request
         await tick();
         // What a worker process does: its own write, which this process's settings cache never hears of.
-        const [{ libraryChangedAt }] = await prisma.$queryRaw<{ libraryChangedAt: Date }[]>`
-            UPDATE "SystemSettings" SET "libraryChangedAt" = timezone('utc', now()) WHERE id = 'default' RETURNING "libraryChangedAt"`;
-        expect(await lastModified()).toBe(libraryChangedAt.getTime());
+        // The server's own clock, not the database's now(): the database's may run ahead of it, which would leave the marker in the future for the tests after this one.
+        const { libraryChangedAt } = await prisma.systemSettings.update({ where: { id: "default" }, data: { libraryChangedAt: new Date() } });
+        expect(await lastModified()).toBe(libraryChangedAt!.getTime());
     });
 
     it("does not go backwards", async () => {

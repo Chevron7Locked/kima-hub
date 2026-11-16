@@ -97,18 +97,20 @@ class TrackIdentityService {
     }
 
     /**
-     * The track's genres are its identified recording's: this set replaces whatever an earlier answer left.
-     * Songs of one album finish together with the same new genres: inserts skip duplicates, waiting for a
-     * genre another song is creating, and go in name order so two songs never wait on each other.
+     * The track's genres are its identified recording's: this set replaces whatever an earlier answer left, and each
+     * keeps its place in `genreNames` (the most voted first) as its rank. Songs of one album finish together with the
+     * same new genres: inserts skip duplicates, waiting for a genre another song is creating, and go in name order so
+     * two songs never wait on each other.
      */
     async populateTrackGenres(trackId: string, genreNames: string[]): Promise<void> {
-        const names = [...new Set(genreNames)].sort();
+        const ordered = [...new Set(genreNames)];
+        const names = [...ordered].sort();
         await prisma.$transaction(async (tx) => {
             if (names.length > 0) {
                 await tx.genre.createMany({ data: names.map((name) => ({ name })), skipDuplicates: true });
             }
             const genres = names.length > 0
-                ? await tx.genre.findMany({ where: { name: { in: names } }, select: { id: true } })
+                ? await tx.genre.findMany({ where: { name: { in: names } }, select: { id: true, name: true } })
                 : [];
             const ids = genres.map((g) => g.id);
             if (ids.length > 0) {
@@ -116,6 +118,13 @@ class TrackIdentityService {
                     data: ids.map((genreId) => ({ trackId, genreId })),
                     skipDuplicates: true,
                 });
+                // A song's own rows: no other song writes them, so these updates wait on nothing.
+                for (const { id, name } of genres) {
+                    await tx.trackGenre.update({
+                        where: { trackId_genreId: { trackId, genreId: id } },
+                        data: { rank: ordered.indexOf(name) },
+                    });
+                }
             }
             await tx.trackGenre.deleteMany({ where: { trackId, genreId: { notIn: ids } } });
         });

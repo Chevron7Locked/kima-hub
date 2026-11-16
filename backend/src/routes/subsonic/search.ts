@@ -9,7 +9,7 @@ import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicRe
 import { searchService, shownSongTitleSql } from "../../services/search";
 import { popularSongs } from "../../services/popularSongs";
 import { wrap, clamp, parseIntParam, mapSong, mapAlbum, mapAlbumChild, mapArtist } from "./mappers";
-import { libraryAlbumIdsOfGenre, ownSongGenres, shownAlbumGenres, shownSongGenres } from "../../utils/genreSql";
+import { shownAlbumGenres, shownGenresOfSongs, songGenreFilterSql } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
 import { effectiveYearSql } from "../../utils/dateFilters";
 
@@ -56,7 +56,7 @@ type SongRow = {
     artistUserGenres: unknown;
 };
 
-function songOf(row: SongRow, own?: string[]) {
+function songOf(row: SongRow, genres: string[]) {
     return mapSong(
         {
             id: row.id,
@@ -82,18 +82,20 @@ function songOf(row: SongRow, own?: string[]) {
         },
         row.artistDisplayName || row.artistName,
         row.artistId,
-        shownSongGenres(
-            own,
-            { genres: row.albumGenres, userGenres: row.albumUserGenres },
-            { name: row.artistName, normalizedName: row.artistNormalizedName, genres: row.artistGenres, userGenres: row.artistUserGenres },
-        ),
+        genres,
     );
 }
 
 /** Subsonic songs for these rows, each with the genres it shows (its own tags, else its album's). */
 async function songsOf(rows: SongRow[]) {
-    const own = await ownSongGenres(rows.map((r) => r.id));
-    return rows.map((row) => songOf(row, own.get(row.id)));
+    const genres = await shownGenresOfSongs(
+        rows.map((row) => ({
+            id: row.id,
+            album: { genres: row.albumGenres, userGenres: row.albumUserGenres },
+            artist: { name: row.artistName, normalizedName: row.artistNormalizedName, genres: row.artistGenres, userGenres: row.artistUserGenres },
+        })),
+    );
+    return rows.map((row) => songOf(row, genres.get(row.id) ?? []));
 }
 
 /** The playable songs among `ids`, in the order given. */
@@ -314,12 +316,9 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
     }
 
     if (genre) {
-        // The songs on the albums showing the genre (shownAlbumGenres). A genre nothing
-        // shows (an empty name, a genre no album has) matches no song.
-        const tagged = await libraryAlbumIdsOfGenre(genre);
-        whereConditions.push(
-            tagged.length > 0 ? Prisma.sql`al.id = ANY(${tagged}::text[])` : Prisma.sql`1 = 0`,
-        );
+        // The songs showing the genre: their own tags, else their album's. A genre nothing shows (an empty name, a genre
+        // no song has) matches no song.
+        whereConditions.push(await songGenreFilterSql(genre, "t", "al"));
     }
 
     const whereClause = Prisma.join(whereConditions, " AND ");
@@ -348,13 +347,13 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
     const count = clamp(parseIntParam(one(req, "count"), 50), 1, 500);
     const offset = Math.max(0, parseIntParam(one(req, "offset"), 0));
 
-    // The songs on the albums showing the genre, the genre a song shows; a genre nothing shows has no songs.
-    const genreAlbumIds = await libraryAlbumIdsOfGenre(genre);
+    // The songs showing the genre (their own tags, else their album's); a genre nothing shows has no songs.
+    const inGenre = await songGenreFilterSql(genre, "t", "al");
 
     const rows = await prisma.$queryRaw<SongRow[]>`
         SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
         WHERE ${PLAYABLE_SQL}
-          AND ${genreAlbumIds.length > 0 ? Prisma.sql`al.id = ANY(${genreAlbumIds}::text[])` : Prisma.sql`1 = 0`}
+          AND ${inGenre}
         ORDER BY ${shownSongTitleSql("t")} ASC, t.id ASC
         OFFSET ${offset}
         LIMIT ${count}

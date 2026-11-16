@@ -10,7 +10,7 @@ import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
 import { artistPicture, mapSong, serveFromTranscodeParams, splitCoverArtId, type SubsonicServe, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
-import { ownSongGenres, shownSongGenres } from "../../utils/genreSql";
+import { shownGenresOfSongs } from "../../utils/genreSql";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { accentBlind, containsAccentBlindSql } from "../../services/textMatch";
 import { sameName } from "../../services/discovery/discoverEvidence";
@@ -116,7 +116,7 @@ playbackRouter.all("/getNowPlaying.view", wrap(async (req, res) => {
 
     const trackById = new Map(tracks.map((track) => [track.id, track]));
 
-    const own = await ownSongGenres(tracks.map((t) => t.id));
+    const genresOf = await shownGenresOfSongs(tracks.map((t) => ({ id: t.id, album: t.album, artist: t.album.artist })));
 
     // One state per listener; the limit counts only the songs shown, so unplayable ones never crowd them out.
     const entries = states.flatMap((state) => {
@@ -125,7 +125,7 @@ playbackRouter.all("/getNowPlaying.view", wrap(async (req, res) => {
         if (!track) return [];
 
         const artistName = track.album.artist.displayName || track.album.artist.name;
-        const genres = shownSongGenres(own.get(track.id), track.album, track.album.artist);
+        const genres = genresOf.get(track.id);
         const minutesAgo = Math.max(0, Math.floor((Date.now() - state.updatedAt.getTime()) / 60000));
 
         return [{
@@ -405,7 +405,7 @@ playbackRouter.all("/getBookmarks.view", wrap(async (req, res) => {
         include: { track: { include: { album: { include: { artist: true } } } } },
     });
 
-    const own = await ownSongGenres(bookmarks.map((b) => b.track.id));
+    const shown = await shownGenresOfSongs(bookmarks.map((b) => ({ id: b.track.id, album: b.track.album, artist: b.track.album.artist })));
     const bookmarkEntries = bookmarks.map((b) => {
         const track = b.track;
         const album = track.album;
@@ -421,7 +421,7 @@ playbackRouter.all("/getBookmarks.view", wrap(async (req, res) => {
                 album,
                 artist.displayName || artist.name,
                 artist.id,
-                shownSongGenres(own.get(track.id), album, artist),
+                shown.get(track.id),
             ),
         };
     });

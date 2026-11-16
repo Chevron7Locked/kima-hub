@@ -71,4 +71,24 @@ describe("populateTrackGenres", () => {
         await trackIdentityService.populateTrackGenres(trackId, []);
         expect(await names()).toEqual([]);
     });
+
+    it("keeps each genre's place in the answer (the most voted first), and a later answer's order replaces it", async () => {
+        const trackId = id("t1");
+        const ranked = async () =>
+            (await prisma.trackGenre.findMany({ where: { trackId }, include: { genre: true }, orderBy: { rank: "asc" } }))
+                .map((tg) => [tg.genre.name, tg.rank]);
+
+        await trackIdentityService.populateTrackGenres(trackId, [NEW_GENRES[2], NEW_GENRES[0], NEW_GENRES[1]]);
+        expect(await ranked()).toEqual([[NEW_GENRES[2], 0], [NEW_GENRES[0], 1], [NEW_GENRES[1], 2]]);
+
+        await trackIdentityService.populateTrackGenres(trackId, [NEW_GENRES[1], NEW_GENRES[2]]);
+        expect(await ranked()).toEqual([[NEW_GENRES[1], 0], [NEW_GENRES[2], 1]]);
+    });
+
+    it("counts a name given twice once, at its first place", async () => {
+        const trackId = id("t2");
+        await trackIdentityService.populateTrackGenres(trackId, [NEW_GENRES[1], NEW_GENRES[0], NEW_GENRES[1]]);
+        const rows = await prisma.trackGenre.findMany({ where: { trackId }, include: { genre: true }, orderBy: { rank: "asc" } });
+        expect(rows.map((tg) => [tg.genre.name, tg.rank])).toEqual([[NEW_GENRES[1], 0], [NEW_GENRES[0], 1]]);
+    });
 });

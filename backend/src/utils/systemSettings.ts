@@ -33,6 +33,9 @@ export function invalidateSystemSettingsCache() {
 /** The queue length limit an operator may set (the schema's default is 10000). */
 export const QUEUE_LENGTH = { min: 100, max: 100000, default: 10000 } as const;
 
+// Saves between their start and the moment they have dropped the cache.
+let savesOpen = 0;
+
 // The read in flight, and the generation it began in. Calls that find the cache cold join it, so a burst of
 // them reads the row once; a call made after an invalidation does not, because that read may predate the save.
 let pending: { began: number; read: Promise<Settings> } | null = null;
@@ -61,6 +64,12 @@ function startRead(): Promise<Settings> {
 // Every caller gets a deep copy (the unreadable-fields list and the dates inside are mutable), so no caller can
 // change what the next one reads.
 export async function getSystemSettings() {
+    // While a save is open, its commit may already be in the database with the cache not yet dropped, so nothing
+    // here is trusted: no cached copy, no read that began earlier. Each call reads the row itself and keeps nothing.
+    if (savesOpen > 0) {
+        const fresh = await buildSettings();
+        return fresh && structuredClone(fresh);
+    }
     if (cachedSettings && cacheExpiry > Date.now()) {
         return structuredClone(cachedSettings);
     }
@@ -90,7 +99,21 @@ const NEVER_EARLIER_FIELDS = ["libraryChangedAt"] as const satisfies readonly Sy
  * written under its lock, so two saves at the same time each see the other's result and a change is reported once.
  */
 export async function saveSystemSettings(changes: SystemSettingsChanges): Promise<SystemSettingsField[]> {
-    const changed = await prisma.$transaction(async (tx) => {
+    savesOpen++;
+    let changed: SystemSettingsField[];
+    try {
+        changed = await commitSettings(changes);
+    } finally {
+        // Dropped even when the save failed: a commit that went through but answered with an error leaves the cache stale.
+        invalidateSystemSettingsCache();
+        savesOpen--;
+    }
+    callSettingsListeners(changed);
+    return changed;
+}
+
+async function commitSettings(changes: SystemSettingsChanges): Promise<SystemSettingsField[]> {
+    return prisma.$transaction(async (tx) => {
         // A lock needs a row, and an upsert races another creator into a unique-key error, so the row is inserted
         // first (a no-op when it exists) and then locked. A save that creates it has nothing before it to compare with.
         const created = (await tx.systemSettings.createMany({ data: [{ id: "default" }], skipDuplicates: true })).count > 0;
@@ -101,7 +124,7 @@ export async function saveSystemSettings(changes: SystemSettingsChanges): Promis
         // The later of the stored and the given time, decided under the row lock, so writers at the same moment cannot step it back.
         for (const field of NEVER_EARLIER_FIELDS) {
             const given = data[field];
-            const held = stored?.[field];
+            const held = before?.[field]; // a row this save created holds its default time, not an earlier marker
             if (given instanceof Date && held && held > given) data[field] = held;
         }
         const after = await tx.systemSettings.update({ where: { id: "default" }, data });
@@ -110,7 +133,4 @@ export async function saveSystemSettings(changes: SystemSettingsChanges): Promis
             (field) => changes[field] !== undefined && meaning(field, before?.[field]) !== meaning(field, after[field]),
         );
     }, { timeout: 15_000 }); // time spent waiting for the lock counts against it
-    invalidateSystemSettingsCache();
-    callSettingsListeners(changed);
-    return changed;
 }

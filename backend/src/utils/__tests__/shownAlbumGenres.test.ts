@@ -1,4 +1,4 @@
-import { shownAlbumGenres, shownSongGenres } from "../genreSql";
+import { computeGenreTotals, shownAlbumGenres, shownSongGenres } from "../genreSql";
 
 const artist = { name: "Jazz", normalizedName: "jazz", genres: ["rock", "_marker", "Jazz"] };
 
@@ -38,5 +38,49 @@ describe("shownSongGenres", () => {
     it("drops a marker, an empty tag and the artist's own name, and falls back when nothing is left", () => {
         expect(shownSongGenres(["_x", "", "jazz", "funk"], { genres: ["blues"] }, artist)).toEqual(["funk"]);
         expect(shownSongGenres(["_x", "Jazz"], { genres: ["blues"] }, artist)).toEqual(["blues"]);
+    });
+});
+
+describe("computeGenreTotals with songs that carry tags of their own", () => {
+    const band = { name: "The Band", normalizedName: "the band" };
+    const albums = [
+        { id: "a1", genres: ["rock"], artist: band, songs: 4 },
+        { id: "a2", genres: ["jazz"], artist: band, songs: 2 },
+    ];
+    const byName = (totals: ReturnType<typeof computeGenreTotals>) =>
+        Object.fromEntries(totals.map((g) => [g.name, [g.songs, g.albums]]));
+
+    it("counts a song under its own tags instead of its album's, and an album once per genre it shows", () => {
+        const totals = computeGenreTotals(albums, [
+            { albumId: "a1", artist: band, tags: ["ska", "rock"] },
+            { albumId: "a1", artist: band, tags: ["Ska"] },
+        ]);
+        // a1's two other songs keep the album's "rock"; one tagged song's own "rock" adds a third. Spellings tie, so the first by code unit names it.
+        expect(byName(totals)).toEqual({ rock: [3, 1], Ska: [2, 0], jazz: [2, 1] });
+    });
+
+    it("counts a song once under spellings of one genre, and names the genre by its commonest spelling", () => {
+        const totals = computeGenreTotals(albums, [
+            { albumId: "a2", artist: band, tags: ["Hip-Hop", "hip hop"] },
+            { albumId: "a2", artist: band, tags: ["Hip-Hop"] },
+        ]);
+        // Both of a2's songs show their own tags, so the album's jazz keeps its album and no songs.
+        expect(byName(totals)).toEqual({ rock: [4, 1], jazz: [0, 1], "Hip-Hop": [2, 0] });
+    });
+
+    it("keeps a song whose only tags are no genre (a marker, the artist's name) under its album's genres", () => {
+        const totals = computeGenreTotals(albums, [
+            { albumId: "a1", artist: band, tags: ["_marker", "The Band"] },
+        ]);
+        expect(byName(totals)).toEqual({ rock: [4, 1], jazz: [2, 1] });
+    });
+
+    it("reads like the albums alone when no song has tags of its own", () => {
+        expect(computeGenreTotals(albums, [])).toEqual(computeGenreTotals(albums));
+    });
+
+    it("lists a genre only songs carry, even when their album is not in the album list", () => {
+        const totals = computeGenreTotals(albums, [{ albumId: "elsewhere", artist: band, tags: ["polka"] }]);
+        expect(byName(totals).polka).toEqual([1, 0]);
     });
 });
