@@ -15,7 +15,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { PLAYABLE_SONG } from "../utils/playableSong";
-import { saveSystemSettings } from "../utils/systemSettings";
+import { invalidateSystemSettingsCache } from "../utils/systemSettings";
 
 /** The moment of the last change, in milliseconds since the epoch; 0 before settings exist. */
 export async function libraryChangedAt(): Promise<number> {
@@ -26,12 +26,23 @@ export async function libraryChangedAt(): Promise<number> {
 /**
  * Records that the library a client lists changed, at `at` (now). A time before the one already stored changes nothing,
  * so a clock that stepped back, or two writers, cannot make a client see the library as older. Answers the time now stored.
+ * The later of the two times is taken by the database in one statement (`GREATEST`), so writers at the same moment cannot
+ * step it back; the settings cache is dropped after, so no reader keeps the old one. `row` is the settings row it moves,
+ * always "default" outside tests: a test of the move itself uses a row of its own, so the one real marker is not left at a
+ * time the test chose while other tests read it.
  */
-export async function markLibraryChanged(at: Date = new Date()): Promise<Date> {
-    const current = await libraryChangedAt();
-    const moved = new Date(Math.max(at.getTime(), current));
-    if (moved.getTime() !== current) await saveSystemSettings({ libraryChangedAt: moved });
-    return moved;
+export async function markLibraryChanged(at: Date = new Date(), row = "default"): Promise<Date> {
+    // The row is inserted first (a no-op when it exists), as saveSystemSettings does, so the update below always has one.
+    await prisma.systemSettings.createMany({ data: [{ id: row }], skipDuplicates: true });
+    const rows = await prisma.$queryRaw<{ libraryChangedAt: Date }[]>`
+        UPDATE "SystemSettings"
+        SET "libraryChangedAt" = GREATEST("libraryChangedAt", ${at}::timestamp),
+            "updatedAt" = (NOW() AT TIME ZONE 'UTC')
+        WHERE id = ${row}
+        RETURNING "libraryChangedAt"`;
+    invalidateSystemSettingsCache();
+    if (!rows[0]) throw new Error(`The settings row "${row}" was removed while the library change was recorded`);
+    return rows[0].libraryChangedAt;
 }
 
 /**

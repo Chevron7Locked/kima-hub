@@ -64,8 +64,7 @@ jest.mock("../../../services/imageStorage", () => ({
 import { enrichSimilarArtist } from "../artists";
 import { prisma } from "../../../utils/db";
 import { useShutdownCheck } from "../../../utils/stopCheck";
-import { markerMoves } from "../../../__tests__/helpers/libraryMarker";
-import * as systemSettings from "../../../utils/systemSettings";
+import { markerMoves, watchMarkerWrites } from "../../../__tests__/helpers/libraryMarker";
 import { flushShownChanges } from "../../../services/shownChanges";
 
 const P = "zz-artEnrich-";
@@ -400,13 +399,12 @@ describe("the enrichment worker's found pictures and the library marker", () => 
         mockDownloadAndStoreImage.mockResolvedValue("native:artists/art-1.jpg");
         mockFindAlbumArtwork.mockResolvedValue({ url: COVER, source: "deezer" });
         const artist = await arrange(null);
-        const saved = jest.spyOn(systemSettings, "saveSystemSettings");
-        saved.mockClear();
+        const writes = watchMarkerWrites();
         await enrichSimilarArtist(artist);
         await flushShownChanges();
-        const markers = saved.mock.calls.filter((c) => "libraryChangedAt" in (c[0] as object));
-        saved.mockRestore();
-        expect(markers).toHaveLength(1);
+        const moves = writes.count();
+        writes.restore();
+        expect(moves).toBe(1);
     });
 
     it("moves the marker when an album cover is found", async () => {

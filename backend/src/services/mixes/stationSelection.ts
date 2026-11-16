@@ -6,7 +6,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { getMergedGenres } from "../../utils/metadataOverrides";
-import { libraryAlbumIdsForGenre } from "../../utils/genreSql";
+import { libraryAlbumIdsAnsweringToGenre } from "../../utils/genreSql";
 import { getEffectiveDecadeWhereClause } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
 import { drawIds, drawWeighted, sampleTrackIds, unplayedTrackIds } from "../mixes/helpers";
@@ -167,8 +167,8 @@ export async function selectRadioTracks(
       const genreValue = (value as string) || "";
       // Every spelling of the genre plays, and genres that contain it ("hip hop" plays "alternative hip-hop").
       // A name made only of spaces and punctuation ("-", "") is no genre and plays nothing. The names are compared
-      // by genreKey (libraryAlbumIdsForGenre), the database only lists the library's albums. An album shows its own genres, else its artist's.
-      const albumIds = await libraryAlbumIdsForGenre(genreValue);
+      // by genreKey (libraryAlbumIdsAnsweringToGenre), the database only lists the library's albums. An album shows its own genres, else its artist's.
+      const albumIds = await libraryAlbumIdsAnsweringToGenre(genreValue);
       const genreTracks = albumIds.length
         ? await prisma.$queryRaw<{ id: string }[]>`
             SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId"

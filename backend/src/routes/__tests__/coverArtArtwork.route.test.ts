@@ -16,10 +16,10 @@ jest.mock("../../utils/redis", () => ({
     },
 }));
 
-const mockSaveSystemSettings = jest.fn().mockResolvedValue(undefined);
 jest.mock("../../utils/systemSettings", () => ({
     getSystemSettings: jest.fn().mockResolvedValue({}),
-    saveSystemSettings: (...a: unknown[]) => mockSaveSystemSettings(...a),
+    saveSystemSettings: jest.fn().mockResolvedValue(undefined),
+    invalidateSystemSettingsCache: jest.fn(),
 }));
 
 jest.mock("../../config", () => ({
@@ -53,6 +53,7 @@ import { prisma } from "../../utils/db";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { mountAsServer } from "./helpers/serverMount";
 import { flushShownChanges } from "../../services/shownChanges";
+import { watchMarkerWrites } from "../../__tests__/helpers/libraryMarker";
 
 function makeApp() {
     const app = express();
@@ -165,17 +166,21 @@ describe("the cover-art route asks every source", () => {
             mockFetchChecked.mockResolvedValueOnce(new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { "content-type": "image/jpeg" } }));
             await request(makeApp()).get("/library/cover-art/" + encodeURIComponent(NATIVE));
             await flushShownChanges();
-            return mockSaveSystemSettings.mock.calls.filter((c) => "libraryChangedAt" in (c[0] as object)).length;
+            return writes.count();
         };
+        let writes: ReturnType<typeof watchMarkerWrites>;
         const withSong = () =>
             prisma.track.create({
                 data: { id: `${P}_t`, albumId: ALBUM_ID, title: "T", trackNo: 1, duration: 100, filePath: `/m/${P}.flac`, fileModified: new Date(), fileSize: 1 },
             });
         beforeEach(async () => {
             await flushShownChanges();
-            mockSaveSystemSettings.mockClear();
+            writes = watchMarkerWrites();
         });
-        afterEach(() => prisma.track.deleteMany({ where: { id: `${P}_t` } }));
+        afterEach(async () => {
+            writes.restore();
+            await prisma.track.deleteMany({ where: { id: `${P}_t` } });
+        });
 
         it("moves once when the replacement found for a listed album is stored", async () => {
             expectLog("warn");

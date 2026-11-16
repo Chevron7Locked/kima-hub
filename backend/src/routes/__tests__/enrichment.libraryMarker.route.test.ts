@@ -11,9 +11,8 @@ import router from "../enrichment";
 import { prisma } from "../../utils/db";
 import { generateToken } from "../../middleware/auth";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
-import { markerMoves } from "../../__tests__/helpers/libraryMarker";
+import { failMarkerWrites, markerMoves } from "../../__tests__/helpers/libraryMarker";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
-import * as settings from "../../utils/systemSettings";
 import { redisClient } from "../../utils/redis";
 import { mountAsServer } from "./helpers/serverMount";
 
@@ -180,7 +179,7 @@ describe("a marker that cannot be asked or written", () => {
     it.each(calls)("%s that is saved answers 200 when the marker cannot be written, and the failure is logged", async (_name, call) => {
         const s = await seed("write", "playable", _name.includes("reset"));
         const logged = expectLog("error");
-        jest.spyOn(settings, "saveSystemSettings").mockRejectedValue(new Error("settings row locked"));
+        failMarkerWrites(new Error("settings row locked"));
 
         await call(s).expect(200);
 

@@ -4,7 +4,7 @@ import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { playableSongSql } from "../utils/playableSong";
 import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
-import { genreKey, libraryAlbumIdsForGenre } from "../utils/genreSql";
+import { genreKey, libraryAlbumIdsAnsweringToGenre } from "../utils/genreSql";
 import { searchRows, containsSql, hasNonAscii } from "./textMatch";
 import { audiobookCoverAddress } from "./imageStorage";
 
@@ -32,7 +32,7 @@ async function genreScopeOf(genre: string): Promise<GenreScope> {
     const wanted = genreKey(genre);
     if (wanted === "") return { albumIds: [], genreIds: [] };
     const [albumIds, genres] = await Promise.all([
-        libraryAlbumIdsForGenre(genre),
+        libraryAlbumIdsAnsweringToGenre(genre),
         prisma.genre.findMany({ select: { id: true, name: true } }),
     ]);
     return { albumIds, genreIds: genres.filter((g) => genreKey(g.name) === wanted).map((g) => g.id) };

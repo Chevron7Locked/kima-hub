@@ -9,7 +9,7 @@ import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicRe
 import { searchService, shownSongTitleSql } from "../../services/search";
 import { popularSongs } from "../../services/popularSongs";
 import { wrap, clamp, parseIntParam, mapSong, mapAlbum, mapAlbumChild, mapArtist } from "./mappers";
-import { libraryAlbumIdsForGenre, shownAlbumGenre } from "../../utils/genreSql";
+import { libraryAlbumIdsOfGenre, shownAlbumGenres } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
 import { effectiveYearSql } from "../../utils/dateFilters";
 
@@ -82,7 +82,7 @@ function songOf(row: SongRow) {
         },
         row.artistDisplayName || row.artistName,
         row.artistId,
-        shownAlbumGenre(
+        shownAlbumGenres(
             { genres: row.albumGenres, userGenres: row.albumUserGenres },
             { name: row.artistName, normalizedName: row.artistNormalizedName, genres: row.artistGenres, userGenres: row.artistUserGenres },
         ),
@@ -266,7 +266,7 @@ searchRouter.all(["/search3.view", "/search2.view"], wrap(async (req, res) => {
             mapAlbumHit(
                 {
                     ...al,
-                    genre: shownAlbumGenre(al, {
+                    genres: shownAlbumGenres(al, {
                         name: al.artistName, normalizedName: al.artistNormalizedName, genres: al.artistGenres, userGenres: al.artistUserGenres,
                     }),
                 },
@@ -309,7 +309,7 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
     if (genre) {
         // The songs on the albums showing the genre (shownAlbumGenres), the genre a song shows. A genre nothing
         // shows (an empty name, a genre no album has) matches no song.
-        const tagged = await libraryAlbumIdsForGenre(genre);
+        const tagged = await libraryAlbumIdsOfGenre(genre);
         whereConditions.push(
             tagged.length > 0 ? Prisma.sql`al.id = ANY(${tagged}::text[])` : Prisma.sql`1 = 0`,
         );
@@ -342,7 +342,7 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
     const offset = Math.max(0, parseIntParam(one(req, "offset"), 0));
 
     // The songs on the albums showing the genre, the genre a song shows; a genre nothing shows has no songs.
-    const genreAlbumIds = await libraryAlbumIdsForGenre(genre);
+    const genreAlbumIds = await libraryAlbumIdsOfGenre(genre);
 
     const rows = await prisma.$queryRaw<SongRow[]>`
         SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}

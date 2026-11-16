@@ -4,10 +4,9 @@
  */
 import { prisma } from "../../utils/db";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
-import { markerMoves } from "../../__tests__/helpers/libraryMarker";
+import { failMarkerWrites, markerMoves, watchMarkerWrites } from "../../__tests__/helpers/libraryMarker";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import * as libraryChanged from "../libraryChanged";
-import * as systemSettings from "../../utils/systemSettings";
 import {
     SHOWN_CHANGE_WINDOW_MS,
     flushShownChanges,
@@ -106,17 +105,17 @@ describe("a found picture that changes what is shown", () => {
     it("moves the marker once for many pictures, and only one of them has to be listed", async () => {
         const listed = await seed("many1", "playable");
         const hidden = await seed("many2", "discover");
-        const saved = jest.spyOn(systemSettings, "saveSystemSettings");
+        const writes = watchMarkerWrites();
         expect(
             await flushedMoves(() => {
-                saved.mockClear();
+                writes.reset();
                 notePictureChange("artist", hidden.artist, { was: null, now: pic("h") });
                 notePictureChange("album", hidden.album, { was: null, now: pic("h") });
                 notePictureChange("album", listed.album, { was: null, now: pic("l") });
                 notePictureChange("artist", listed.artist, { was: null, now: pic("l") });
             }),
         ).toBe(true);
-        expect(saved).toHaveBeenCalledTimes(1);
+        expect(writes.count()).toBe(1);
     });
 
     it("holds a note until the window ends, without keeping the process alive, and then moves the marker by itself", async () => {
@@ -242,7 +241,7 @@ describe("a marker that cannot be written", () => {
     it("is logged and does not fail the writer", async () => {
         const s = await seed("fail", "playable");
         const logged = expectLog("error");
-        jest.spyOn(systemSettings, "saveSystemSettings").mockRejectedValue(new Error("settings went away"));
+        failMarkerWrites(new Error("settings went away"));
         notePictureChange("artist", s.artist, { was: null, now: pic("f") });
         await expect(flushShownChanges()).resolves.toBeUndefined();
         expect(logged).toHaveBeenCalled();

@@ -32,9 +32,20 @@ export type AlbumRow = {
     createdAt: Date;
     songCount?: number;
     duration?: number;
-    /** The genre the album shows, from `shownAlbumGenre` (utils/genreSql.ts): the one rule for albums and their songs. */
-    genre?: string | null;
+    /** The genres the album shows, from `shownAlbumGenres` (utils/genreSql.ts): the one rule for albums and their songs. */
+    genres?: string[];
 };
+
+/**
+ * The genre fields of an album or song: `genre`, the first genre shown (every client reads it), and OpenSubsonic's
+ * `genres`, one `{name}` per genre shown. Neither is emitted for an album that shows none.
+ */
+function genreFields(genres: string[] | undefined) {
+    return {
+        "@_genre": genres?.[0] || undefined,
+        genres: genres && genres.length > 0 ? genres.map((name) => ({ "@_name": name })) : undefined,
+    };
+}
 
 /** The year a client sees for an album: what the web shows. Zero or none is no year. */
 export const shownAlbumYear = (album: { year: number | null; originalYear: number | null; displayYear: number | null }): number | undefined =>
@@ -115,7 +126,7 @@ export function mapAlbum(album: AlbumRow, artistName: string) {
         "@_songCount": album.songCount ?? 0,
         "@_duration": album.duration !== undefined ? Math.round(album.duration) : 0,
         "@_year": shownAlbumYear(album),
-        "@_genre": album.genre || undefined,
+        ...genreFields(album.genres),
         "@_created": album.createdAt.toISOString(),
     };
 }
@@ -136,7 +147,7 @@ export function mapAlbumChild(album: AlbumRow, artistName: string) {
         "@_artistId": album.artistId,
         "@_coverArt": albumCoverArtId(album),
         "@_year": shownAlbumYear(album),
-        "@_genre": album.genre || undefined,
+        ...genreFields(album.genres),
         "@_created": album.createdAt.toISOString(),
     };
 }
@@ -146,7 +157,7 @@ export function mapSong(
     album: { id: string; title: string; displayTitle: string | null; year: number | null; originalYear: number | null; displayYear: number | null; coverUrl?: string | null; userCoverUrl?: string | null },
     artistName: string,
     artistId: string,
-    genre?: string | null
+    genres?: string[]
 ) {
     return {
         "@_id": track.id,
@@ -167,7 +178,7 @@ export function mapSong(
         "@_albumId": album.id,
         "@_artistId": artistId,
         "@_type": "music",
-        "@_genre": genre || undefined,
+        ...genreFields(genres),
     };
 }
 

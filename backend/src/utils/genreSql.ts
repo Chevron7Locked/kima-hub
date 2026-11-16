@@ -1,10 +1,12 @@
 /**
- * The genre key (genreKey), the one rule for the genres an album shows (shownAlbumGenres, shownAlbumGenre), the filter
- * built on it (libraryAlbumIdsForGenre), and the genre list (computeGenreTotals, libraryGenreTotals). An album shows its own
- * merged genres, else its artist's, and a song shows its album's, so a genre shown, the filter for it and the list that
- * counts it always agree. Matching and totals are computed in TypeScript, never in SQL: a database in the SQL_ASCII
- * encoding can neither normalize nor lower-case beyond ASCII, and the rule is one every surface shares (Subsonic's genre
- * fields, filters and getGenres, the web's search and the radio stations).
+ * The genre key (genreKey), the one rule for the genres an album shows (shownAlbumGenres), the two filters
+ * built on it (libraryAlbumIdsOfGenre: exactly that genre, for Subsonic; libraryAlbumIdsAnsweringToGenre: that genre or
+ * one containing it, for the radio stations and the web's search), and the genre list (computeGenreTotals,
+ * libraryGenreTotals). An album shows its own merged genres, else its artist's, and a song shows its album's, so a genre
+ * shown, the exact filter for it and the list that counts it always agree. Matching and totals are computed in
+ * TypeScript, never in SQL: a database in the SQL_ASCII encoding can neither normalize nor lower-case beyond ASCII, and
+ * the rule is one every surface shares (Subsonic's genre fields, filters and getGenres, the web's search and the radio
+ * stations).
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
@@ -29,11 +31,18 @@ export function genreKey(name: string | null | undefined): string {
 }
 
 /**
- * Whether one genre name answers to a wanted genre key: every spelling of that genre, and genres
- * that contain it ("hip hop" answers "alternative hip-hop"). An empty key (a request made only of spaces and
- * punctuation) is no genre and answers to nothing.
+ * Whether one genre name is the wanted genre key: every spelling of that genre and no other ("rock" is not "punk
+ * rock"). An empty key (a request made only of spaces and punctuation) is no genre and is nothing.
  */
-function genreMatchesWanted(name: string, wantedKey: string): boolean {
+function genreIsWanted(name: string, wantedKey: string): boolean {
+    return wantedKey !== "" && genreKey(name) === wantedKey;
+}
+
+/**
+ * Whether one genre name answers to a wanted genre key: every spelling of that genre, and genres that contain it ("hip
+ * hop" answers "alternative hip-hop"). An empty key is no genre and answers to nothing.
+ */
+function genreAnswersTo(name: string, wantedKey: string): boolean {
     return wantedKey !== "" && genreKey(name).includes(wantedKey);
 }
 
@@ -69,17 +78,11 @@ export function shownAlbumGenres(album: GenreAlbum, artist: GenreArtist): string
     return ofAlbum.length > 0 ? ofAlbum : usable(artist);
 }
 
-/** The genre an album, or a song on it, shows: the first of `shownAlbumGenres`. */
-export function shownAlbumGenre(album: GenreAlbum, artist: GenreArtist): string | undefined {
-    return shownAlbumGenres(album, artist)[0];
-}
-
 /**
- * The ids of the library's albums (those holding a playable song) that show a genre, matched by genreKey: the database
- * lists the albums that, or whose artist, carry a tag, the names are compared here. Every surface that filters library
- * music by genre asks this, so a genre shown and its filter always agree.
+ * The ids of the library's albums (those holding a playable song) one of whose shown genres satisfies `matches`: the
+ * database lists the albums that, or whose artist, carry a tag, the names are compared here.
  */
-export async function libraryAlbumIdsForGenre(genreValue: string): Promise<string[]> {
+async function libraryAlbumIdsWhere(genreValue: string, matches: (name: string, wantedKey: string) => boolean): Promise<string[]> {
     const wanted = genreKey(genreValue);
     if (wanted === "") return [];
     const tagged = await prisma.$queryRaw<
@@ -99,9 +102,26 @@ export async function libraryAlbumIdsForGenre(genreValue: string): Promise<strin
         .filter((row) =>
             shownAlbumGenres(row, {
                 name: row.name, normalizedName: row.normalizedName, genres: row.artistGenres, userGenres: row.artistUserGenres,
-            }).some((g) => genreMatchesWanted(g, wanted)),
+            }).some((g) => matches(g, wanted)),
         )
         .map((row) => row.id);
+}
+
+/**
+ * The ids of the library's albums that show exactly this genre (any spelling of it, genreKey), the filter Subsonic's
+ * genre lists (byGenre, getSongsByGenre, getRandomSongs) use: "rock" lists the albums of "rock" and "Rock", not of
+ * "punk rock", the same genres getGenres lists, as Subsonic and Navidrome do.
+ */
+export async function libraryAlbumIdsOfGenre(genreValue: string): Promise<string[]> {
+    return libraryAlbumIdsWhere(genreValue, genreIsWanted);
+}
+
+/**
+ * The ids of the library's albums that show this genre or one containing it ("hip hop" answers "alternative hip-hop"),
+ * the broad filter the radio stations and the web's search use to find music near a genre.
+ */
+export async function libraryAlbumIdsAnsweringToGenre(genreValue: string): Promise<string[]> {
+    return libraryAlbumIdsWhere(genreValue, genreAnswersTo);
 }
 
 /** One library album for the genre list: its tags, its artist's, and the playable songs it holds. */

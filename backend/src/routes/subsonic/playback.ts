@@ -10,7 +10,7 @@ import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
 import { artistPicture, mapSong, serveFromTranscodeParams, splitCoverArtId, type SubsonicServe, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
-import { shownAlbumGenre } from "../../utils/genreSql";
+import { shownAlbumGenres } from "../../utils/genreSql";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { accentBlind, containsAccentBlindSql } from "../../services/textMatch";
 import { sameName } from "../../services/discovery/discoverEvidence";
@@ -123,11 +123,11 @@ playbackRouter.all("/getNowPlaying.view", wrap(async (req, res) => {
         if (!track) return [];
 
         const artistName = track.album.artist.displayName || track.album.artist.name;
-        const genre = shownAlbumGenre(track.album, track.album.artist);
+        const genres = shownAlbumGenres(track.album, track.album.artist);
         const minutesAgo = Math.max(0, Math.floor((Date.now() - state.updatedAt.getTime()) / 60000));
 
         return [{
-            ...mapSong(track, track.album, artistName, track.album.artist.id, genre),
+            ...mapSong(track, track.album, artistName, track.album.artist.id, genres),
             "@_username": state.user.username,
             "@_minutesAgo": minutesAgo,
             "@_playerName": "Kima",
@@ -418,7 +418,7 @@ playbackRouter.all("/getBookmarks.view", wrap(async (req, res) => {
                 album,
                 artist.displayName || artist.name,
                 artist.id,
-                shownAlbumGenre(album, artist),
+                shownAlbumGenres(album, artist),
             ),
         };
     });

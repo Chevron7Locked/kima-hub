@@ -7,7 +7,7 @@ import { LEADING_ARTICLES, unaccent } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { listenRows } from "../../services/stats/listens";
-import { libraryGenreTotals, libraryAlbumIdsForGenre, shownAlbumGenre } from "../../utils/genreSql";
+import { libraryGenreTotals, libraryAlbumIdsOfGenre, shownAlbumGenres } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
 import { libraryChangedAt } from "../../services/libraryChanged";
 
@@ -109,7 +109,7 @@ libraryRouter.all("/getArtist.view", wrap(async (req, res) => {
         artist: {
             ...mapArtist({ ...artist, albumCount: artist.albums.length }),
             album: newestShownYearFirst(artist.albums).map((al) =>
-                mapAlbum({ ...al, songCount: al._count.tracks, genre: shownAlbumGenre(al, artist) }, artistName)
+                mapAlbum({ ...al, songCount: al._count.tracks, genres: shownAlbumGenres(al, artist) }, artistName)
             ),
         },
     });
@@ -177,7 +177,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
                 "@_name": artistName,
                 ...(artist.albums.length > 0
                     ? {
-                          child: newestShownYearFirst(artist.albums).map((album) => mapAlbumChild({ ...album, genre: shownAlbumGenre(album, artist) }, artistName)),
+                          child: newestShownYearFirst(artist.albums).map((album) => mapAlbumChild({ ...album, genres: shownAlbumGenres(album, artist) }, artistName)),
                       }
                     : {}),
             },
@@ -208,7 +208,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
     }
 
     const artistName = album.artist.displayName || album.artist.name;
-    const genre = shownAlbumGenre(album, album.artist);
+    const genres = shownAlbumGenres(album, album.artist);
 
     return subsonicOk(req, res, {
         directory: {
@@ -218,7 +218,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
             ...(album.tracks.length > 0
                 ? {
                       child: album.tracks.map((track) =>
-                          mapSong(track, album, artistName, album.artist.id, genre)
+                          mapSong(track, album, artistName, album.artist.id, genres)
                       ),
                   }
                 : {}),
@@ -250,14 +250,14 @@ libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
     }
 
     const artistName = album.artist.displayName || album.artist.name;
-    const genre = shownAlbumGenre(album, album.artist);
+    const genres = shownAlbumGenres(album, album.artist);
     const totalDuration = album.tracks.reduce((sum, t) => sum + (t.duration ?? 0), 0);
 
     subsonicOk(req, res, {
         album: {
-            ...mapAlbum({ ...album, songCount: album.tracks.length, duration: totalDuration, genre }, artistName),
+            ...mapAlbum({ ...album, songCount: album.tracks.length, duration: totalDuration, genres }, artistName),
             song: album.tracks.map((t) =>
-                mapSong(t, album, artistName, album.artist.id, genre)
+                mapSong(t, album, artistName, album.artist.id, genres)
             ),
         },
     });
@@ -286,9 +286,9 @@ libraryRouter.all("/getSong.view", wrap(async (req, res) => {
     }
 
     const artistName = track.album.artist.displayName || track.album.artist.name;
-    const genre = shownAlbumGenre(track.album, track.album.artist);
+    const genres = shownAlbumGenres(track.album, track.album.artist);
     subsonicOk(req, res, {
-        song: mapSong(track, track.album, artistName, track.album.artist.id, genre),
+        song: mapSong(track, track.album, artistName, track.album.artist.id, genres),
     });
 }));
 
@@ -405,7 +405,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
             }
             // The albums showing the genre (shownAlbumGenres: their own, else their artist's), so a genre an album
             // shows and this filter agree. A genre nothing shows has no albums.
-            const genreAlbumIds = await libraryAlbumIdsForGenre(genre);
+            const genreAlbumIds = await libraryAlbumIdsOfGenre(genre);
             const rows = await prisma.$queryRaw<AlbumWithArtist[]>(Prisma.sql`
                 ${ALBUM_LIST_SELECT}
                 WHERE ${genreAlbumIds.length > 0 ? Prisma.sql`a.id = ANY(${genreAlbumIds}::text[])` : Prisma.sql`1 = 0`}
@@ -490,12 +490,12 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 
     const albumList = albums.map((a) => {
         const artistName = a.artist.displayName || a.artist.name;
-        const genre = shownAlbumGenre(a, a.artist);
+        const genres = shownAlbumGenres(a, a.artist);
         const songCount = a.tracks?.length ?? a.songCount ?? 0;
         const duration = a.tracks
             ? a.tracks.reduce((sum, t) => sum + (t.duration ?? 0), 0)
             : Number(a.totalDuration ?? 0);
-        return mapAlbum({ ...a, artistId: a.artist.id, songCount, duration, genre }, artistName);
+        return mapAlbum({ ...a, artistId: a.artist.id, songCount, duration, genres }, artistName);
     });
 
     const key = req.path.includes("getAlbumList2") ? "albumList2" : "albumList";
