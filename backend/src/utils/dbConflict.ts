@@ -3,9 +3,9 @@
  * the SQLSTATE on `meta.code` (a raw statement, `P2010`), on `code` (a driver error), as Prisma's own `P2034`
  * ("write conflict or a deadlock", from a transaction), or in the message text.
  *
- * Two named cases. A deadlock (40P01) is Postgres picking this transaction as the victim; a serialization failure
- * (40001) is a Repeatable Read or Serializable transaction finding its rows changed under it. Each caller says which
- * it retries on. `P2034` does not say which of the two it was, so both recognise it.
+ * Two cases are recognised: a deadlock (40P01), where Postgres picks this transaction as the victim, and a
+ * serialization failure (40001), where a Repeatable Read or Serializable transaction finds its rows changed under it.
+ * `P2034` does not say which of the two it was, so it counts as either. Callers ask only whether it was a conflict.
  */
 
 import { logger } from "./logger";
@@ -28,12 +28,12 @@ function matchesConflict(err: unknown, sqlState: string, message: RegExp): boole
 }
 
 /** Postgres picked this transaction as a deadlock victim (40P01). */
-export function isDeadlock(err: unknown): boolean {
+function isDeadlock(err: unknown): boolean {
     return matchesConflict(err, "40P01", /deadlock detected/i);
 }
 
 /** Postgres refused this transaction because rows it used changed under it (40001). */
-export function isSerializationFailure(err: unknown): boolean {
+function isSerializationFailure(err: unknown): boolean {
     return matchesConflict(err, "40001", /could not serialize access/i);
 }
 

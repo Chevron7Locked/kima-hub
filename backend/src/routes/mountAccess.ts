@@ -182,7 +182,7 @@ export const mountAccess: Record<string, MountAccess> = {
     },
     "/api/releases": { access: signedInByUrlToken, runawayLimit: true },
     "/api/vibe": { access: signedIn, runawayLimit: true },
-    // Read-only public vibe feed, mounted only when KIMA_PUBLIC_VIBE=true.
+    // Read-only vibe feed for machine callers holding the service token, mounted only when KIMA_PUBLIC_VIBE=true.
     "/api/public/vibe": { access: { family: "internal" }, runawayLimit: true },
     "/api/system": { access: signedIn, runawayLimit: true },
     "/api/events/ticket": { access: signedInByUrlToken, runawayLimit: true },

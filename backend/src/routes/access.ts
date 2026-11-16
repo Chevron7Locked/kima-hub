@@ -189,8 +189,14 @@ function accessCheck(access: Access): RequestHandler {
     return async (req, res, next) => {
         // Already passed in front of the runaway limit.
         if (res.locals[ACCESS_PASSED] === true) return next();
-        const { family, urlToken } = await declared(req.method, req.url);
-        return runInOrder(checksFor(family, urlToken), req, res, next);
+        let verdict: Declared;
+        try {
+            verdict = await declared(req.method, req.url);
+        } catch (error) {
+            // Express 4 does not catch a rejected async handler, so without this the request would hang undecided.
+            return next(error);
+        }
+        return runInOrder(checksFor(verdict.family, verdict.urlToken), req, res, next);
     };
 }
 

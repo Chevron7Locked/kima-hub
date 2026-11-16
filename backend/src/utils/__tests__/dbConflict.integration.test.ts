@@ -5,7 +5,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
-import { isDeadlock, isSerializationFailure, isTransactionConflict } from "../dbConflict";
+import { isTransactionConflict } from "../dbConflict";
 import { untilLockWait } from "../../__tests__/helpers/lockWait";
 
 jest.setTimeout(60_000);
@@ -67,16 +67,13 @@ describe("a deadlock", () => {
     it("is recognised from a raw statement (P2010 carrying 40P01)", async () => {
         const error = await deadlockVictim(rawTouch);
         expect(error).toMatchObject({ code: "P2010", meta: { code: "40P01" } });
-        expect(isDeadlock(error)).toBe(true);
         expect(isTransactionConflict(error)).toBe(true);
-        expect(isSerializationFailure(error)).toBe(false);
     });
 
     it("is recognised from a model write, where Prisma gives no code and only the message says so", async () => {
         const error = await deadlockVictim(modelTouch);
         expect(error).toBeInstanceOf(Prisma.PrismaClientUnknownRequestError);
         expect((error as { code?: string }).code).toBeUndefined();
-        expect(isDeadlock(error)).toBe(true);
         expect(isTransactionConflict(error)).toBe(true);
     });
 });
@@ -85,34 +82,30 @@ describe("a serialization failure", () => {
     it("is recognised from a raw statement (P2010 carrying 40001)", async () => {
         const error = await serializationVictim(rawTouch);
         expect(error).toMatchObject({ code: "P2010", meta: { code: "40001" } });
-        expect(isSerializationFailure(error)).toBe(true);
         expect(isTransactionConflict(error)).toBe(true);
-        expect(isDeadlock(error)).toBe(false);
     });
 
     it("is recognised from a model write, however Prisma reports it", async () => {
         const error = await serializationVictim(modelTouch);
         expect(error).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
-        expect(isSerializationFailure(error)).toBe(true);
         expect(isTransactionConflict(error)).toBe(true);
     });
 });
 
 describe("the other shapes", () => {
-    it("P2034 is both, because Prisma says 'write conflict or a deadlock'", () => {
+    it("P2034 is a conflict, because Prisma says 'write conflict or a deadlock'", () => {
         const error = Object.assign(new Error("Transaction failed due to a write conflict or a deadlock."), { code: "P2034" });
-        expect(isDeadlock(error)).toBe(true);
-        expect(isSerializationFailure(error)).toBe(true);
+        expect(isTransactionConflict(error)).toBe(true);
     });
 
     it("a bare SQLSTATE on code is recognised", () => {
-        expect(isDeadlock({ code: "40P01" })).toBe(true);
-        expect(isSerializationFailure({ code: "40001" })).toBe(true);
+        expect(isTransactionConflict({ code: "40P01" })).toBe(true);
+        expect(isTransactionConflict({ code: "40001" })).toBe(true);
     });
 
     it("the message alone is recognised, in any case", () => {
-        expect(isDeadlock(new Error("ERROR: Deadlock Detected"))).toBe(true);
-        expect(isSerializationFailure(new Error("could not serialize access due to concurrent update"))).toBe(true);
+        expect(isTransactionConflict(new Error("ERROR: Deadlock Detected"))).toBe(true);
+        expect(isTransactionConflict(new Error("could not serialize access due to concurrent update"))).toBe(true);
     });
 
     it("anything else is not a conflict", () => {
