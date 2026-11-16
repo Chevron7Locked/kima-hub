@@ -134,6 +134,25 @@ describe("a downloaded picture at the cap's edge", () => {
         expect(fs.readFileSync(path.join(albums, "ok2.jpg")).equals(jpeg)).toBe(true);
     });
 
+    it.each(["image/svg+xml", "image/x-icon", "image/tiff"])(
+        "is refused when its type is %p, though sharp could decode it, so the downloaded types are the ones a route may proxy",
+        async (type) => {
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="red"/><!--${"x".repeat(1200)}--></svg>`;
+            fetchMock.mockResolvedValue(new Response(svg, { status: 200, headers: { "content-type": type } }));
+
+            expect(await downloadAndStoreImage("https://example.org/s.svg", "svg1", "album")).toBeNull();
+
+            expect(fs.existsSync(path.join(albums, "svg1.jpg"))).toBe(false);
+        },
+    );
+
+    it("still takes a type written in capitals or with a charset, as a host may send it", async () => {
+        const jpeg = await picture();
+        fetchMock.mockResolvedValue(new Response(new Uint8Array(jpeg), { status: 200, headers: { "content-type": "Image/JPEG; charset=binary" } }));
+
+        expect(await downloadAndStoreImage("https://example.org/a.jpg", "caps1", "album")).toMatch(/^native:albums\/caps1\.jpg\?v=/);
+    });
+
     it("still refuses a placeholder under 1000 bytes", async () => {
         fetchMock.mockResolvedValue(new Response(new Uint8Array(500), { status: 200, headers: { "content-type": "image/jpeg" } }));
 

@@ -271,6 +271,12 @@ export async function readCapped(response: Response): Promise<Buffer | null> {
 
 const PROXIED_PICTURE_TYPES: ReadonlySet<string> = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
 
+/** The reply's picture type without parameters, in lower case, when it is one a browser draws as a plain image; else null. */
+function pictureTypeOf(response: Response): string | null {
+    const type = /^\s*(image\/[^\s;]+)/i.exec(response.headers.get("content-type") ?? "")?.[1]?.toLowerCase();
+    return type && PROXIED_PICTURE_TYPES.has(type) ? type : null;
+}
+
 /**
  * A picture a route proxies from another host: its bytes (read through `readCapped`) and its type, without parameters.
  * Null when it is over the cap or the host named no picture type, so the route answers not found rather than send a
@@ -278,8 +284,8 @@ const PROXIED_PICTURE_TYPES: ReadonlySet<string> = new Set(["image/jpeg", "image
  * image are read: an SVG is a document that can carry script, and would run under Kima's address.
  */
 export async function readPicture(response: Response): Promise<{ bytes: Buffer; contentType: string } | null> {
-    const contentType = /^\s*(image\/[^\s;]+)/i.exec(response.headers.get("content-type") ?? "")?.[1]?.toLowerCase();
-    if (!contentType || !PROXIED_PICTURE_TYPES.has(contentType)) {
+    const contentType = pictureTypeOf(response);
+    if (!contentType) {
         await response.body?.cancel().catch(() => undefined);
         return null;
     }
@@ -356,9 +362,10 @@ export async function downloadAndStoreImage(
             return null;
         }
 
-        const contentType = response.headers.get("content-type") || "";
-        if (!contentType.startsWith("image/")) {
-            logger.debug(`[ImageStorage] Not an image: ${contentType}`);
+        // The types a route may proxy and no more: sharp decodes SVG, TIFF and ICO too, and a stored copy is no reason to widen what it reads.
+        if (!pictureTypeOf(response)) {
+            logger.debug(`[ImageStorage] Not a picture type taken: ${response.headers.get("content-type") ?? ""}`);
+            await response.body?.cancel().catch(() => undefined);
             return null;
         }
 
@@ -374,7 +381,7 @@ export async function downloadAndStoreImage(
 
         const version = await storeAsJpeg(filePath, buffer);
         if (!version) {
-            logger.debug(`[ImageStorage] Not a readable picture despite its content type: ${contentType}`);
+            logger.debug(`[ImageStorage] Not a readable picture despite its content type: ${response.headers.get("content-type") ?? ""}`);
             return null;
         }
         logger.debug(`[ImageStorage] Saved ${type} image: ${filename}`);
