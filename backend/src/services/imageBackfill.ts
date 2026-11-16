@@ -161,6 +161,10 @@ async function backfillImages(kind: BackfillKind, stop: StopCheck, signal: Abort
 
             await Promise.all(
                 batch.map(async (row) => {
+                    const skipEdited = () => {
+                        backfillProgress.skipped++;
+                        backfillProgress.processed++;
+                    };
                     try {
                         if (!row.url || isNativePath(row.url)) {
                             backfillProgress.skipped++;
@@ -171,21 +175,18 @@ async function backfillImages(kind: BackfillKind, stop: StopCheck, signal: Abort
                         const localPath = await downloadAndStoreImage(row.url, row.id, kind, signal);
 
                         if (localPath) {
+                            // Only where the row still holds the address that was read: one a person set during the download stands.
+                            let own: string | null;
                             if (kind === "artist") {
-                                const stored = await prisma.artist.update({
-                                    where: { id: row.id },
-                                    data: { heroUrl: localPath },
-                                    select: { userHeroUrl: true },
-                                });
-                                notePictureChange("artist", row.id, { was: row.url, now: localPath, own: stored.userHeroUrl });
+                                const written = await prisma.artist.updateMany({ where: { id: row.id, heroUrl: row.url }, data: { heroUrl: localPath } });
+                                if (written.count === 0) return skipEdited();
+                                own = (await prisma.artist.findUnique({ where: { id: row.id }, select: { userHeroUrl: true } }))?.userHeroUrl ?? null;
                             } else {
-                                const stored = await prisma.album.update({
-                                    where: { id: row.id },
-                                    data: { coverUrl: localPath },
-                                    select: { userCoverUrl: true },
-                                });
-                                notePictureChange("album", row.id, { was: row.url, now: localPath, own: stored.userCoverUrl });
+                                const written = await prisma.album.updateMany({ where: { id: row.id, coverUrl: row.url }, data: { coverUrl: localPath } });
+                                if (written.count === 0) return skipEdited();
+                                own = (await prisma.album.findUnique({ where: { id: row.id }, select: { userCoverUrl: true } }))?.userCoverUrl ?? null;
                             }
+                            notePictureChange(kind, row.id, { was: row.url, now: localPath, own });
 
                             // Update Redis cache
                             try {

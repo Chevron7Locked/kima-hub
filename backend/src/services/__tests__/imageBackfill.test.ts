@@ -108,6 +108,25 @@ describe("backfillAllImages progress", () => {
     });
 });
 
+describe("backfillAllImages and an address edited while it downloads", () => {
+    it("leaves the newer address a person set, for the next start, and counts the row as skipped, not stored", async () => {
+        await seed();
+        download.mockImplementation(async (_url: string, id: string) => {
+            if (id === `${P}-ar-1`) await prisma.artist.update({ where: { id }, data: { heroUrl: "http://example.invalid/edited.jpg" } });
+            if (id === `${P}-al-1`) await prisma.album.update({ where: { id }, data: { coverUrl: "http://example.invalid/edited-cover.jpg" } });
+            return ours(id) ? `native:x/${id}.jpg` : null;
+        });
+
+        await backfillAllImages();
+
+        expect((await prisma.artist.findUniqueOrThrow({ where: { id: `${P}-ar-1` } })).heroUrl).toBe("http://example.invalid/edited.jpg");
+        expect((await prisma.artist.findUniqueOrThrow({ where: { id: `${P}-ar-2` } })).heroUrl).toBe(`native:x/${P}-ar-2.jpg`);
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}-al-1` } })).coverUrl).toBe("http://example.invalid/edited-cover.jpg");
+        expect((await prisma.album.findUniqueOrThrow({ where: { id: `${P}-al-2` } })).coverUrl).toBe(`native:x/${P}-al-2.jpg`);
+        expect(getImageBackfillProgress()).toMatchObject({ success: 3, skipped: 2, failed: 0 });
+    });
+});
+
 describe("backfillAllImages closing log line", () => {
     it("says complete, with the counts, when every image was gone through", async () => {
         await seed();
