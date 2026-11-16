@@ -110,17 +110,22 @@ export type AlbumToFill = {
  * that changes what a client shows is noted for the library-changed marker
  * (services/shownChanges.ts); the caller flushes at the end of its run. */
 export async function fillAlbumFromCatalogue(album: AlbumToFill, answer: AlbumFacts): Promise<void> {
-    const data: { year?: number; label?: string; genres?: string[] } = {};
-    if (album.year == null && answer.originalYear != null) data.year = answer.originalYear;
-    if (!album.label && answer.label) data.label = answer.label;
+    // Each field is its own write that holds only while the column is still blank, so a value set between the read and
+    // here (a scan, a person's edit) is kept, and a change is noted only for a write that landed.
+    if (album.year == null && answer.originalYear != null) {
+        const year = answer.originalYear;
+        const { count } = await prisma.album.updateMany({ where: { id: album.id, year: null }, data: { year } });
+        if (count > 0) noteYearChange(album.id, { was: album, now: { ...album, year } });
+    }
+    if (!album.label && answer.label) {
+        await prisma.album.updateMany({ where: { id: album.id, OR: [{ label: null }, { label: "" }] }, data: { label: answer.label } });
+    }
     const existing = album.genres as string[] | null;
     if ((existing == null || existing.length === 0) && answer.albumGenres.length > 0) {
-        data.genres = topVoted(answer.albumGenres, 5);
-    }
-    if (Object.keys(data).length > 0) {
-        await prisma.album.update({ where: { id: album.id }, data });
-        if (data.year !== undefined) noteYearChange(album.id, { was: album, now: { ...album, year: data.year } });
-        if (data.genres) noteGenresChange("album", album.id, { was: album, now: { ...album, genres: data.genres } });
+        const genres = topVoted(answer.albumGenres, 5);
+        const blank = [{ genres: { equals: Prisma.DbNull } }, { genres: { equals: Prisma.JsonNull } }, { genres: { equals: [] } }];
+        const { count } = await prisma.album.updateMany({ where: { id: album.id, OR: blank }, data: { genres } });
+        if (count > 0) noteGenresChange("album", album.id, { was: album, now: { ...album, genres } });
     }
 }
 

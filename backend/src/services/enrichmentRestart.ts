@@ -12,6 +12,9 @@ import { trackQueue, vibeQueue } from "../workers/enrichmentQueues";
 import { STAGE_QUEUES } from "../workers/unifiedEnrichment";
 import * as stageRecords from "./stages/stageRecords";
 import { RERUN_TIMEOUT_MS } from "./matching/state";
+import { artistHasPlayableSongSql } from "./libraryFilters";
+import { markLibraryChangedQuietly } from "./libraryChanged";
+import { Prisma } from "@prisma/client";
 
 export type RerunStep = "identification" | "artists" | "analysis" | "vectors" | "moods" | "similarity";
 
@@ -45,6 +48,18 @@ const STEP_CLEARS: Record<RerunStep, {
 export const RERUN_STEPS = Object.keys(STEP_CLEARS) as RerunStep[];
 
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+/** Whether a client lists an artist whose shown genres the reset is about to wipe (the enriched ones, under no list of the person's): they show on the artist, its albums and its songs. */
+async function resetLosesShownGenres(tx: Tx): Promise<boolean> {
+    const rows = await tx.$queryRaw<{ found: number }[]>(Prisma.sql`
+        SELECT 1 AS found FROM "Artist" ar
+        WHERE COALESCE(CASE WHEN jsonb_typeof(ar.genres) = 'array' THEN jsonb_array_length(ar.genres) END, 0) > 0
+          AND COALESCE(CASE WHEN jsonb_typeof(ar."userGenres") = 'array' THEN jsonb_array_length(ar."userGenres") END, 0) = 0
+          AND ${artistHasPlayableSongSql("ar")}
+        LIMIT 1
+    `);
+    return rows.length > 0;
+}
 
 async function resetArtists(tx: Tx): Promise<number> {
     await tx.$executeRaw`DELETE FROM "SimilarArtist"`;
@@ -187,8 +202,12 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
             let artists = 0;
             let tracks = 0;
             let vectors = 0;
+            let genresLost = false;
             if (clears.recording) await resetRecording(tx);
-            if (clears.artists) artists = await resetArtists(tx);
+            if (clears.artists) {
+                genresLost = await resetLosesShownGenres(tx);
+                artists = await resetArtists(tx);
+            }
             if (clears.analysis) tracks = await resetAnalysis(tx);
             if (clears.vectors) vectors = await resetVectors(tx);
             if (clears.artists) {
@@ -206,10 +225,12 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
             if (clears.similarity) await resetSimilarity(tx);
             // A file that is gone cannot be re-run; its records wait for a scan to find it.
             if (trackWork) await stageRecords.closeForMissingFiles(tx);
-            return { artists, tracks, vectors };
+            return { artists, tracks, vectors, genresLost };
         },
         { timeout: RERUN_TIMEOUT_MS, maxWait: RERUN_TIMEOUT_MS },
     ));
+    // Once, after the reset has committed: a client lists the genres it wiped on artists, albums and songs.
+    if (wiped.genresLost) await markLibraryChangedQuietly("an artists re-run");
     // After the reset has committed: the album vote reads the songs it votes on from the database, so a round
     // running during the reset may still write a verdict from the old state; clearing last removes that too.
     if (clears.recording) {
@@ -220,7 +241,7 @@ export async function rerunEnrichment(from: RerunStep): Promise<EnrichmentWipe> 
             logger.warn(`[Enrichment] Could not clear the remembered album verdicts: ${(err as Error).message}`);
         }
     }
-    return wiped;
+    return { artists: wiped.artists, tracks: wiped.tracks, vectors: wiped.vectors };
 }
 
 /** Re-runs everything: the identification step and every step after it. */

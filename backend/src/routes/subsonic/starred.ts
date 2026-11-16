@@ -3,7 +3,8 @@ import { prisma } from "../../utils/db";
 import { PLAYABLE_SONG } from "../../utils/playableSong";
 import { logger } from "../../utils/logger";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { mapSong, firstArtistGenre, wrap } from "./mappers";
+import { shownAlbumGenre } from "../../utils/genreSql";
+import { mapSong, wrap } from "./mappers";
 import { one, many } from "../../utils/subsonicParams";
 
 export const starredRouter = Router();
@@ -18,13 +19,13 @@ starredRouter.all(["/getStarred2.view", "/getStarred.view"], wrap(async (req, re
                 include: {
                     album: {
                         include: {
-                            artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
+                            artist: { select: { id: true, name: true, normalizedName: true, displayName: true, genres: true, userGenres: true } },
                         },
                     },
                 },
             },
         },
-        orderBy: { likedAt: "desc" },
+        orderBy: [{ likedAt: "desc" }, { trackId: "asc" }],
     });
 
     const key = req.path.includes("getStarred2") ? "starred2" : "starred";
@@ -34,7 +35,7 @@ starredRouter.all(["/getStarred2.view", "/getStarred.view"], wrap(async (req, re
                 song: liked.map((l) => {
                     const t = l.track;
                     const artistName = t.album.artist.displayName || t.album.artist.name;
-                    const genre = firstArtistGenre(t.album.artist.genres, t.album.artist.userGenres);
+                    const genre = shownAlbumGenre(t.album, t.album.artist);
                     return {
                         ...mapSong(t, t.album, artistName, t.album.artist.id, genre),
                         "@_starred": l.likedAt.toISOString(),

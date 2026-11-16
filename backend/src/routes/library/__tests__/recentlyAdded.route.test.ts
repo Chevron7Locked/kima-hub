@@ -91,3 +91,10 @@ it("keeps the order albums first arrived when a rescan touches an old album", as
     await prisma.album.update({ where: { id: `${P}-al-3-0` }, data: { lastSynced: new Date(Date.UTC(2032, 0, 1)) } });
     expect(await names("?limit=4")).toEqual([`${P} 0`, `${P} 1`, `${P} 2`, `${P} 3`]);
 });
+
+it("shows the artist picture when the person's own picture is blank text", async () => {
+    await prisma.artist.update({ where: { id: `${P}-ar-2` }, data: { userHeroUrl: "", heroUrl: "https://pictures.example/found.jpg" } });
+    const res = await request(app()).get("/library/recently-added?limit=4");
+    const card = (res.body.artists as { name: string; coverArt: string | null }[]).find((a) => a.name === `${P} 2`);
+    expect(card?.coverArt).toBe("https://pictures.example/found.jpg");
+});

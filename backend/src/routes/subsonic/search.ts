@@ -8,8 +8,8 @@ import { foldedPattern } from "../../services/textMatch";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { searchService, shownSongTitleSql } from "../../services/search";
 import { popularSongs } from "../../services/popularSongs";
-import { wrap, clamp, parseIntParam, firstArtistGenre, mapSong, mapAlbum, mapAlbumChild, mapArtist } from "./mappers";
-import { libraryArtistIdsForGenre } from "../../utils/genreSql";
+import { wrap, clamp, parseIntParam, mapSong, mapAlbum, mapAlbumChild, mapArtist } from "./mappers";
+import { libraryAlbumIdsForGenre, shownAlbumGenre } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
 import { effectiveYearSql } from "../../utils/dateFilters";
 
@@ -21,7 +21,8 @@ const SONG_COLUMNS = Prisma.sql`
     al.id AS "albumId", al.title AS "albumTitle", al."displayTitle" AS "albumDisplayTitle", al.year AS "albumYear",
     al."originalYear" AS "albumOriginalYear", al."displayYear" AS "albumDisplayYear",
     al."coverUrl" AS "albumCoverUrl", al."userCoverUrl" AS "albumUserCoverUrl",
-    ar.id AS "artistId", ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
+    al.genres AS "albumGenres", al."userGenres" AS "albumUserGenres",
+    ar.id AS "artistId", ar.name AS "artistName", ar."normalizedName" AS "artistNormalizedName", ar."displayName" AS "artistDisplayName",
     ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"`;
 const SONG_FROM = Prisma.sql`"Track" t JOIN "Album" al ON t."albumId" = al.id JOIN "Artist" ar ON al."artistId" = ar.id`;
 /** The playable-song rule, for the aliases every query here uses. */
@@ -45,8 +46,11 @@ type SongRow = {
     albumDisplayYear: number | null;
     albumCoverUrl: string | null;
     albumUserCoverUrl: string | null;
+    albumGenres: unknown;
+    albumUserGenres: unknown;
     artistId: string;
     artistName: string;
+    artistNormalizedName: string | null;
     artistDisplayName: string | null;
     artistGenres: unknown;
     artistUserGenres: unknown;
@@ -78,7 +82,10 @@ function songOf(row: SongRow) {
         },
         row.artistDisplayName || row.artistName,
         row.artistId,
-        firstArtistGenre(row.artistGenres, row.artistUserGenres),
+        shownAlbumGenre(
+            { genres: row.albumGenres, userGenres: row.albumUserGenres },
+            { name: row.artistName, normalizedName: row.artistNormalizedName, genres: row.artistGenres, userGenres: row.artistUserGenres },
+        ),
     );
 }
 
@@ -106,6 +113,7 @@ type AlbumHit = {
     artistId: string;
     createdAt: Date;
     artistName: string;
+    artistNormalizedName: string | null;
     artistDisplayName: string | null;
     artistGenres: unknown;
     artistUserGenres: unknown;
@@ -118,7 +126,7 @@ async function playableAlbumsInOrder(ids: string[]): Promise<AlbumHit[]> {
     if (ids.length === 0) return [];
     const rows = await prisma.$queryRaw<AlbumHit[]>`
         SELECT al.id, al.title, al."displayTitle", al.year, al."originalYear", al."displayYear", al.genres, al."userGenres", al."coverUrl", al."userCoverUrl", al."artistId", al."createdAt",
-               ar.name AS "artistName", ar."displayName" AS "artistDisplayName",
+               ar.name AS "artistName", ar."normalizedName" AS "artistNormalizedName", ar."displayName" AS "artistDisplayName",
                ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres",
                COUNT(t.id)::int AS "songCount", COALESCE(SUM(t.duration), 0)::float8 AS duration
         FROM "Album" al
@@ -258,7 +266,9 @@ searchRouter.all(["/search3.view", "/search2.view"], wrap(async (req, res) => {
             mapAlbumHit(
                 {
                     ...al,
-                    genre: firstArtistGenre(al.artistGenres, al.artistUserGenres),
+                    genre: shownAlbumGenre(al, {
+                        name: al.artistName, normalizedName: al.artistNormalizedName, genres: al.artistGenres, userGenres: al.artistUserGenres,
+                    }),
                 },
                 al.artistDisplayName || al.artistName,
             )
@@ -297,12 +307,11 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
     }
 
     if (genre) {
-        // Genre lives on Artist, not Album — the artists carrying the genre, matched by genreKey
-        // exactly as the web's genre filters do. A genre nothing carries (an empty name, a genre
-        // no artist has) matches no song.
-        const tagged = await libraryArtistIdsForGenre(genre);
+        // The songs on the albums showing the genre (shownAlbumGenres), the genre a song shows. A genre nothing
+        // shows (an empty name, a genre no album has) matches no song.
+        const tagged = await libraryAlbumIdsForGenre(genre);
         whereConditions.push(
-            tagged.length > 0 ? Prisma.sql`ar.id = ANY(${tagged}::text[])` : Prisma.sql`1 = 0`,
+            tagged.length > 0 ? Prisma.sql`al.id = ANY(${tagged}::text[])` : Prisma.sql`1 = 0`,
         );
     }
 
@@ -332,14 +341,13 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
     const count = clamp(parseIntParam(one(req, "count"), 50), 1, 500);
     const offset = Math.max(0, parseIntParam(one(req, "offset"), 0));
 
-    // The artists carrying the genre, matched by genreKey exactly as the web's genre filters do;
-    // a genre nothing carries has no songs.
-    const genreArtistIds = await libraryArtistIdsForGenre(genre);
+    // The songs on the albums showing the genre, the genre a song shows; a genre nothing shows has no songs.
+    const genreAlbumIds = await libraryAlbumIdsForGenre(genre);
 
     const rows = await prisma.$queryRaw<SongRow[]>`
         SELECT ${SONG_COLUMNS} FROM ${SONG_FROM}
         WHERE ${PLAYABLE_SQL}
-          AND ${genreArtistIds.length > 0 ? Prisma.sql`al."artistId" = ANY(${genreArtistIds}::text[])` : Prisma.sql`1 = 0`}
+          AND ${genreAlbumIds.length > 0 ? Prisma.sql`al.id = ANY(${genreAlbumIds}::text[])` : Prisma.sql`1 = 0`}
         ORDER BY ${shownSongTitleSql("t")} ASC, t.id ASC
         OFFSET ${offset}
         LIMIT ${count}

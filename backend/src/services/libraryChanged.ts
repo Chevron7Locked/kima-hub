@@ -8,6 +8,8 @@
  * songs and the albums and artists holding one (utils/playableSong.ts), so a change to anything else leaves it: a
  * Discover item, a song that is missing or corrupt, an empty album. Analysis writes, Discover songs and artist syncs do
  * not move it either, and it never goes backwards. It is stored in the system settings, so every process reads the same one.
+ * Changes the coalescing window of services/shownChanges.ts still held when the server stopped are lost with it, so every
+ * start moves the marker once (`markLibraryChangedAtStart`) and a client refetches rather than keep a stale list.
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
@@ -39,6 +41,9 @@ export async function markLibraryChanged(at: Date = new Date()): Promise<Date> {
 export async function markLibraryChangedQuietly(what: string): Promise<void> {
     await markLibraryChanged().catch((e) => logger.error(`Failed to record the library change (${what}):`, e));
 }
+
+/** The start-up move: what a client lists may have changed in a window that died with the last process. */
+export const markLibraryChangedAtStart = () => markLibraryChangedQuietly("server start");
 
 const holdsPlayableSong = async (where: Prisma.TrackWhereInput): Promise<boolean> =>
     (await prisma.track.findFirst({ where: { AND: [PLAYABLE_SONG, where] }, select: { id: true } })) !== null;

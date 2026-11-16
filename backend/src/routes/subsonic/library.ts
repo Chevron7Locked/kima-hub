@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { prisma, Prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { mapArtist, mapAlbum, mapAlbumChild, mapSong, coverArtId, artistPicture, firstArtistGenre, wrap, clamp, parseIntParam } from "./mappers";
+import { mapArtist, mapAlbum, mapAlbumChild, mapSong, coverArtId, artistPicture, wrap, clamp, parseIntParam } from "./mappers";
 import { effectiveYearSql, getEffectiveYear } from "../../utils/dateFilters";
 import { LEADING_ARTICLES, unaccent } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { listenRows } from "../../services/stats/listens";
-import { libraryGenreTotals, libraryArtistIdsForGenre } from "../../utils/genreSql";
+import { libraryGenreTotals, libraryAlbumIdsForGenre, shownAlbumGenre } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
 import { libraryChangedAt } from "../../services/libraryChanged";
 
@@ -74,10 +74,10 @@ libraryRouter.all(["/getArtists.view", "/getIndexes.view"], wrap(async (req, res
 
 // ===================== FOLDER BROWSING =====================
 
-/** An artist's albums by the year a client sees, newest first (no year last); a tie keeps the order the database gave. */
+/** An artist's albums by the year a client sees, newest first, an album with no year ahead of them all (as the database ordered a missing year when it sorted descending); a tie keeps the order the database gave. */
 function newestShownYearFirst<T extends { year: number | null; originalYear: number | null; displayYear: number | null }>(albums: T[]): T[] {
     return albums
-        .map((album, order) => ({ album, order, year: getEffectiveYear(album) ?? -Infinity }))
+        .map((album, order) => ({ album, order, year: getEffectiveYear(album) || Infinity }))
         .sort((a, b) => b.year - a.year || a.order - b.order)
         .map((x) => x.album);
 }
@@ -105,12 +105,11 @@ libraryRouter.all("/getArtist.view", wrap(async (req, res) => {
     }
 
     const artistName = artist.displayName || artist.name;
-    const genre = firstArtistGenre(artist.genres, artist.userGenres);
     subsonicOk(req, res, {
         artist: {
             ...mapArtist({ ...artist, albumCount: artist.albums.length }),
             album: newestShownYearFirst(artist.albums).map((al) =>
-                mapAlbum({ ...al, songCount: al._count.tracks, genre }, artistName)
+                mapAlbum({ ...al, songCount: al._count.tracks, genre: shownAlbumGenre(al, artist) }, artistName)
             ),
         },
     });
@@ -171,7 +170,6 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
 
     if (artist) {
         const artistName = artist.displayName || artist.name;
-        const genre = firstArtistGenre(artist.genres, artist.userGenres);
         return subsonicOk(req, res, {
             directory: {
                 "@_id": artist.id,
@@ -179,7 +177,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
                 "@_name": artistName,
                 ...(artist.albums.length > 0
                     ? {
-                          child: newestShownYearFirst(artist.albums).map((album) => mapAlbumChild({ ...album, genre }, artistName)),
+                          child: newestShownYearFirst(artist.albums).map((album) => mapAlbumChild({ ...album, genre: shownAlbumGenre(album, artist) }, artistName)),
                       }
                     : {}),
             },
@@ -194,7 +192,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
     const album = await prisma.album.findUnique({
         where: { id: albumId },
         include: {
-            artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
+            artist: { select: { id: true, name: true, normalizedName: true, displayName: true, genres: true, userGenres: true } },
             tracks: {
                 where: PLAYABLE_SONG,
                 orderBy: [
@@ -210,7 +208,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
     }
 
     const artistName = album.artist.displayName || album.artist.name;
-    const genre = firstArtistGenre(album.artist.genres, album.artist.userGenres);
+    const genre = shownAlbumGenre(album, album.artist);
 
     return subsonicOk(req, res, {
         directory: {
@@ -237,7 +235,7 @@ libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
     const album = await prisma.album.findUnique({
         where: { id },
         include: {
-            artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
+            artist: { select: { id: true, name: true, normalizedName: true, displayName: true, genres: true, userGenres: true } },
             tracks: {
                 where: PLAYABLE_SONG,
                 orderBy: [
@@ -252,7 +250,7 @@ libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
     }
 
     const artistName = album.artist.displayName || album.artist.name;
-    const genre = firstArtistGenre(album.artist.genres, album.artist.userGenres);
+    const genre = shownAlbumGenre(album, album.artist);
     const totalDuration = album.tracks.reduce((sum, t) => sum + (t.duration ?? 0), 0);
 
     subsonicOk(req, res, {
@@ -278,7 +276,7 @@ libraryRouter.all("/getSong.view", wrap(async (req, res) => {
         include: {
             album: {
                 include: {
-                    artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
+                    artist: { select: { id: true, name: true, normalizedName: true, displayName: true, genres: true, userGenres: true } },
                 },
             },
         },
@@ -288,7 +286,7 @@ libraryRouter.all("/getSong.view", wrap(async (req, res) => {
     }
 
     const artistName = track.album.artist.displayName || track.album.artist.name;
-    const genre = firstArtistGenre(track.album.artist.genres, track.album.artist.userGenres);
+    const genre = shownAlbumGenre(track.album, track.album.artist);
     subsonicOk(req, res, {
         song: mapSong(track, track.album, artistName, track.album.artist.id, genre),
     });
@@ -312,6 +310,7 @@ type AlbumWithArtist = {
     artist: {
         id: string;
         name: string;
+        normalizedName?: string | null;
         displayName: string | null;
         genres?: unknown;
         userGenres?: unknown;
@@ -326,7 +325,7 @@ type AlbumWithArtist = {
 // shape; only the joins, filter and ordering differ.
 const ALBUM_LIST_SELECT = Prisma.sql`
     SELECT a.id, a.title, a."displayTitle", a.year, a."originalYear", a."displayYear", a.genres, a."userGenres", a."coverUrl", a."userCoverUrl", a."artistId", a."createdAt",
-           json_build_object('id', ar.id, 'name', ar.name, 'displayName', ar."displayName",
+           json_build_object('id', ar.id, 'name', ar.name, 'normalizedName', ar."normalizedName", 'displayName', ar."displayName",
                'genres', ar.genres, 'userGenres', ar."userGenres") as artist,
            (SELECT COUNT(*)::int FROM "Track" t2 WHERE t2."albumId" = a.id AND ${playableSongSql("t2", "a")}) as "songCount",
            (SELECT COALESCE(SUM(t2.duration), 0) FROM "Track" t2 WHERE t2."albumId" = a.id AND ${playableSongSql("t2", "a")}) as "totalDuration"
@@ -342,7 +341,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
     const userId = req.user!.id;
 
     const albumInclude = {
-        artist: { select: { id: true, name: true, displayName: true, genres: true, userGenres: true } },
+        artist: { select: { id: true, name: true, normalizedName: true, displayName: true, genres: true, userGenres: true } },
         tracks: { where: PLAYABLE_SONG, select: { duration: true } },
     } as const;
 
@@ -362,7 +361,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
         case "alphabeticalByName":
             albums = await prisma.album.findMany({
                 where: { tracks: { some: PLAYABLE_SONG } },
-                orderBy: { sortName: "asc" },
+                orderBy: [{ sortName: "asc" }, { id: "asc" }],
                 take: size,
                 skip: offset,
                 include: albumInclude,
@@ -374,7 +373,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                 where: { tracks: { some: PLAYABLE_SONG } },
                 // "alphabeticalByArtist" means alphabetical to the user, and a
                 // user does not file The Beatles under T.
-                orderBy: { artist: { sortName: "asc" } },
+                orderBy: [{ artist: { sortName: "asc" } }, { id: "asc" }],
                 take: size,
                 skip: offset,
                 include: albumInclude,
@@ -404,14 +403,14 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
             if (!genre) {
                 return subsonicError(req, res, SubsonicError.MISSING_PARAM, "byGenre requires genre");
             }
-            // Genre lives on Artist, not Album — the artists carrying the genre, matched by genreKey
-            // exactly as the web's genre filters do. A genre nothing carries has no albums.
-            const genreArtistIds = await libraryArtistIdsForGenre(genre);
+            // The albums showing the genre (shownAlbumGenres: their own, else their artist's), so a genre an album
+            // shows and this filter agree. A genre nothing shows has no albums.
+            const genreAlbumIds = await libraryAlbumIdsForGenre(genre);
             const rows = await prisma.$queryRaw<AlbumWithArtist[]>(Prisma.sql`
                 ${ALBUM_LIST_SELECT}
-                WHERE ${genreArtistIds.length > 0 ? Prisma.sql`a."artistId" = ANY(${genreArtistIds}::text[])` : Prisma.sql`1 = 0`}
+                WHERE ${genreAlbumIds.length > 0 ? Prisma.sql`a.id = ANY(${genreAlbumIds}::text[])` : Prisma.sql`1 = 0`}
                   AND EXISTS (SELECT 1 FROM "Track" t WHERE t."albumId" = a.id AND ${playableSongSql("t", "a")})
-                ORDER BY a."sortName" ASC
+                ORDER BY a."sortName" ASC, a.id ASC
                 LIMIT ${size} OFFSET ${offset}
             `);
             albums = rows;
@@ -428,7 +427,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
                         },
                     },
                 },
-                orderBy: { sortName: "asc" },
+                orderBy: [{ sortName: "asc" }, { id: "asc" }],
                 take: size,
                 skip: offset,
                 include: albumInclude,
@@ -491,7 +490,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 
     const albumList = albums.map((a) => {
         const artistName = a.artist.displayName || a.artist.name;
-        const genre = firstArtistGenre(a.artist.genres, a.artist.userGenres);
+        const genre = shownAlbumGenre(a, a.artist);
         const songCount = a.tracks?.length ?? a.songCount ?? 0;
         const duration = a.tracks
             ? a.tracks.reduce((sum, t) => sum + (t.duration ?? 0), 0)
@@ -506,7 +505,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
 // ===================== GENRES =====================
 
 libraryRouter.all("/getGenres.view", wrap(async (req, res) => {
-    // Genres live on artists; libraryGenreTotals is the one shared list, counted from the playable songs.
+    // libraryGenreTotals is the one shared list, counted from the playable songs under the genres their albums show.
     const sorted = (await libraryGenreTotals())
         .sort((x, y) => x.name.localeCompare(y.name))
         .map(({ name, albums, songs }) => ({

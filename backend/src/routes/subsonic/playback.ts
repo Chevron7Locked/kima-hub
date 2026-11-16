@@ -8,8 +8,9 @@ import { isFileGone } from "../../utils/errors";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
 import { getAudioStreamingService } from "../../services/audioStreaming";
 import { config } from "../../config";
-import { artistPicture, firstArtistGenre, mapSong, serveFromTranscodeParams, splitCoverArtId, type SubsonicServe, wrap } from "./mappers";
+import { artistPicture, mapSong, serveFromTranscodeParams, splitCoverArtId, type SubsonicServe, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
+import { shownAlbumGenre } from "../../utils/genreSql";
 import { normalizeArtistName } from "../../services/artistIdentity";
 import { accentBlind, containsAccentBlindSql } from "../../services/textMatch";
 import { sameName } from "../../services/discovery/discoverEvidence";
@@ -101,6 +102,7 @@ playbackRouter.all("/getNowPlaying.view", wrap(async (req, res) => {
                               select: {
                                   id: true,
                                   name: true,
+                                  normalizedName: true,
                                   displayName: true,
                                   genres: true,
                                   userGenres: true,
@@ -121,7 +123,7 @@ playbackRouter.all("/getNowPlaying.view", wrap(async (req, res) => {
         if (!track) return [];
 
         const artistName = track.album.artist.displayName || track.album.artist.name;
-        const genre = firstArtistGenre(track.album.artist.genres, track.album.artist.userGenres);
+        const genre = shownAlbumGenre(track.album, track.album.artist);
         const minutesAgo = Math.max(0, Math.floor((Date.now() - state.updatedAt.getTime()) / 60000));
 
         return [{
@@ -416,7 +418,7 @@ playbackRouter.all("/getBookmarks.view", wrap(async (req, res) => {
                 album,
                 artist.displayName || artist.name,
                 artist.id,
-                firstArtistGenre(artist.genres, artist.userGenres),
+                shownAlbumGenre(album, artist),
             ),
         };
     });

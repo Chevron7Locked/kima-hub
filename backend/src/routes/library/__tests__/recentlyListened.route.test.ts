@@ -70,6 +70,13 @@ it("leaves out Various Artists and Unknown Artist, which name no one", async () 
     expect(names).toEqual([`${P} Real`]);
 });
 
+it("shows the artist picture when the person's own picture is blank text", async () => {
+    await prisma.artist.update({ where: { id: `${P}-ar-real` }, data: { userHeroUrl: "", heroUrl: "https://pictures.example/found.jpg" } });
+    const res = await request(app()).get("/library/recently-listened?limit=10");
+    const card = (res.body.items as { type: string; name?: string; coverArt: string | null }[]).find((i) => i.name === `${P} Real`);
+    expect(card?.coverArt).toBe("https://pictures.example/found.jpg");
+});
+
 describe("the page is full", () => {
     const BUSY = `${P}-busy`;
     const asBusy = () =>

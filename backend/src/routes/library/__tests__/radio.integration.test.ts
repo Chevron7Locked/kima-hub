@@ -109,6 +109,16 @@ const artistGenres = (r: Row) => {
     return personSet.length > 0 ? personSet : asGenreList(r.album.artist.genres);
 };
 
+// The genres a song shows, by hand (utils/genreSql.ts shownAlbumGenres): its album's merged genres, else its artist's,
+// with "_" markers and a tag equal to the artist's own name left out.
+const shownGenres = (r: Row) => {
+    const usable = (list: string[]) =>
+        list.filter((g) => g !== "" && !g.startsWith("_") && g.toLowerCase() !== r.album.artist.name.toLowerCase());
+    const own = asGenreList(r.album.userGenres).length > 0 ? asGenreList(r.album.userGenres) : asGenreList(r.album.genres);
+    const ofAlbum = usable(own);
+    return ofAlbum.length > 0 ? ofAlbum : usable(artistGenres(r));
+};
+
 interface RadioTrack {
     id: string;
     title: string;
@@ -146,9 +156,9 @@ const branches: Branch[] = [
     { name: "decade 1970", query: { type: "decade", value: 1970 },
       clause: (r) => year(r) !== null && year(r)! >= 1970 && year(r)! < 1980 },
     { name: "genre rock", query: { type: "genre", value: "rock" },
-      clause: (r) => artistGenres(r).some((g) => g.toLowerCase().includes("rock")) },
+      clause: (r) => shownGenres(r).some((g) => g.toLowerCase().includes("rock")) },
     { name: "genre Pop (value is lower-cased)", query: { type: "genre", value: "Pop" },
-      clause: (r) => artistGenres(r).some((g) => g.toLowerCase().includes("pop")) },
+      clause: (r) => shownGenres(r).some((g) => g.toLowerCase().includes("pop")) },
     ...STATIONS.map(([query, recipe]) => ({
         name: `${Object.values(query).join(" ")} (recipe ${recipe})`,
         query,

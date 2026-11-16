@@ -277,6 +277,15 @@ const listeningStartSteps: StartStep[] = [
         },
     },
     {
+        name: "library change marker",
+        // Shown changes still waiting in their coalescing window when the last process stopped were forgotten with it,
+        // so a client refetches once after every start.
+        run: async () => {
+            const { markLibraryChangedAtStart } = await import("./services/libraryChanged");
+            await markLibraryChangedAtStart();
+        },
+    },
+    {
         name: "GPU runtime projection",
         run: async () => {
             // Rewrite the GPU toggle file from the DB so the two cannot disagree after a restart.

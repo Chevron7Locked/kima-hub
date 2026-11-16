@@ -3,6 +3,7 @@ import { prisma } from "../../utils/db";
 import { subsonicError, subsonicOk, SubsonicError } from "../../utils/subsonicResponse";
 import { DIRECT_PARAMS, knownSuffix, mapSong, songFormat, transcodeParamsFor, wrap } from "./mappers";
 import { planSubsonicSong } from "./streamPlan";
+import { shownAlbumGenre } from "../../utils/genreSql";
 import { resolveWithinMusicRoot } from "../library/trackPath";
 import { PLAYABLE_SONG } from "../../utils/playableSong";
 import {
@@ -67,7 +68,7 @@ async function shareEntries(entityType: ShareEntityType, entityId: string) {
                       include: { track: { include: SONG_WITH_ALBUM } },
                   })
               ).map((item) => item.track);
-    return tracks.map((t) => mapSong(t, t.album, t.album.artist.displayName || t.album.artist.name, t.album.artist.id));
+    return tracks.map((t) => mapSong(t, t.album, t.album.artist.displayName || t.album.artist.name, t.album.artist.id, shownAlbumGenre(t.album, t.album.artist)));
 }
 
 // Endpoints Kima does not implement answer with a real Subsonic error, never

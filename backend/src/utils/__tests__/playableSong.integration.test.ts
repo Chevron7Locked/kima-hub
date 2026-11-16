@@ -71,7 +71,7 @@ import libraryArtistsRouter, { resolveSimilarArtists } from "../../routes/librar
 import libraryAlbumsRouter from "../../routes/library/albums";
 import playlistsRouter from "../../routes/playlists";
 import { updateArtistCounts } from "../../services/artistCountsService";
-import { libraryArtistIdsForGenre } from "../genreSql";
+import { libraryAlbumIdsForGenre } from "../genreSql";
 import recommendationsRouter from "../../routes/recommendations";
 import { deezerService } from "../../services/deezer";
 import { dataCacheService } from "../../services/dataCache";
@@ -989,8 +989,11 @@ describe("an artist with no playable song", () => {
         }
     });
 
-    it("is not among a genre's library artists", async () => {
-        listed(await libraryArtistIdsForGenre(GENRE));
+    it("has no album among a genre's library albums", async () => {
+        const ids = await libraryAlbumIdsForGenre(GENRE);
+        expect(ids).toContain(`${SONG.playable}-al`);
+        expect(ids).not.toContain(`${P}-vanished-al1`);
+        expect(ids).not.toContain(`${P}-vanished-al2`);
     });
 
     it("counts no albums and no songs, so the Subsonic artist lists leave it out", async () => {

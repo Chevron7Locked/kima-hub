@@ -6,7 +6,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { getMergedGenres } from "../../utils/metadataOverrides";
-import { libraryArtistIdsForGenre } from "../../utils/genreSql";
+import { libraryAlbumIdsForGenre } from "../../utils/genreSql";
 import { getEffectiveDecadeWhereClause } from "../../utils/dateFilters";
 import { shuffleArray } from "../../utils/shuffle";
 import { drawIds, drawWeighted, sampleTrackIds, unplayedTrackIds } from "../mixes/helpers";
@@ -167,12 +167,12 @@ export async function selectRadioTracks(
       const genreValue = (value as string) || "";
       // Every spelling of the genre plays, and genres that contain it ("hip hop" plays "alternative hip-hop").
       // A name made only of spaces and punctuation ("-", "") is no genre and plays nothing. The names are compared
-      // by genreKey (libraryArtistIdsForGenre), the database only lists the library's artists.
-      const artistIds = await libraryArtistIdsForGenre(genreValue);
-      const genreTracks = artistIds.length
+      // by genreKey (libraryAlbumIdsForGenre), the database only lists the library's albums. An album shows its own genres, else its artist's.
+      const albumIds = await libraryAlbumIdsForGenre(genreValue);
+      const genreTracks = albumIds.length
         ? await prisma.$queryRaw<{ id: string }[]>`
             SELECT t.id FROM "Track" t JOIN "Album" al ON al.id = t."albumId"
-             WHERE ${playableSongSql("t", "al")} AND al."artistId" = ANY(${artistIds}::text[])`
+             WHERE ${playableSongSql("t", "al")} AND al.id = ANY(${albumIds}::text[])`
         : [];
       trackIds = drawIds(
         genreTracks.map((t) => t.id),
@@ -180,7 +180,7 @@ export async function selectRadioTracks(
       );
 
       logger.debug(
-        `[Radio:genre] Found ${trackIds.length} tracks for genre "${genreValue}" from Artist.genres and userGenres`,
+        `[Radio:genre] Found ${trackIds.length} tracks for genre "${genreValue}" from the genres albums show`,
       );
       break;
     }

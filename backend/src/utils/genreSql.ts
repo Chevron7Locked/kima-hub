@@ -1,14 +1,15 @@
 /**
- * The genre key (genreKey), the shared genre matching built on it (genreMatchesWanted,
- * artistTaggedWithGenre, libraryArtistIdsForGenre), and the genre list built on getMergedGenres
- * (computeGenreTotals, libraryGenreTotals). Matching and totals are computed in TypeScript, never in SQL: a database
- * in the SQL_ASCII encoding can neither normalize nor lower-case beyond ASCII, and the list is
- * one rule every surface shares (Subsonic's getGenres and the radio stations).
+ * The genre key (genreKey), the one rule for the genres an album shows (shownAlbumGenres, shownAlbumGenre), the filter
+ * built on it (libraryAlbumIdsForGenre), and the genre list (computeGenreTotals, libraryGenreTotals). An album shows its own
+ * merged genres, else its artist's, and a song shows its album's, so a genre shown, the filter for it and the list that
+ * counts it always agree. Matching and totals are computed in TypeScript, never in SQL: a database in the SQL_ASCII
+ * encoding can neither normalize nor lower-case beyond ASCII, and the rule is one every surface shares (Subsonic's genre
+ * fields, filters and getGenres, the web's search and the radio stations).
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { getMergedGenres } from "./metadataOverrides";
-import { artistHasPlayableSongSql } from "../services/libraryFilters";
+import { albumHasPlayableSongSql } from "../services/libraryFilters";
 import { playableSongSql } from "./playableSong";
 
 /**
@@ -36,43 +37,78 @@ function genreMatchesWanted(name: string, wantedKey: string): boolean {
     return wantedKey !== "" && genreKey(name).includes(wantedKey);
 }
 
-/**
- * Whether an artist's genre tags answer to a requested genre. The tags read are getMergedGenres —
- * the ones a person set when they set any, else the enriched ones — the same list the web's genre
- * filters read. The one matching rule, shared by the web and the Subsonic layer, so all surfaces
- * select the same artists for the same genre string.
- */
-export function artistTaggedWithGenre(genres: unknown, userGenres: unknown, genreValue: string | null | undefined): boolean {
-    const wanted = genreKey(genreValue);
-    return wanted !== "" && getMergedGenres({ genres, userGenres }).some((g) => genreMatchesWanted(g, wanted));
-}
-
-/**
- * The ids of the artists tagged with a genre, matched by genreKey (the rule above): the database lists the
- * library's artists (those with a playable song), the names are compared here. Every surface that filters
- * library music by genre asks this, so none can drift from the others.
- */
-export async function libraryArtistIdsForGenre(genreValue: string): Promise<string[]> {
-    if (genreKey(genreValue) === "") return [];
-    const tagged = await prisma.$queryRaw<{ id: string; genres: unknown; userGenres: unknown }[]>`
-        SELECT ar.id, ar.genres, ar."userGenres"
-        FROM "Artist" ar
-        WHERE ${artistHasPlayableSongSql("ar")} AND (ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
-    `;
-    return tagged.filter((ar) => artistTaggedWithGenre(ar.genres, ar.userGenres, genreValue)).map((ar) => ar.id);
-}
-
-/** One artist's genres for the genre list, with the songs and albums its library music carries. */
-export interface GenreCountedArtist {
-    /** The artist's name, for dropping its self-name tag. */
+/** What the genre rule reads of an artist: its tags, and its names for dropping a tag that names the artist. */
+export interface GenreArtist {
     name?: string | null;
     normalizedName?: string | null;
     genres?: unknown;
     userGenres?: unknown;
-    /** Playable songs this artist has. */
+}
+
+/** What the genre rule reads of an album: its own tags. */
+export interface GenreAlbum {
+    genres?: unknown;
+    userGenres?: unknown;
+}
+
+/**
+ * The genres an album shows, the one rule for the album, its songs, the genre filters and the genre list. The album's own
+ * merged genres (getMergedGenres: the person's list when set, else the enriched one), else its artist's. An internal
+ * marker (a tag starting "_"), an empty tag and a tag equal to the artist's own name (a band named "Jazz" tagged "jazz")
+ * are no genre, and an album left with none shows its artist's. The first is the genre it shows; the rest are the ones it
+ * answers to.
+ */
+export function shownAlbumGenres(album: GenreAlbum, artist: GenreArtist): string[] {
+    const own = new Set([genreKey(artist.name), genreKey(artist.normalizedName)]);
+    const usable = (entity: GenreAlbum) =>
+        getMergedGenres(entity).filter((name) => {
+            const key = genreKey(name);
+            return !!name && !name.startsWith("_") && key !== "" && !own.has(key);
+        });
+    const ofAlbum = usable(album);
+    return ofAlbum.length > 0 ? ofAlbum : usable(artist);
+}
+
+/** The genre an album, or a song on it, shows: the first of `shownAlbumGenres`. */
+export function shownAlbumGenre(album: GenreAlbum, artist: GenreArtist): string | undefined {
+    return shownAlbumGenres(album, artist)[0];
+}
+
+/**
+ * The ids of the library's albums (those holding a playable song) that show a genre, matched by genreKey: the database
+ * lists the albums that, or whose artist, carry a tag, the names are compared here. Every surface that filters library
+ * music by genre asks this, so a genre shown and its filter always agree.
+ */
+export async function libraryAlbumIdsForGenre(genreValue: string): Promise<string[]> {
+    const wanted = genreKey(genreValue);
+    if (wanted === "") return [];
+    const tagged = await prisma.$queryRaw<
+        {
+            id: string; genres: unknown; userGenres: unknown;
+            name: string; normalizedName: string | null; artistGenres: unknown; artistUserGenres: unknown;
+        }[]
+    >(Prisma.sql`
+        SELECT a.id, a.genres, a."userGenres", ar.name, ar."normalizedName",
+               ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres"
+        FROM "Album" a
+        JOIN "Artist" ar ON a."artistId" = ar.id
+        WHERE ${albumHasPlayableSongSql("a")}
+          AND (a.genres IS NOT NULL OR a."userGenres" IS NOT NULL OR ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
+    `);
+    return tagged
+        .filter((row) =>
+            shownAlbumGenres(row, {
+                name: row.name, normalizedName: row.normalizedName, genres: row.artistGenres, userGenres: row.artistUserGenres,
+            }).some((g) => genreMatchesWanted(g, wanted)),
+        )
+        .map((row) => row.id);
+}
+
+/** One library album for the genre list: its tags, its artist's, and the playable songs it holds. */
+export interface GenreCountedAlbum extends GenreAlbum {
+    artist: GenreArtist;
+    /** Playable songs this album has. */
     songs: number;
-    /** Library albums this artist has with a playable song. */
-    albums: number;
 }
 
 /** One genre of the shared list: its key, commonest spelling, and summed library counts. */
@@ -86,67 +122,70 @@ export interface GenreTotals {
 }
 
 /**
- * The genre list, computed once for every surface that shows one (the web's GET /genres and Subsonic's
- * getGenres). For each artist the genres read are getMergedGenres — the person's tags when they set any,
- * else the enriched ones — so a genre a person added shows and counts like an enriched one, and a genre
- * a person removed counts under neither. Spellings of one
- * genre are one genre (genreKey) listed under the spelling carrying the most songs; each artist is
- * counted once per genre, so an artist tagged "Hip-Hop" AND "hip hop" adds its songs once. A tag equal
- * to the artist's own name (a band named "Jazz" tagged "jazz") is not a genre: it is dropped from
- * that artist only, so the band neither adds nor hides the genre. The one rule the web and the
- * Subsonic layer share; each caller keeps its own output shape and thresholds.
+ * The genre list, computed once for every surface that shows one (Subsonic's getGenres and the radio stations). Each
+ * album counts under the genres it shows (shownAlbumGenres), so a genre a person added shows and counts like an enriched
+ * one, a genre a person removed counts under neither, and a song counts under its album's genres, the ones its genre field
+ * and its filters read. Spellings of one genre are one genre (genreKey) listed under the spelling carrying the most
+ * songs; each album is counted once per genre, so an album tagged "Hip-Hop" AND "hip hop" adds its songs once. Each
+ * caller keeps its own output shape and thresholds.
  */
-export function computeGenreTotals(artists: GenreCountedArtist[]): GenreTotals[] {
+export function computeGenreTotals(albums: GenreCountedAlbum[]): GenreTotals[] {
     const songs = new Map<string, number>();
-    const albums = new Map<string, number>();
+    const counted = new Map<string, number>();
     const spellings = new Map<string, Map<string, number>>();
-    for (const artist of artists) {
-        const own = new Set([genreKey(artist.name), genreKey(artist.normalizedName)]);
+    for (const album of albums) {
         const seen = new Set<string>();
-        for (const name of getMergedGenres(artist)) {
-            if (!name || name.startsWith("_")) continue;
+        for (const name of shownAlbumGenres(album, album.artist)) {
             const key = genreKey(name);
-            if (!key || own.has(key)) continue;
-            // One spelling per artist counted once, as one artist is counted once per genre.
+            // One spelling per album counted once, as one album is counted once per genre.
             if (!seen.has(key)) {
-                songs.set(key, (songs.get(key) ?? 0) + artist.songs);
-                albums.set(key, (albums.get(key) ?? 0) + artist.albums);
+                songs.set(key, (songs.get(key) ?? 0) + album.songs);
+                counted.set(key, (counted.get(key) ?? 0) + 1);
             }
             seen.add(key);
             const carried = spellings.get(key) ?? new Map<string, number>();
             if (!spellings.has(key)) spellings.set(key, carried);
-            carried.set(name, (carried.get(name) ?? 0) + artist.songs);
+            carried.set(name, (carried.get(name) ?? 0) + album.songs);
         }
     }
     return Array.from(songs.entries()).map(([key, songCount]) => ({
         key,
         name: Array.from(spellings.get(key)!.entries()).sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0))[0][0],
         songs: songCount,
-        albums: albums.get(key) ?? 0,
+        albums: counted.get(key) ?? 0,
     }));
 }
 
 /**
- * Every artist with a genre tag and a playable song, with the playable songs it has and the library albums that hold
- * them, counted from the songs themselves. Nothing cached is read: a count kept on the artist or album can be stale (a
- * file went missing since the last scan) and can include songs that cannot play.
+ * Every library album with a genre tag of its own or its artist's and a playable song, with the playable songs it holds,
+ * counted from the songs themselves. Nothing cached is read: a count kept on the album can be stale (a file went missing
+ * since the last scan) and can include songs that cannot play.
  */
-export async function libraryGenreArtists(): Promise<GenreCountedArtist[]> {
+export async function libraryGenreAlbums(): Promise<GenreCountedAlbum[]> {
     const rows = await prisma.$queryRaw<
-        { name: string; normalizedName: string | null; genres: unknown; userGenres: unknown; songs: bigint; albums: bigint }[]
+        {
+            genres: unknown; userGenres: unknown; name: string; normalizedName: string | null;
+            artistGenres: unknown; artistUserGenres: unknown; songs: bigint;
+        }[]
     >(Prisma.sql`
-        SELECT ar.name, ar."normalizedName", ar.genres, ar."userGenres",
-               COUNT(t.id)::bigint AS songs, COUNT(DISTINCT a.id)::bigint AS albums
-        FROM "Artist" ar
-        JOIN "Album" a ON a."artistId" = ar.id
+        SELECT a.genres, a."userGenres", ar.name, ar."normalizedName",
+               ar.genres AS "artistGenres", ar."userGenres" AS "artistUserGenres", COUNT(t.id)::bigint AS songs
+        FROM "Album" a
+        JOIN "Artist" ar ON ar.id = a."artistId"
         JOIN "Track" t ON t."albumId" = a.id
-        WHERE ${playableSongSql("t", "a")} AND (ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
-        GROUP BY ar.id
+        WHERE ${playableSongSql("t", "a")}
+          AND (a.genres IS NOT NULL OR a."userGenres" IS NOT NULL OR ar.genres IS NOT NULL OR ar."userGenres" IS NOT NULL)
+        GROUP BY a.id, ar.id
     `);
-    return rows.map((r) => ({ ...r, songs: Number(r.songs), albums: Number(r.albums) }));
+    return rows.map((r) => ({
+        genres: r.genres,
+        userGenres: r.userGenres,
+        artist: { name: r.name, normalizedName: r.normalizedName, genres: r.artistGenres, userGenres: r.artistUserGenres },
+        songs: Number(r.songs),
+    }));
 }
 
-/** The genre list of the library as it plays now: computeGenreTotals over libraryGenreArtists. */
+/** The genre list of the library as it plays now: computeGenreTotals over libraryGenreAlbums. */
 export async function libraryGenreTotals(): Promise<GenreTotals[]> {
-    return computeGenreTotals(await libraryGenreArtists());
+    return computeGenreTotals(await libraryGenreAlbums());
 }

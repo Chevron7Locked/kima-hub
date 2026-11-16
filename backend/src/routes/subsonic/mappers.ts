@@ -25,9 +25,6 @@ export type AlbumRow = {
     year: number | null;
     originalYear: number | null;
     displayYear: number | null;
-    /** The album's own genres: the person's list when set, else the enriched one. */
-    genres: unknown;
-    userGenres: unknown;
     coverUrl: string | null;
     userCoverUrl?: string | null;
     artistId: string;
@@ -35,16 +32,13 @@ export type AlbumRow = {
     createdAt: Date;
     songCount?: number;
     duration?: number;
-    /** The artist's genre: what an album with no genre of its own shows. */
+    /** The genre the album shows, from `shownAlbumGenre` (utils/genreSql.ts): the one rule for albums and their songs. */
     genre?: string | null;
 };
 
 /** The year a client sees for an album: what the web shows. Zero or none is no year. */
 export const shownAlbumYear = (album: { year: number | null; originalYear: number | null; displayYear: number | null }): number | undefined =>
     getEffectiveYear(album) || undefined;
-
-/** The genre an album shows: the first of its own genres, else its artist's (`album.genre`). */
-const shownAlbumGenre = (album: AlbumRow): string | undefined => firstArtistGenre(album.genres, album.userGenres) ?? (album.genre || undefined);
 
 export type TrackRow = {
     id: string;
@@ -121,7 +115,7 @@ export function mapAlbum(album: AlbumRow, artistName: string) {
         "@_songCount": album.songCount ?? 0,
         "@_duration": album.duration !== undefined ? Math.round(album.duration) : 0,
         "@_year": shownAlbumYear(album),
-        "@_genre": shownAlbumGenre(album),
+        "@_genre": album.genre || undefined,
         "@_created": album.createdAt.toISOString(),
     };
 }
@@ -142,7 +136,7 @@ export function mapAlbumChild(album: AlbumRow, artistName: string) {
         "@_artistId": album.artistId,
         "@_coverArt": albumCoverArtId(album),
         "@_year": shownAlbumYear(album),
-        "@_genre": shownAlbumGenre(album),
+        "@_genre": album.genre || undefined,
         "@_created": album.createdAt.toISOString(),
     };
 }
@@ -175,17 +169,6 @@ export function mapSong(
         "@_type": "music",
         "@_genre": genre || undefined,
     };
-}
-
-// Extract the first genre string from an artist's enriched genre array.
-// Prefers userGenres override; falls back to enrichment genres.
-// Tags starting with "_" are internal markers (e.g. "_no_mood_tags") — filtered out.
-// Only a JSON array counts as a list of genres, as in the genre filters (utils/genreSql.ts): a bare string or an
-// object in either column is none.
-export function firstArtistGenre(genres: unknown, userGenres: unknown): string | undefined {
-    const list = (value: unknown) => (Array.isArray(value) ? value.filter((g): g is string => typeof g === "string") : []);
-    const user = list(userGenres);
-    return (user.length > 0 ? user : list(genres)).find((g) => g && !g.startsWith("_"));
 }
 
 // Normalize codec names stored by the library scanner (e.g. "FLAC", "MPEG 1 Layer 3")

@@ -176,7 +176,7 @@ router.get("/recently-listened", async (req, res) => {
       if (item.type === "audiobook" || item.type === "podcast") {
         return item;
       } else {
-        const coverArt = item.userHeroUrl ?? item.heroUrl ?? null;
+        const coverArt = item.userHeroUrl || item.heroUrl || null;
         return {
           ...item,
           coverArt,
@@ -228,7 +228,7 @@ router.get("/recently-added", async (req, res) => {
     );
 
     const artistsWithImages = Array.from(artistsMap.values()).map((artist) => {
-      const coverArt = artist.userHeroUrl ?? artist.heroUrl ?? null;
+      const coverArt = artist.userHeroUrl || artist.heroUrl || null;
       return {
         ...artist,
         coverArt,

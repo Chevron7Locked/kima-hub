@@ -140,11 +140,12 @@ describe("the web's genre matching and the Subsonic filters answer alike", () =>
         expect(songsKeys).toEqual(albumKeys);
     });
 
-    it("the band named 'Jazz' is reached through the genre it is tagged with, like anyone else", async () => {
+    it("the band named 'Jazz' is not reached through the one tag that is its own name, as the genre list leaves it out", async () => {
         const songs = await subsonic("/getSongsByGenre.view", { genre: "jazz", count: 500 });
         const keys = artistKeysOf(list(songs.songsByGenre.song).map((s: { id: string }) => s.id), "trk_");
-        // "split" is absent: its person-set genres replace its enriched ones.
-        expect(keys).toEqual(["jazz", "named"]);
+        // "split" is absent: its person-set genres replace its enriched ones. "named" is absent: its only tag is its
+        // own name, no genre (the same rule the genre list and the genre a song shows use).
+        expect(keys).toEqual(["jazz"]);
     });
 
     it("an artist's person-set genres replace its enriched genres, in every surface", async () => {

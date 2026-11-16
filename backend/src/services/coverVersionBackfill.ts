@@ -83,7 +83,7 @@ export async function rewriteCoverValues(
             await prisma.album.update({ where: { id: album.id }, data });
             notePictureChange("album", album.id, {
                 was: shownPicture(album.coverUrl, album.userCoverUrl),
-                now: shownPicture(data.coverUrl ?? album.coverUrl, data.userCoverUrl ?? album.userCoverUrl),
+                now: shownPicture(data.coverUrl || album.coverUrl, data.userCoverUrl || album.userCoverUrl),
             });
             written += keys;
         }
@@ -102,7 +102,7 @@ export async function rewriteCoverValues(
             await prisma.artist.update({ where: { id: artist.id }, data });
             notePictureChange("artist", artist.id, {
                 was: shownPicture(artist.heroUrl, artist.userHeroUrl),
-                now: shownPicture(data.heroUrl ?? artist.heroUrl, data.userHeroUrl ?? artist.userHeroUrl),
+                now: shownPicture(data.heroUrl || artist.heroUrl, data.userHeroUrl || artist.userHeroUrl),
             });
             written += keys;
         }

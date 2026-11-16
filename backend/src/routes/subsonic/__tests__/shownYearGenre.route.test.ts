@@ -114,6 +114,25 @@ describe("an album as Subsonic shows it", () => {
         albums.forEach(expectAlbumShown);
     });
 
+    it("lists an album with no year first, newest-first, as the database ordered a missing year before", async () => {
+        const D = `${P}-al-d`;
+        await prisma.album.create({
+            data: { id: D, rgMbid: `${D}-rg`, identityKey: D, artistId: ARTIST, title: `${P} album d`, primaryType: "Album", location: "LIBRARY" },
+        });
+        await prisma.track.create({
+            data: { id: song(D), albumId: D, title: `${P} song d`, trackNo: 1, duration: 100, filePath: `${D}.flac`, fileModified: new Date(), fileSize: 1, mime: "FLAC" },
+        });
+        try {
+            const artist = list<any>((await ask("getArtist", { id: ARTIST })).artist.album).map((a) => a.id);
+            const directory = list<any>((await ask("getMusicDirectory", { id: ARTIST })).directory.child).map((a) => a.id);
+            expect(artist).toEqual([D, C, A, B]);
+            expect(directory).toEqual([D, C, A, B]);
+        } finally {
+            await prisma.track.deleteMany({ where: { id: song(D) } });
+            await prisma.album.deleteMany({ where: { id: D } });
+        }
+    });
+
     it("getMusicDirectory lists an artist's albums by the year shown, with the shown year and genre", async () => {
         const body = await ask("getMusicDirectory", { id: ARTIST });
         const children = list<any>(body.directory.child);
@@ -143,10 +162,10 @@ describe("the album lists", () => {
         },
     );
 
-    it("byGenre gives each album the shown year and genre", async () => {
-        const body = await ask("getAlbumList2", { type: "byGenre", genre: "artistgenre", size: "500" });
+    it.each([A, B, C] as const)("byGenre keeps album %s under the genre it shows, with the shown year and genre", async (id) => {
+        const body = await ask("getAlbumList2", { type: "byGenre", genre: SHOWN[id].genre, size: "500" });
         const ours = ofOurs(list<any>(body.albumList2.album));
-        expect(ours.map((a) => a.id).sort()).toEqual([A, B, C]);
+        expect(ours.map((a) => a.id)).toEqual([id]);
         ours.forEach(expectAlbumShown);
     });
 
@@ -219,9 +238,9 @@ describe("the song lists", () => {
         expect(await randomIds({ fromYear: "2005", toYear: "2005" })).toEqual([]);
     });
 
-    it("getSongsByGenre gives the shown year", async () => {
-        const songs = list<any>((await ask("getSongsByGenre", { genre: "artistgenre", count: "500" })).songsByGenre.song).filter((s) => s.id.startsWith(P));
-        expect(songs).toHaveLength(3);
+    it.each([A, B, C] as const)("getSongsByGenre keeps album %s's song under the genre it shows, with the shown year", async (id) => {
+        const songs = list<any>((await ask("getSongsByGenre", { genre: SHOWN[id].genre, count: "500" })).songsByGenre.song).filter((s) => s.id.startsWith(P));
+        expect(songs.map((s) => s.id)).toEqual([song(id)]);
         songs.forEach(expectSongShown);
     });
 

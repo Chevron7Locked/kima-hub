@@ -157,3 +157,44 @@ describe('subsonic getAlbumList ordering', () => {
         expect(await albums({ type: 'byGenre', genre: GENRE })).toEqual([albumId('1'), albumId('3'), albumId('4'), albumId('2')]);
     });
 });
+
+describe('subsonic getAlbumList paging over albums that share a sort name', () => {
+    const TIES = ['c', 'a', 'b'].map((k) => `${P}-tie-${k}`);
+
+    beforeAll(async () => {
+        for (const id of TIES) {
+            await prisma.album.create({
+                data: { id, rgMbid: `${id}-rg`, artistId: artistId('1'), identityKey: id, title: 'Same', sortName: 'zzzz same', primaryType: 'Album', location: 'LIBRARY' },
+            });
+            const track = await prisma.track.create({
+                data: { id: `${id}-t`, albumId: id, title: 'Same', trackNo: 1, duration: 100, filePath: `${id}.flac`, fileModified: new Date(), fileSize: 1 },
+            });
+            await prisma.likedTrack.create({ data: { userId: USER, trackId: track.id } });
+        }
+    });
+
+    afterAll(async () => {
+        await prisma.likedTrack.deleteMany({ where: { trackId: { in: TIES.map((id) => `${id}-t`) } } });
+        await prisma.track.deleteMany({ where: { id: { in: TIES.map((id) => `${id}-t`) } } });
+        await prisma.album.deleteMany({ where: { id: { in: TIES } } });
+    });
+
+    it.each([
+        ['alphabeticalByName', {}],
+        ['starred', {}],
+        ['byGenre', { genre: GENRE }],
+    ])('%s keeps tied albums in id order, one page at a time', async (type, extra) => {
+        // The tied albums sort after every other of this file's albums, so the first of them (id order) is where their pages start.
+        const all = await ask('/getAlbumList.view', { type, size: '500', ...extra });
+        const ids = list<{ id: string }>(all.albumList.album).map((a) => a.id);
+        const first = ids.indexOf([...TIES].sort()[0]);
+        expect(first).toBeGreaterThanOrEqual(0);
+        expect(ids.slice(first, first + 3)).toEqual([...TIES].sort());
+        const pages: string[] = [];
+        for (let i = 0; i < 3; i++) {
+            const page = await ask('/getAlbumList.view', { type, size: '1', offset: String(first + i), ...extra });
+            pages.push(...list<{ id: string }>(page.albumList.album).map((a) => a.id));
+        }
+        expect(pages).toEqual([...TIES].sort());
+    });
+});

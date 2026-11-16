@@ -4,7 +4,7 @@ import { logger } from "../utils/logger";
 import { redisClient } from "../utils/redis";
 import { playableSongSql } from "../utils/playableSong";
 import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "./libraryFilters";
-import { genreKey, libraryArtistIdsForGenre } from "../utils/genreSql";
+import { genreKey, libraryAlbumIdsForGenre } from "../utils/genreSql";
 import { searchRows, containsSql, hasNonAscii } from "./textMatch";
 import { audiobookCoverAddress } from "./imageStorage";
 
@@ -18,30 +18,30 @@ interface SearchOptions {
     offset?: number;
 }
 
-/** What a genre filter keeps: the songs of artists tagged with the genre, and the songs tagged with it themselves. */
+/** What a genre filter keeps: the songs on albums showing the genre (utils/genreSql.ts), and the songs tagged with it themselves. */
 interface GenreScope {
-    artistIds: string[];
+    albumIds: string[];
     genreIds: string[];
 }
 
 /**
- * The artists and song genres that answer to a genre. Both are matched as genreKeys here, not in SQL: on SQL_ASCII the
+ * The albums and song genres that answer to a genre. Both are matched as genreKeys here, not in SQL: on SQL_ASCII the
  * database folds ASCII case only. A genre nothing carries has an empty scope, which keeps no song.
  */
 async function genreScopeOf(genre: string): Promise<GenreScope> {
     const wanted = genreKey(genre);
-    if (wanted === "") return { artistIds: [], genreIds: [] };
-    const [artistIds, genres] = await Promise.all([
-        libraryArtistIdsForGenre(genre),
+    if (wanted === "") return { albumIds: [], genreIds: [] };
+    const [albumIds, genres] = await Promise.all([
+        libraryAlbumIdsForGenre(genre),
         prisma.genre.findMany({ select: { id: true, name: true } }),
     ]);
-    return { artistIds, genreIds: genres.filter((g) => genreKey(g.name) === wanted).map((g) => g.id) };
+    return { albumIds, genreIds: genres.filter((g) => genreKey(g.name) === wanted).map((g) => g.id) };
 }
 
 /** The genre condition for a raw song query that names the song `t` and its album `a`; nothing when there is no scope. */
 function genreSql(scope: GenreScope | undefined): Prisma.Sql {
     if (!scope) return Prisma.empty;
-    return Prisma.sql`AND (a."artistId" = ANY(${scope.artistIds}::text[])
+    return Prisma.sql`AND (a.id = ANY(${scope.albumIds}::text[])
               OR EXISTS (SELECT 1 FROM "TrackGenre" tg WHERE tg."trackId" = t.id AND tg."genreId" = ANY(${scope.genreIds}::text[])))`;
 }
 

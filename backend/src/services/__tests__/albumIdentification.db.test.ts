@@ -10,7 +10,8 @@ import path from "path";
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { acoustidService } from "../acoustidService";
-import { identifyAlbumsBySound } from "../albumIdentification";
+import { fillAlbumFromCatalogue, identifyAlbumsBySound, type AlbumToFill } from "../albumIdentification";
+import { flushShownChanges } from "../shownChanges";
 import { markerMoves } from "../../__tests__/helpers/libraryMarker";
 
 jest.mock("../../utils/logger", () => ({
@@ -188,6 +189,41 @@ describe("identifyAlbumsBySound", () => {
             await seedAlbum();
             await prisma.album.update({ where: { id: id("alb") }, data: { ...ownCover, displayYear: 2014, userGenres: ["horrorsynth"] } });
             expect(await markerMoves(() => identifyAlbumsBySound([id("alb")]))).toBe(false);
+        });
+    });
+
+    describe("fillAlbumFromCatalogue on a row read before someone else filled it", () => {
+        const blank = (): AlbumToFill => ({ id: id("alb"), year: null, originalYear: null, displayYear: null, label: null, genres: null, userGenres: null });
+        const facts = { albumGenres: [{ name: "synthwave", count: 4 }], originalYear: 2014, label: "Blood Music" };
+
+        it("keeps a year, label and genres set after the read, and notes no change", async () => {
+            await seedAlbum();
+            await prisma.album.update({ where: { id: id("alb") }, data: { year: 1999, label: "Mine", genres: ["dub"] } });
+
+            expect(await markerMoves(async () => {
+                await fillAlbumFromCatalogue(blank(), facts);
+                await flushShownChanges();
+            })).toBe(false);
+            expect(await album()).toMatchObject({ year: 1999, label: "Mine", genres: ["dub"] });
+        });
+
+        it("fills only the field still blank, and notes just that one", async () => {
+            await seedAlbum();
+            await prisma.album.update({ where: { id: id("alb") }, data: { year: 1999, label: "Mine" } });
+
+            expect(await markerMoves(async () => {
+                await fillAlbumFromCatalogue(blank(), facts);
+                await flushShownChanges();
+            })).toBe(true);
+            expect(await album()).toMatchObject({ year: 1999, label: "Mine", genres: ["synthwave"] });
+        });
+
+        it("fills an empty genre list", async () => {
+            await seedAlbum();
+            await prisma.album.update({ where: { id: id("alb") }, data: { genres: [] } });
+
+            await fillAlbumFromCatalogue({ ...blank(), genres: [] }, facts);
+            expect((await album())?.genres).toEqual(["synthwave"]);
         });
     });
 
