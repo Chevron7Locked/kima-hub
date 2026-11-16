@@ -59,6 +59,17 @@ beforeEach(() => {
 });
 
 describe("POST /api/playback-state/live", () => {
+    it("drops a queue entry whose duration is not a number", async () => {
+        const queue = [
+            { trackId: "ctrackbbbbbbbbbbbbbbbbbb1", duration: null },
+            { trackId: "ctrackbbbbbbbbbbbbbbbbbb2", duration: true },
+            { trackId: "ctrackbbbbbbbbbbbbbbbbbb3", duration: 5000 },
+        ];
+        const res = await request(app).post("/api/playback-state/live").send({ ...BODY, queue });
+        expect(res.status).toBe(200);
+        expect(getLiveState().queue).toEqual([{ trackId: "ctrackbbbbbbbbbbbbbbbbbb3", duration: 5000 }]);
+    });
+
     it("passes the public user's report on, keeping only well-formed queue entries", async () => {
         const res = await request(app).post("/api/playback-state/live").send(BODY);
         expect(res.status).toBe(200);
@@ -103,6 +114,11 @@ describe("POST /api/playback-state/live", () => {
         ["no track", { ...BODY, trackId: "" }],
         ["a negative position", { ...BODY, position: -1 }],
         ["no duration", { ...BODY, duration: undefined }],
+        ["a null position", { ...BODY, position: null }],
+        ["an empty-string position", { ...BODY, position: "" }],
+        ["a boolean duration", { ...BODY, duration: true }],
+        ["an array position", { ...BODY, position: [] }],
+        ["a numeric string position", { ...BODY, position: "1000" }],
     ])("refuses %s", async (_label, body) => {
         const res = await request(app).post("/api/playback-state/live").send(body);
         expect(res.status).toBe(400);

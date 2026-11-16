@@ -40,9 +40,9 @@ router.post("/", async (req, res) => {
 
 const LIVE_STATUSES = new Set(["playing", "paused", "stopped"]);
 
+// Only a real number counts: Number() would turn null, "", true and [] into 0.
 function millis(value: unknown): number | null {
-    const n = Number(value);
-    return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
 }
 
 // The web player's play/pause/seek/track changes, for the public live trip. Players only send
@@ -56,7 +56,7 @@ router.post("/live", async (req, res) => {
         const positionMs = millis(position);
         const durationMs = millis(duration);
         if (!LIVE_STATUSES.has(status) || typeof trackId !== "string" || !trackId || positionMs === null || durationMs === null) {
-            return res.status(400).json({ error: "status, trackId, position and duration are required" });
+            return refuseRequest(req, res, "live report needs a status, a trackId and numeric position and duration", "status, trackId, position and duration are required");
         }
         const upNext: LiveQueueEntry[] = Array.isArray(queue)
             ? queue
