@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Recently added keeps its order after a rescan.** Recently added, and the newest-albums list in Subsonic apps, order by when an album first arrived, so a rescan no longer moves an album back to the top. An album re-filed under another artist or merged with its twin keeps the time it first arrived.
 - **Albums and artists with nothing to play leave the library lists.** An album whose every song is missing or could not be read, and an artist with no album that plays, no longer show in the album and artist lists, search, recently added, a genre's artists, an artist's albums or among similar artists in your library, on the web and in Subsonic apps. Album and song counts count only songs that play. They come back when a file does.
 - **Similar artists show as in your library as soon as they are**, not up to a day later.
+- **A library scan finishes even when recovering old plays fails.** It still removes songs that are gone and refreshes what apps see, and moving an artist's album credit while another change deletes it no longer fails.
+- **Search results update as soon as songs go missing** or a liked Discover album joins the library, instead of up to five minutes later.
+- **A played song that has left the library no longer shows under a Discover-only artist of the same name.**
+- **Links no longer break when an id contains `/`, `?` or `#`,** on library, playlist, mix and podcast pages.
 
 #### Playback and the saved queue
 
@@ -72,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Play and pause buttons act on what is playing.** The play icon on a song row turns to pause while that song plays, pressing it pauses, and play resumes from the same point instead of starting the list again; a double click never pauses. The big play button on an album, artist, mix, playlist or Discover page resumes music started from that page, also after a reload, on another device and with songs added by add to queue or play next. A song of that album started from elsewhere leaves the button saying play, and two artists with the same name no longer both show as playing.
 - **The queue plays what it shows.** Removing, moving or replacing the next song in a song's last 30 seconds plays the song the queue shows next, and a one-song repeat plays without a gap. Clicking a song in the queue panel jumps to it without rebuilding the queue or changing the shuffle order, starting a list at a place it does not have plays it from the top, and the buttons on a song row act on the list as it is now.
 - **The web player skips songs whose file can't be read.** It answers "not available" instead of stalling, and such songs are no longer prepared ahead of play. Discover songs still play. A saved playback quality Kima doesn't know plays the original.
+- **An empty audio file answers "not found"** even when the player already holds a cached copy.
 
 #### Playlists and imports
 
@@ -83,6 +88,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Import counts stay right.** An import builds its playlist once, even when a scan and a progress check finish together, and a cancelled import makes no playlist. A song you dismiss from the waiting list comes off the total, stays out of the playlist and is not added back by a scan. Songs found later raise the matched count, a late failure no longer resets the counts, and an open import page updates as songs are found or dismissed. An import whose download ran out of sources finishes at once instead of waiting out its 10-minute timeout.
 - **Playlist import finds the right songs.** All of an artist's songs are looked at, not only the first 50, and a song or artist you renamed is found by the name you gave it. A line no longer imports a longer title that only contains its words ("Love" no longer brings in "Love Me Do") or a longer-named artist's song, while a featured artist or a remaster note still matches. Edition notes like "- Remastered 2011" are cut from titles when matching, but a title such as "- Live and Let Die" or "Song - Stereotype" is kept whole. Credits joined with "&", "/" or brackets match by their names.
 - **M3U files are read the way music players read them.** Encoded, `file://` and relative paths, backslashes, differences in capital letters, and files saved by a Mac or in an older encoding all find the song, and a song at the top of your music folder is found by its file name. A line that matches only by file name must agree on both artist and title when it gives both, a path that fits more than one song equally well is skipped (the song whose folders agree most wins, as in Navidrome), and a file that matches nothing makes no empty playlist. Long files import faster, and the upload form says in plain words when a file is too large, isn't a playlist, isn't text, has too many songs, or sends its name twice.
+- **A song removed while it is being added to a playlist is reported as not added,** instead of an error.
+- **A cancelled playlist import stays cancelled** when its downloads finish later, and songs an import matched by title or ISRC no longer show as both found and still waiting.
+- **Retrying a waiting playlist song says why it failed:** Soulseek has no files for it, or Soulseek is not answering. Retry all says when Soulseek is not answering.
 
 #### Subsonic apps
 
@@ -96,6 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Subsonic apps see each song's real bitrate,** and lossless files (ALAC, WAV, AIFF, WavPack, Monkey's Audio and others) no longer show 192 or 256 kbps. Choosing the best copy of a song, and deciding whether to stream the original or transcode, use it too.
 - **Subsonic requests behave as apps expect.** A parameter repeated that the protocol sends once (a second `id` on `getSong`, `getAlbum`, `getLyrics` and the rest) answers for the first value. Apps see when an album was added. A playlist update with an empty name no longer blanks the name, and a garbled or repeated song position no longer removes the wrong song. A scrobble dated in the future, or with a time that can't be read, counts as played now, and several scrobbles sent at once are each counted.
 - **Subsonic shares keep their expiry and say what they hold.** A share made with an expiry now lapses when it should, and one too large to be a date is refused. The app is told when the share was made, when it expires, how often it was opened and which songs it holds. A link you already had keeps its expiry.
+- **Older Subsonic apps see albums as folders** in the original album list, as the protocol has it, and the saved play queue shows an album title you edited.
 
 #### Sharing
 
@@ -122,6 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Clearing downloads leaves running ones alone.** A running download can't be dismissed and "clear all" removes only finished and failed ones. A Lidarr outage no longer stops you clearing downloads, retrying an album whose download you dismissed works, clearing or retrying one already gone says so, and a status a download can't have answers an error.
 - **Downloads Lidarr is working on are tracked properly.** A Discover download is matched as soon as Lidarr grabs and imports it. A download Lidarr parks tells you once, and Discover and playlist-import downloads post no "waiting in Lidarr" notice. A download held while Lidarr is down resumes once when it comes back, removing an album stops its waiting downloads too, and an album already downloading for someone else no longer stops your own Discover week fetching it.
 - **Soulseek reconnects cleanly.** Searches and downloads made while it reconnects say "soulseek is reconnecting, try again in Ns" at once, a dropped connection closing late no longer cuts off the new one, a connection that fails says why, and while Redis is down the connection fails at once with the reason instead of after 30 seconds.
+- **Clearing downloads while Discover or an import is still checking them** no longer makes the check miss them or finish early.
 
 #### Sign-in and accounts
 
@@ -131,6 +141,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A newly created account stays signed in.** Creating an account hands the app the same long-lived sign-in that logging in does, so the web and the iOS app renew the session on their own.
 - **A server restart no longer signs you out of the web app.** A busy or restarting server leaves your session alone, and signing in as someone else no longer leaves the earlier account's session behind.
 - **Account sign-up and admin password reset answer plainly.** A closed sign-up creates nothing, a sign-up that races another for the same name or for the first account gets a plain answer, and two password changes at the same moment can't both succeed. An `ADMIN_RESET_PASSWORD` shorter than 6 characters logs an error and leaves the admin password as it was.
+- **The last admin account can't be deleted,** even when two admins delete each other at the same moment, and deleting an account that is already gone answers not found.
+- **Linking a device answers plainly.** A wrong, used or expired code always gets "invalid or expired code", making a new code tells an app still waiting on the old one at once that it is gone, and two codes made at the same moment no longer cause a server error.
+- **Changing a password in settings and creating a user apply the 72-character limit** with the same message as sign-up.
 
 #### Stats, mixes and radio
 
@@ -142,11 +155,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Songs that could not be read stay out of the vibe map and text search**, the public vibe site and the sound of an artist used for similar artists. The progress counts for the map and moods count only songs that play.
 - **A song path needs two songs that play.** A start or end song that is missing, unreadable or in Discover is refused as not found.
 - **Recommended artists fill the list.** Artists you already own no longer leave it short, the closest matches across all your top artists come first, and an artist you play most is never recommended back to you. For-you recommendations take a limit between 1 and 50 (10 by default).
+- **Vibe lookups refuse songs that don't play.** Mood and similar-song lookups answer not found for a Discover, missing or unreadable song and bad request for a malformed id, a song path with a length that is not a number is refused, and the public vibe site shows covers only for songs that play.
+- **Artist radio for an artist with nothing that plays** still starts, with songs by similar artists.
 
 #### Covers
 
 - **A changed cover shows up without clearing the cache.** The web app and Subsonic apps get the new one; a cover cached by an earlier version can take until that copy expires. Covers load from the cache again, an audiobook's cover is downloaded again only when it changes, Subsonic apps get covers at the size they ask for and outside covers from a short memory, and a cover file that has gone missing answers not-found.
 - **Covers are saved whole, in one format.** Downloaded pictures, audiobook covers and cover art read from music files are saved whole or not at all as JPEG, a file that is not a picture is no longer kept, pictures over 20 MB are refused, and half-written files left by a crash are cleaned up. Covers and artist pictures saved by older versions in other formats are converted once, in the background. A picture is turned the right way up and transparent areas become white instead of black. A cover that failed to download is remembered instead of fetched again each time, and leftover smaller copies of removed covers are cleaned up.
+- **A cover you set is never overwritten by a background job.** Finding album covers, the image backfill and cover repair leave alone a picture you set while they ran.
+- **Cover downloads are safer.** A downloaded cover is kept only when it is a plain image type, an Audiobookshelf cover that stalls gives up after ten seconds, cover repair skips an oversized stored file and finds an artist picture whose address already has a version, and removing a book Audiobookshelf no longer lists removes its cached cover.
 
 #### Enrichment
 
@@ -155,6 +172,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Song analysis status shows as soon as it starts.** An analysis or sound-vector job shows as processing the moment it is handed out, a fast report is no longer overwritten by a late status write, and re-deciding everything puts the sound-vector status back to pending.
 - **Re-running enrichment no longer overwrites a year or genres you set while it ran.**
 - **Enrichment failures are counted right.** Two failures at once no longer miscount, the 24-hour alert waits for the song to be set aside, the failures list refuses a type that does not exist, and podcast failures show.
+- **Run enrichment, pressed while it is stopped, finishes every step.**
+- **Retry failed gives every failed song a fresh set of tries.**
 
 #### Settings, server and podcasts
 
@@ -172,6 +191,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`LOG_LEVEL` works in any case.** `DEBUG`, `debug` and `Debug` mean the same level, and a value Kima doesn't know logs at the default level with a warning, instead of silencing every log line.
 - **The split image no longer logs a Redis error at every start.**
 - **The playlists page, the podcast episodes header and the button labels on episode and album song lists are lowercase** like the rest of the app.
+- **A podcast refresh that finishes while the queue fails keeps its time,** and a podcast category id that is not a whole number is refused.
 
 ## [1.12.4] - 2026-11-07
 
