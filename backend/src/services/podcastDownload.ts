@@ -58,6 +58,14 @@ async function validateCachedFile(episodeId: string): Promise<string | null> {
     }
 }
 
+/** Forgets an episode's cached copy, its file and every person's record of it, because the audio it held is no longer the episode's. */
+export async function dropCachedEpisode(episodeId: string): Promise<void> {
+    const records = await prisma.podcastDownload.findMany({ where: { episodeId }, select: { localPath: true } });
+    const paths = new Set([path.join(getPodcastCacheDir(), `${episodeId}.mp3`), ...records.map((r) => r.localPath)]);
+    await Promise.all([...paths].map((file) => fs.unlink(file).catch(() => {})));
+    await prisma.podcastDownload.deleteMany({ where: { episodeId } });
+}
+
 /** The complete cached file, or null while it is still downloading, missing or incomplete. */
 export async function getCachedFilePath(episodeId: string): Promise<string | null> {
     // Don't return cache path if still downloading - file may be incomplete

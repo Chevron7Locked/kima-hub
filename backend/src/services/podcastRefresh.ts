@@ -2,11 +2,13 @@ import { prisma, Prisma } from "../utils/db";
 import { rssParserService, type RSSEpisode as FeedEpisode } from "./rss-parser";
 import { enrichmentFailureService } from "./enrichmentFailureService";
 import { assignCategories } from "./podcastCatalog";
+import { dropCachedEpisode } from "./podcastDownload";
 
 /**
  * Fetch a stored show's feed again and store its episodes: new ones are added, and one already stored takes the
  * feed's current title, description, audio address, length, size and date (keeping its id, so a person's progress
- * stays). The feed's ETag and Last-Modified are saved only once all of that is stored, so a refresh that fails
+ * stays). An episode whose audio address changed loses its cached copy, so the old audio is not served under the new
+ * address. The feed's ETag and Last-Modified are saved only once all of that is stored, so a refresh that fails
  * partway reads the feed again next time instead of being answered "not modified". Null when the show is not stored.
  * Shared by the refresh route, the Subsonic refresh and the podcast worker.
  */
@@ -60,11 +62,14 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
             newEpisodesCount++;
             continue;
         }
-        const measured = have.downloads.length > 0;
+        // A new address is new audio: the cached copy and its measured figures belong to the old one.
+        const audioChanged = have.audioUrl !== ep.audioUrl;
+        if (audioChanged && have.downloads.length > 0) await dropCachedEpisode(have.id);
+        const measured = have.downloads.length > 0 && !audioChanged;
         const changes: Prisma.PodcastEpisodeUpdateManyMutationInput = {};
         if (have.title !== ep.title) changes.title = ep.title;
         if ((have.description ?? null) !== (ep.description ?? null)) changes.description = ep.description ?? null;
-        if (have.audioUrl !== ep.audioUrl) changes.audioUrl = ep.audioUrl;
+        if (audioChanged) changes.audioUrl = ep.audioUrl;
         // A figure the feed leaves out (no date, no length, no size) is not the feed saying it changed.
         if (ep.publishedGiven !== false && have.publishedAt.getTime() !== ep.publishedAt.getTime()) changes.publishedAt = ep.publishedAt;
         if (!measured && ep.duration > 0 && have.duration !== ep.duration) changes.duration = ep.duration;

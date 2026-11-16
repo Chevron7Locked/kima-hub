@@ -6,6 +6,10 @@
 import { prisma } from "../../utils/db";
 import { rssParserService } from "../rss-parser";
 import { refreshPodcastFeed } from "../podcastRefresh";
+import { config } from "../../config";
+import fs from "fs";
+import os from "os";
+import path from "path";
 
 jest.mock("../rss-parser", () => ({
     rssParserService: { parseFeed: jest.fn() },
@@ -137,7 +141,7 @@ it("leaves the measured length and size of an episode whose copy is cached", asy
     await prisma.podcastDownload.create({
         data: { userId: USER, episodeId: `${P}-ep1`, localPath: "/cache/x.mp3", fileSizeMb: 1 },
     });
-    parseFeed.mockResolvedValue(feed([feedEpisode("g1", { duration: 2400, fileSize: 9000, title: "New title" })]));
+    parseFeed.mockResolvedValue(feed([feedEpisode("g1", { audioUrl: "https://cdn.example.invalid/old.mp3", duration: 2400, fileSize: 9000, title: "New title" })]));
 
     await refreshPodcastFeed(P);
 
@@ -171,4 +175,46 @@ it("a 304 changes nothing but the refresh time", async () => {
     const row = await show();
     expect(row.feedEtag).toBe('"v1"');
     expect(await prisma.podcastEpisode.count({ where: { podcastId: P } })).toBe(1);
+});
+
+describe("a cached copy of an episode", () => {
+    let root = "";
+    let original = "";
+    let cached = "";
+
+    beforeEach(async () => {
+        root = fs.mkdtempSync(path.join(os.tmpdir(), "kima-pod-refresh-"));
+        original = config.music.transcodeCachePath;
+        config.music.transcodeCachePath = path.join(root, "transcodes");
+        fs.mkdirSync(path.join(root, "podcast-audio"));
+        cached = path.join(root, "podcast-audio", `${P}-ep1.mp3`);
+        fs.writeFileSync(cached, "old audio");
+        await prisma.podcastDownload.create({
+            data: { userId: USER, episodeId: `${P}-ep1`, localPath: cached, fileSizeMb: 0.1 },
+        });
+    });
+
+    afterEach(() => {
+        config.music.transcodeCachePath = original;
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    it("is dropped, file and record, when the feed gives the episode a new audio address", async () => {
+        parseFeed.mockResolvedValue(feed([feedEpisode("g1", { audioUrl: "https://cdn.example.invalid/new.mp3", duration: 2400, fileSize: 9000 })]));
+        await refreshPodcastFeed(P);
+
+        expect(fs.existsSync(cached)).toBe(false);
+        expect(await prisma.podcastDownload.count({ where: { episodeId: `${P}-ep1` } })).toBe(0);
+        // The measured figures belonged to the old audio, so the feed's replace them.
+        const ep = await prisma.podcastEpisode.findUniqueOrThrow({ where: { id: `${P}-ep1` } });
+        expect(ep).toMatchObject({ audioUrl: "https://cdn.example.invalid/new.mp3", duration: 2400, fileSize: 9000 });
+    });
+
+    it("is kept when only the title changes", async () => {
+        parseFeed.mockResolvedValue(feed([feedEpisode("g1", { audioUrl: "https://cdn.example.invalid/old.mp3", title: "Renamed" })]));
+        await refreshPodcastFeed(P);
+
+        expect(fs.existsSync(cached)).toBe(true);
+        expect(await prisma.podcastDownload.count({ where: { episodeId: `${P}-ep1` } })).toBe(1);
+    });
 });
