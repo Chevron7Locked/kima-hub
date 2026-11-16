@@ -599,8 +599,12 @@ describe("radio: genre with an artist whose genres are not a JSON array", () => 
     beforeAll(async () => {
         // An artist whose ENRICHED genres hold "rock" (no person-set list, so the enriched ones are
         // what selects it). Non-array columns on it must read as no genres, not fail the request.
-        odd = rows.find((r) => asGenreList(r.album.artist.genres).some((g) => g.toLowerCase().includes("rock"))
-            && asGenreList(r.album.artist.userGenres).length === 0)!.album.artist.id;
+        // None of its albums may answer to "rock" on their own either: the station also picks albums by their own genres,
+        // so an artist with such an album is legitimately in the answer, and the test would pass or fail by chance.
+        const hasRock = (list: unknown) => asGenreList(list).some((g) => g.toLowerCase().includes("rock"));
+        const albumsOf = (artistId: string) => rows.filter((r) => r.album.artist.id === artistId).map((r) => r.album);
+        odd = rows.find((r) => hasRock(r.album.artist.genres) && asGenreList(r.album.artist.userGenres).length === 0
+            && albumsOf(r.album.artist.id).every((a) => !hasRock(a.genres) && !hasRock(a.userGenres)))!.album.artist.id;
         await prisma.artist.update({ where: { id: odd }, data: { genres: "rock", userGenres: { rock: true } } });
     });
 

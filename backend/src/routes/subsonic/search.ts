@@ -9,7 +9,7 @@ import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicRe
 import { searchService, shownSongTitleSql } from "../../services/search";
 import { popularSongs } from "../../services/popularSongs";
 import { wrap, clamp, parseIntParam, mapSong, mapAlbum, mapAlbumChild, mapArtist } from "./mappers";
-import { libraryAlbumIdsOfGenre, shownAlbumGenres } from "../../utils/genreSql";
+import { libraryAlbumIdsOfGenre, ownSongGenres, shownAlbumGenres, shownSongGenres } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
 import { effectiveYearSql } from "../../utils/dateFilters";
 
@@ -56,7 +56,7 @@ type SongRow = {
     artistUserGenres: unknown;
 };
 
-function songOf(row: SongRow) {
+function songOf(row: SongRow, own?: string[]) {
     return mapSong(
         {
             id: row.id,
@@ -82,11 +82,18 @@ function songOf(row: SongRow) {
         },
         row.artistDisplayName || row.artistName,
         row.artistId,
-        shownAlbumGenres(
+        shownSongGenres(
+            own,
             { genres: row.albumGenres, userGenres: row.albumUserGenres },
             { name: row.artistName, normalizedName: row.artistNormalizedName, genres: row.artistGenres, userGenres: row.artistUserGenres },
         ),
     );
+}
+
+/** Subsonic songs for these rows, each with the genres it shows (its own tags, else its album's). */
+async function songsOf(rows: SongRow[]) {
+    const own = await ownSongGenres(rows.map((r) => r.id));
+    return rows.map((row) => songOf(row, own.get(row.id)));
 }
 
 /** The playable songs among `ids`, in the order given. */
@@ -175,7 +182,7 @@ searchRouter.all("/search.view", wrap(async (req, res) => {
         limit: count,
         offset,
     });
-    const songs = (await playableSongsInOrder(ids)).map(songOf);
+    const songs = await songsOf(await playableSongsInOrder(ids));
     const result: Record<string, unknown> = { "@_offset": offset, "@_totalHits": total };
     if (songs.length > 0) result.match = songs;
     return subsonicOk(req, res, { searchResult: result });
@@ -276,7 +283,7 @@ searchRouter.all(["/search3.view", "/search2.view"], wrap(async (req, res) => {
     }
 
     if (tracks.length > 0) {
-        result.song = tracks.map(songOf);
+        result.song = await songsOf(tracks);
     }
 
     return subsonicOk(req, res, { [responseKey]: result });
@@ -307,7 +314,7 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
     }
 
     if (genre) {
-        // The songs on the albums showing the genre (shownAlbumGenres), the genre a song shows. A genre nothing
+        // The songs on the albums showing the genre (shownAlbumGenres). A genre nothing
         // shows (an empty name, a genre no album has) matches no song.
         const tagged = await libraryAlbumIdsOfGenre(genre);
         whereConditions.push(
@@ -323,7 +330,7 @@ searchRouter.all("/getRandomSongs.view", wrap(async (req, res) => {
         ORDER BY RANDOM()
         LIMIT ${size}
     `;
-    const songs = rows.map(songOf);
+    const songs = await songsOf(rows);
 
     return subsonicOk(req, res, {
         randomSongs: songs.length > 0 ? { song: songs } : {},
@@ -352,7 +359,7 @@ searchRouter.all("/getSongsByGenre.view", wrap(async (req, res) => {
         OFFSET ${offset}
         LIMIT ${count}
     `;
-    const songs = rows.map(songOf);
+    const songs = await songsOf(rows);
 
     return subsonicOk(req, res, {
         songsByGenre: songs.length > 0 ? { song: songs } : {},
@@ -405,7 +412,7 @@ searchRouter.all("/getTopSongs.view", wrap(async (req, res) => {
 
     // The owned songs of the artist's popular-songs list, the order the web artist page shows them in.
     const popular = await popularSongs({ artist, userId: req.user!.id, limit: count, previews: false });
-    const songs = (await playableSongsInOrder(popular.flatMap((p) => p.trackId ?? []))).map(songOf);
+    const songs = await songsOf(await playableSongsInOrder(popular.flatMap((p) => p.trackId ?? [])));
 
     return subsonicOk(req, res, {
         topSongs: songs.length > 0 ? { song: songs } : {},
@@ -468,7 +475,7 @@ searchRouter.all(["/getSimilarSongs2.view", "/getSimilarSongs.view"], wrap(async
         ORDER BY RANDOM()
         LIMIT ${count}
     `;
-    const songs = rows.map(songOf);
+    const songs = await songsOf(rows);
 
     return subsonicOk(req, res, {
         [responseKey]: songs.length > 0 ? { song: songs } : {},

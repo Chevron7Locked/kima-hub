@@ -79,9 +79,13 @@ function meaning(field: string, stored: unknown): unknown {
     return stored === undefined || stored === "" ? null : stored;
 }
 
+/** Time fields that only move forward: a save with an earlier time than the stored one leaves the stored one. */
+const NEVER_EARLIER_FIELDS = ["libraryChangedAt"] as const satisfies readonly SystemSettingsField[];
+
 /**
  * The one way system settings are saved: writes the supplied fields (a credential given blank is cleared, except one
- * the server cannot read, which stays), drops the settings cache, then calls each listener with its own fields that
+ * the server cannot read, which stays; a time that only moves forward, such as the library change marker, is kept if
+ * the stored one is later), drops the settings cache, then calls each listener with its own fields that
  * changed, without waiting for any of them to finish. Answers the fields whose value changed. The row is read and
  * written under its lock, so two saves at the same time each see the other's result and a change is reported once.
  */
@@ -91,8 +95,15 @@ export async function saveSystemSettings(changes: SystemSettingsChanges): Promis
         // first (a no-op when it exists) and then locked. A save that creates it has nothing before it to compare with.
         const created = (await tx.systemSettings.createMany({ data: [{ id: "default" }], skipDuplicates: true })).count > 0;
         await tx.$queryRaw`SELECT id FROM "SystemSettings" WHERE id = 'default' FOR UPDATE`;
-        const before = created ? null : await tx.systemSettings.findUnique({ where: { id: "default" } });
+        const stored = await tx.systemSettings.findUnique({ where: { id: "default" } });
+        const before = created ? null : stored;
         const data = encryptSettings(changes as Record<string, unknown>, before) as SystemSettingsChanges;
+        // The later of the stored and the given time, decided under the row lock, so writers at the same moment cannot step it back.
+        for (const field of NEVER_EARLIER_FIELDS) {
+            const given = data[field];
+            const held = stored?.[field];
+            if (given instanceof Date && held && held > given) data[field] = held;
+        }
         const after = await tx.systemSettings.update({ where: { id: "default" }, data });
 
         return (Object.keys(changes) as SystemSettingsField[]).filter(

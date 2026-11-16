@@ -1,4 +1,4 @@
-import { shownAlbumGenres } from "../genreSql";
+import { shownAlbumGenres, shownSongGenres } from "../genreSql";
 
 const artist = { name: "Jazz", normalizedName: "jazz", genres: ["rock", "_marker", "Jazz"] };
 
@@ -22,5 +22,21 @@ describe("shownAlbumGenres", () => {
 
     it("shows no genre when neither the album nor the artist has a usable one", () => {
         expect(shownAlbumGenres({ genres: null }, { name: "A", genres: ["_x"] })).toEqual([]);
+    });
+});
+
+describe("shownSongGenres", () => {
+    it("shows the song's own tags first, whatever the album shows", () => {
+        expect(shownSongGenres(["funk", "soul"], { genres: ["blues"] }, artist)).toEqual(["funk", "soul"]);
+    });
+
+    it("falls back to what the album shows when the song has no tags", () => {
+        expect(shownSongGenres(undefined, { genres: ["blues"] }, artist)).toEqual(["blues"]);
+        expect(shownSongGenres([], { genres: null }, artist)).toEqual(["rock"]);
+    });
+
+    it("drops a marker, an empty tag and the artist's own name, and falls back when nothing is left", () => {
+        expect(shownSongGenres(["_x", "", "jazz", "funk"], { genres: ["blues"] }, artist)).toEqual(["funk"]);
+        expect(shownSongGenres(["_x", "Jazz"], { genres: ["blues"] }, artist)).toEqual(["blues"]);
     });
 });

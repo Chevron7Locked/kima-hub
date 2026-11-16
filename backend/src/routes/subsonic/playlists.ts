@@ -3,7 +3,7 @@ import { rankForPosition } from "../../utils/lexoRank";
 import { allocateAppendRanks, lockPlaylist, replaceItems } from "../../services/playlistService";
 import { prisma } from "../../utils/db";
 import { subsonicOk, subsonicError, SubsonicError } from "../../utils/subsonicResponse";
-import { shownAlbumGenres } from "../../utils/genreSql";
+import { ownSongGenres, shownSongGenres } from "../../utils/genreSql";
 import { mapSong, wrap } from "./mappers";
 import { announcePlaylistChange } from "../../services/playlistEvents";
 import { PLAYABLE_SONG } from "../../utils/playableSong";
@@ -63,10 +63,11 @@ function loadPlaylist(id: string) {
     });
 }
 
-function playlistReply(playlist: NonNullable<Awaited<ReturnType<typeof loadPlaylist>>>) {
+async function playlistReply(playlist: NonNullable<Awaited<ReturnType<typeof loadPlaylist>>>) {
+    const own = await ownSongGenres(playlist.items.map(({ track }) => track.id));
     const entries = playlist.items.map(({ track }) => {
         const { album } = track;
-        return mapSong(track, album, album.artist.displayName || album.artist.name, album.artist.id, shownAlbumGenres(album, album.artist));
+        return mapSong(track, album, album.artist.displayName || album.artist.name, album.artist.id, shownSongGenres(own.get(track.id), album, album.artist));
     });
     return {
         "@_id": playlist.id,
@@ -97,7 +98,7 @@ playlistRouter.all("/getPlaylist.view", wrap(async (req, res) => {
         return subsonicError(req, res, SubsonicError.NOT_AUTHORIZED, "Access denied");
     }
 
-    return subsonicOk(req, res, { playlist: playlistReply(playlist) });
+    return subsonicOk(req, res, { playlist: await playlistReply(playlist) });
 }));
 
 /** Whether every id names a playable song: a playlist change naming one that does not is refused whole, as not found. */
@@ -175,7 +176,7 @@ playlistRouter.all("/createPlaylist.view", wrap(async (req, res) => {
     if (!created) {
         return subsonicError(req, res, SubsonicError.NOT_FOUND, "Playlist not found after creation");
     }
-    return subsonicOk(req, res, { playlist: playlistReply(created) });
+    return subsonicOk(req, res, { playlist: await playlistReply(created) });
 }));
 
 playlistRouter.all("/updatePlaylist.view", wrap(async (req, res) => {

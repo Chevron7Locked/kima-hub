@@ -2,8 +2,10 @@
  * The genre key (genreKey), the one rule for the genres an album shows (shownAlbumGenres), the two filters
  * built on it (libraryAlbumIdsOfGenre: exactly that genre, for Subsonic; libraryAlbumIdsAnsweringToGenre: that genre or
  * one containing it, for the radio stations and the web's search), and the genre list (computeGenreTotals,
- * libraryGenreTotals). An album shows its own merged genres, else its artist's, and a song shows its album's, so a genre
- * shown, the exact filter for it and the list that counts it always agree. Matching and totals are computed in
+ * libraryGenreTotals). An album shows its own merged genres, else its artist's; a song shows its own tags
+ * (ownSongGenres, shown through shownSongGenres), else its album's. The filters and the list work by the album's genres
+ * only, so a song that shows tags of its own is not found under them and they are not in the list: the two do not agree
+ * until the filters and totals read song tags too. Matching and totals are computed in
  * TypeScript, never in SQL: a database in the SQL_ASCII encoding can neither normalize nor lower-case beyond ASCII, and
  * the rule is one every surface shares (Subsonic's genre fields, filters and getGenres, the web's search and the radio
  * stations).
@@ -68,14 +70,45 @@ export interface GenreAlbum {
  * answers to.
  */
 export function shownAlbumGenres(album: GenreAlbum, artist: GenreArtist): string[] {
+    const ofAlbum = usableGenres(getMergedGenres(album), artist);
+    return ofAlbum.length > 0 ? ofAlbum : usableGenres(getMergedGenres(artist), artist);
+}
+
+/** The tags among `names` that are a genre: not empty, not an internal marker, not the artist's own name. */
+function usableGenres(names: string[], artist: GenreArtist): string[] {
     const own = new Set([genreKey(artist.name), genreKey(artist.normalizedName)]);
-    const usable = (entity: GenreAlbum) =>
-        getMergedGenres(entity).filter((name) => {
-            const key = genreKey(name);
-            return !!name && !name.startsWith("_") && key !== "" && !own.has(key);
-        });
-    const ofAlbum = usable(album);
-    return ofAlbum.length > 0 ? ofAlbum : usable(artist);
+    return names.filter((name) => {
+        const key = genreKey(name);
+        return !!name && !name.startsWith("_") && key !== "" && !own.has(key);
+    });
+}
+
+/**
+ * The genres a song shows: its own tags (the genres of its identified recording, `ownSongGenres`) first, the same tags
+ * an album drops being dropped here, else what its album shows (shownAlbumGenres). Own tags carry no order, so they come
+ * in name order; the first is the genre it shows.
+ */
+export function shownSongGenres(own: readonly string[] | undefined, album: GenreAlbum, artist: GenreArtist): string[] {
+    const mine = usableGenres([...(own ?? [])], artist);
+    return mine.length > 0 ? mine : shownAlbumGenres(album, artist);
+}
+
+/** The own genre tags of these songs, by song id, each list in name order; a song with none is not in the map. */
+export async function ownSongGenres(trackIds: readonly string[]): Promise<Map<string, string[]>> {
+    const byTrack = new Map<string, string[]>();
+    if (trackIds.length === 0) return byTrack;
+    const rows = await prisma.trackGenre.findMany({
+        where: { trackId: { in: [...new Set(trackIds)] } },
+        select: { trackId: true, genre: { select: { name: true } } },
+    });
+    for (const { trackId, genre } of rows) {
+        const names = byTrack.get(trackId);
+        if (names) names.push(genre.name);
+        else byTrack.set(trackId, [genre.name]);
+    }
+    // Code-unit order, not localeCompare: the same order on every host and locale, so the first tag is the same everywhere.
+    for (const names of byTrack.values()) names.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    return byTrack;
 }
 
 /**

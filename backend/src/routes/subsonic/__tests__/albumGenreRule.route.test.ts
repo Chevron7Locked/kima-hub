@@ -1,6 +1,7 @@
 /**
  * One genre rule for albums, songs and the genre filters. What an album shows is its own merged genres (the person's list
- * when set, else the enriched one; a "_" marker is no genre), else its artist's. A song shows its album's, the genre
+ * when set, else the enriched one; a "_" marker is no genre), else its artist's. A song with no tags of its own (the
+ * songs here; songGenres.route.test.ts has the ones with) shows its album's, the genre
  * lists count by it and the genre filters (byGenre, getSongsByGenre, getRandomSongs) keep by it, so a shown genre and
  * its filter always agree. Real routers and the suite database; one artist tagged "rock" with four albums:
  * - J: its own enriched "jazz". Shown: jazz.

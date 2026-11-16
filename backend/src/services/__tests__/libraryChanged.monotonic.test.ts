@@ -1,57 +1,62 @@
 /**
- * The library change marker never goes backwards, however many writers move it at once, and the settings cache is not left
- * holding the old value. Real database. The moves run on a settings row of this test's own, at times of its choosing, so
- * the one real marker, which other tests read, is never left at a time chosen here.
+ * The library change marker never goes backwards, however many writers move it at once, the settings cache is not left
+ * holding the old value, and a save through the one settings writer tells its listeners. Real database, the one real
+ * marker: other tests read it, so every time used here is within a few milliseconds of now, never left far ahead of it.
+ * Other suites in the same run reset that row too (as saveSystemSettings.test.ts does), so a reset landing between a
+ * move and its read is a possible, very rare failure; the one writer takes no row id, so there is no private row to use.
  */
 import { prisma } from "../../utils/db";
-import { getSystemSettings } from "../../utils/systemSettings";
-import { markLibraryChanged } from "../libraryChanged";
+import { getSystemSettings, onSystemSettingsChange, saveSystemSettings } from "../../utils/systemSettings";
+import { libraryChangedAt, markLibraryChanged } from "../libraryChanged";
 
-const ROW = "monotonic_test_row";
-const BASE = Date.UTC(2031, 0, 1);
-
-const stored = async () => (await prisma.systemSettings.findUniqueOrThrow({ where: { id: ROW } })).libraryChangedAt?.getTime();
-const move = (ms: number) => markLibraryChanged(new Date(ms), ROW);
-
-beforeEach(async () => {
-    await prisma.systemSettings.deleteMany({ where: { id: ROW } });
-});
+// Past the few milliseconds ahead of now that the earlier tests may have left the marker at.
+const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 
 afterAll(async () => {
-    await prisma.systemSettings.deleteMany({ where: { id: ROW } });
     await prisma.$disconnect();
 });
 
-it("two concurrent moves leave the later time, whichever finishes last", async () => {
-    await move(BASE);
-    const [a, b] = await Promise.all([move(BASE + 2000), move(BASE + 1000)]);
-    // Each answer is the time stored when its own statement ran: never below its own time, never past the later one.
-    expect(a.getTime()).toBe(BASE + 2000);
-    expect(b.getTime()).toBeGreaterThanOrEqual(BASE + 1000);
-    expect(b.getTime()).toBeLessThanOrEqual(BASE + 2000);
-    expect(await stored()).toBe(BASE + 2000);
-});
-
 it("many concurrent moves never leave the marker below the latest of them", async () => {
-    for (let round = 0; round < 5; round++) {
-        const times = Array.from({ length: 12 }, (_, i) => BASE + round * 100_000 + ((i * 7) % 12) * 1000);
-        const answers = await Promise.all(times.map(move));
-        expect(await stored()).toBe(Math.max(...times));
-        for (const [i, answer] of answers.entries()) expect(answer.getTime()).toBeGreaterThanOrEqual(times[i]);
+    for (let round = 0; round < 8; round++) {
+        const base = Date.now() + 5;
+        const times = Array.from({ length: 12 }, (_, i) => base + ((i * 7) % 12));
+        await Promise.all(times.map((t) => markLibraryChanged(new Date(t))));
+        expect(await libraryChangedAt()).toBeGreaterThanOrEqual(Math.max(...times));
     }
 });
 
-it("an older time changes nothing and answers the time stored", async () => {
-    const latest = await move(BASE + 500_000);
-    const older = await move(BASE + 1000);
-    expect(older.getTime()).toBe(latest.getTime());
-    expect(await stored()).toBe(latest.getTime());
+it("two concurrent moves leave the later time, whichever finishes last", async () => {
+    const base = Date.now() + 5;
+    await Promise.all([markLibraryChanged(new Date(base + 9)), markLibraryChanged(new Date(base + 3))]);
+    expect(await libraryChangedAt()).toBeGreaterThanOrEqual(base + 9);
+});
+
+it("an older time changes nothing", async () => {
+    await markLibraryChanged();
+    const held = await libraryChangedAt();
+    await markLibraryChanged(new Date(held - 60_000));
+    expect(await libraryChangedAt()).toBe(held);
+    expect(await saveSystemSettings({ libraryChangedAt: new Date(held - 60_000) })).toEqual([]);
 });
 
 it("a later read of the settings sees the new marker, not a cached one", async () => {
     const before = (await getSystemSettings())?.libraryChangedAt?.getTime() ?? 0;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    const moved = await markLibraryChanged();
-    expect(moved.getTime()).toBeGreaterThan(before);
-    expect((await getSystemSettings())?.libraryChangedAt?.getTime()).toBeGreaterThanOrEqual(moved.getTime());
+    await settle();
+    await markLibraryChanged();
+    expect((await getSystemSettings())?.libraryChangedAt?.getTime()).toBeGreaterThan(before);
+});
+
+it("a move tells the listeners of the marker, and an older time does not", async () => {
+    const heard = jest.fn();
+    const stop = onSystemSettingsChange("monotonic-test", ["libraryChangedAt"], heard);
+    try {
+        await settle();
+        await markLibraryChanged();
+        expect(heard).toHaveBeenCalledWith(["libraryChangedAt"]);
+        heard.mockClear();
+        await markLibraryChanged(new Date(Date.now() - 60_000));
+        expect(heard).not.toHaveBeenCalled();
+    } finally {
+        stop();
+    }
 });

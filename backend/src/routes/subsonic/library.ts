@@ -7,7 +7,7 @@ import { LEADING_ARTICLES, unaccent } from "../../services/pgTextRules";
 import { LIBRARY_LOCATION, PLAYABLE_ALBUM_WHERE, albumHasPlayableSongSql } from "../../services/libraryFilters";
 import { PLAYABLE_SONG, playableSongSql } from "../../utils/playableSong";
 import { listenRows } from "../../services/stats/listens";
-import { libraryGenreTotals, libraryAlbumIdsOfGenre, shownAlbumGenres } from "../../utils/genreSql";
+import { libraryGenreTotals, libraryAlbumIdsOfGenre, ownSongGenres, shownAlbumGenres, shownSongGenres } from "../../utils/genreSql";
 import { one } from "../../utils/subsonicParams";
 import { libraryChangedAt } from "../../services/libraryChanged";
 
@@ -208,7 +208,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
     }
 
     const artistName = album.artist.displayName || album.artist.name;
-    const genres = shownAlbumGenres(album, album.artist);
+    const own = await ownSongGenres(album.tracks.map((t) => t.id));
 
     return subsonicOk(req, res, {
         directory: {
@@ -218,7 +218,7 @@ libraryRouter.all("/getMusicDirectory.view", wrap(async (req, res) => {
             ...(album.tracks.length > 0
                 ? {
                       child: album.tracks.map((track) =>
-                          mapSong(track, album, artistName, album.artist.id, genres)
+                          mapSong(track, album, artistName, album.artist.id, shownSongGenres(own.get(track.id), album, album.artist))
                       ),
                   }
                 : {}),
@@ -251,13 +251,14 @@ libraryRouter.all("/getAlbum.view", wrap(async (req, res) => {
 
     const artistName = album.artist.displayName || album.artist.name;
     const genres = shownAlbumGenres(album, album.artist);
+    const own = await ownSongGenres(album.tracks.map((t) => t.id));
     const totalDuration = album.tracks.reduce((sum, t) => sum + (t.duration ?? 0), 0);
 
     subsonicOk(req, res, {
         album: {
             ...mapAlbum({ ...album, songCount: album.tracks.length, duration: totalDuration, genres }, artistName),
             song: album.tracks.map((t) =>
-                mapSong(t, album, artistName, album.artist.id, genres)
+                mapSong(t, album, artistName, album.artist.id, shownSongGenres(own.get(t.id), album, album.artist))
             ),
         },
     });
@@ -286,9 +287,9 @@ libraryRouter.all("/getSong.view", wrap(async (req, res) => {
     }
 
     const artistName = track.album.artist.displayName || track.album.artist.name;
-    const genres = shownAlbumGenres(track.album, track.album.artist);
+    const own = (await ownSongGenres([track.id])).get(track.id);
     subsonicOk(req, res, {
-        song: mapSong(track, track.album, artistName, track.album.artist.id, genres),
+        song: mapSong(track, track.album, artistName, track.album.artist.id, shownSongGenres(own, track.album, track.album.artist)),
     });
 }));
 

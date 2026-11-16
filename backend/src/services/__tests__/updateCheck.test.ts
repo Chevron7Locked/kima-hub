@@ -16,24 +16,36 @@ import { compareVersions, getUpdateStatus } from "../updateCheck";
 import { invalidateSystemSettingsCache, onSystemSettingsChange } from "../../utils/systemSettings";
 
 const HOUR = 60 * 60 * 1000;
-/** Settings as a previous check left them. */
-async function checkedBefore(latestKnownVersion: string, hoursAgo: number) {
-    await prisma.systemSettings.create({
-        data: { id: "default", latestKnownVersion, lastUpdateCheck: new Date(Date.now() - hoursAgo * HOUR) },
-    });
+
+// The one shared settings row belongs to every suite, so this one touches only the three fields the check reads and
+// writes: it starts each test from their defaults and puts back what it found.
+const FIELDS = { updateChecksEnabled: true, lastUpdateCheck: null, latestKnownVersion: null } as const;
+type Fields = { updateChecksEnabled: boolean; lastUpdateCheck: Date | null; latestKnownVersion: string | null };
+async function setFields(fields: Partial<Fields>) {
+    const data = { ...FIELDS, ...fields };
+    await prisma.systemSettings.upsert({ where: { id: "default" }, create: { id: "default", ...data }, update: data });
     invalidateSystemSettingsCache();
 }
 
+/** Settings as a previous check left them. */
+const checkedBefore = (latestKnownVersion: string, hoursAgo: number) =>
+    setFields({ latestKnownVersion, lastUpdateCheck: new Date(Date.now() - hoursAgo * HOUR) });
+
 const get = mocked(axios.get);
+let found: Fields | null = null;
+
+beforeAll(async () => {
+    const row = await prisma.systemSettings.findUnique({ where: { id: "default" } });
+    found = row && { updateChecksEnabled: row.updateChecksEnabled, lastUpdateCheck: row.lastUpdateCheck, latestKnownVersion: row.latestKnownVersion };
+});
 
 beforeEach(async () => {
     jest.clearAllMocks();
-    await prisma.systemSettings.deleteMany({});
-    invalidateSystemSettingsCache();
+    await setFields({});
 });
 
 afterAll(async () => {
-    await prisma.systemSettings.deleteMany({});
+    await setFields(found ?? {});
 });
 
 // The comparison the version chip rides on. GitHub's /releases/latest never returns a draft or a
@@ -124,10 +136,7 @@ describe("getUpdateStatus", () => {
     });
 
     it("answers disabled without any network call", async () => {
-        await prisma.systemSettings.create({
-            data: { id: "default", updateChecksEnabled: false },
-        });
-        invalidateSystemSettingsCache();
+        await setFields({ updateChecksEnabled: false });
 
         const status = await getUpdateStatus({ force: true });
 

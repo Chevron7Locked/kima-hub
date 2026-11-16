@@ -27,7 +27,8 @@ jest.mock("../../../utils/logger", () => ({ logger: { debug: jest.fn(), info: je
 
 import type { Job } from "bullmq";
 import { prisma } from "../../../utils/db";
-import { libraryChangedAt, markLibraryChanged } from "../../../services/libraryChanged";
+import { libraryChangedAt } from "../../../services/libraryChanged";
+import { markedTime } from "../../../__tests__/helpers/libraryMarker";
 import { processScan, type ScanJobData } from "../scanProcessor";
 
 const counts = { tracksAdded: 0, tracksUpdated: 0, tracksMissing: 0, tracksRemoved: 0, tracksCorrupt: 0, libraryChanged: false };
@@ -43,7 +44,7 @@ afterAll(async () => {
 });
 
 it("moves the marker when the scan says it changed the library", async () => {
-    const before = (await markLibraryChanged()).getTime();
+    const before = (await markedTime()).getTime();
     await tick();
     mockScanLibrary.mockResolvedValue({ ...counts, tracksAdded: 1, libraryChanged: true });
     await processScan(job());
@@ -51,7 +52,7 @@ it("moves the marker when the scan says it changed the library", async () => {
 });
 
 it("leaves the marker alone when a scan only changed Discover songs", async () => {
-    const before = (await markLibraryChanged()).getTime();
+    const before = (await markedTime()).getTime();
     await tick();
     mockScanLibrary.mockResolvedValue({ ...counts, tracksAdded: 2, tracksMissing: 1, libraryChanged: false });
     await processScan(job());
@@ -59,7 +60,7 @@ it("leaves the marker alone when a scan only changed Discover songs", async () =
 });
 
 it("leaves the marker alone when a scan changed nothing, even one asked for by hand", async () => {
-    const before = (await markLibraryChanged()).getTime();
+    const before = (await markedTime()).getTime();
     await tick();
     mockScanLibrary.mockResolvedValue(counts);
     await processScan(job({ source: "manual-scan", userId: "u1" }));
@@ -67,7 +68,7 @@ it("leaves the marker alone when a scan changed nothing, even one asked for by h
 });
 
 it("moves the marker when the scan fails part-way after changing the library, since songs it filed are skipped by the next scan", async () => {
-    const before = (await markLibraryChanged()).getTime();
+    const before = (await markedTime()).getTime();
     await tick();
     mockScannerChangedLibrary = true;
     mockScanLibrary.mockRejectedValue(new Error("disk gone"));
@@ -76,7 +77,7 @@ it("moves the marker when the scan fails part-way after changing the library, si
 });
 
 it("leaves the marker alone when the scan fails before changing the library", async () => {
-    const before = (await markLibraryChanged()).getTime();
+    const before = (await markedTime()).getTime();
     await tick();
     mockScanLibrary.mockRejectedValue(new Error("disk gone"));
     await expect(processScan(job())).rejects.toThrow("disk gone");

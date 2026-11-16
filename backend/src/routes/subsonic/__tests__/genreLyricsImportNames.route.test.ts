@@ -20,7 +20,8 @@ import { libraryRouter } from "../library";
 import { playbackRouter } from "../playback";
 import enrichmentRouter from "../../enrichment";
 import { spotifyImportService, mergeEditionTracks } from "../../../services/spotifyImport";
-import { markLibraryChanged } from "../../../services/libraryChanged";
+import { getSystemSettings } from "../../../utils/systemSettings";
+import { markedTime } from "../../../__tests__/helpers/libraryMarker";
 import { generateToken } from "../../../middleware/auth";
 import { mountAsServer } from "../../__tests__/helpers/serverMount";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
@@ -318,23 +319,32 @@ describe("getArtists' lastModified follows the library a client lists", () => {
     const tick = () => new Promise((r) => setTimeout(r, 15));
 
     it("is the stored marker in milliseconds, and moves when the marker does", async () => {
-        const marked = await markLibraryChanged();
+        const marked = await markedTime();
         expect(await lastModified()).toBe(marked.getTime());
         await tick();
-        const later = await markLibraryChanged();
+        const later = await markedTime();
         expect(later.getTime()).toBeGreaterThan(marked.getTime());
         expect(await lastModified()).toBe(later.getTime());
     });
 
+    it("sees a move made in another process at once, not after the settings cache expires", async () => {
+        await getSystemSettings(); // the cache is warm, as in a server that has just answered a request
+        await tick();
+        // What a worker process does: its own write, which this process's settings cache never hears of.
+        const [{ libraryChangedAt }] = await prisma.$queryRaw<{ libraryChangedAt: Date }[]>`
+            UPDATE "SystemSettings" SET "libraryChangedAt" = timezone('utc', now()) WHERE id = 'default' RETURNING "libraryChangedAt"`;
+        expect(await lastModified()).toBe(libraryChangedAt.getTime());
+    });
+
     it("does not go backwards", async () => {
-        const before = await markLibraryChanged();
-        const again = await markLibraryChanged(new Date(before.getTime() - 60_000));
+        const before = await markedTime();
+        const again = await markedTime(new Date(before.getTime() - 60_000));
         expect(again.getTime()).toBe(before.getTime());
         expect(await lastModified()).toBe(before.getTime());
     });
 
     it("does not move for a song change, a Discover song or an analysis write", async () => {
-        const before = await markLibraryChanged();
+        const before = await markedTime();
         await tick();
         await prisma.track.update({ where: { id: `${P}-gen-a3s1` }, data: { trackNo: 7 } });
         await prisma.track.update({ where: { id: `${P}-gen-a1s1` }, data: { analysisStatus: "completed" } });

@@ -17,8 +17,10 @@ jest.mock("../../utils/redis", () => ({
 }));
 
 jest.mock("../../utils/systemSettings", () => ({
+    __esModule: true,
     getSystemSettings: jest.fn().mockResolvedValue({}),
-    saveSystemSettings: jest.fn().mockResolvedValue(undefined),
+    // The real writer: the library marker is saved through it, and the marker tests below count those saves.
+    saveSystemSettings: (changes: unknown) => jest.requireActual("../../utils/systemSettings").saveSystemSettings(changes),
     invalidateSystemSettingsCache: jest.fn(),
 }));
 

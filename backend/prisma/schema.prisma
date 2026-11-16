@@ -678,7 +678,7 @@ model SystemSettings {
   /// When the one-time pass that gave every stored cover value a version ran (services/coverVersionBackfill.ts); null until it has.
   coverVersionsAddedAt        DateTime? @default(now())
   /// When the library a client lists last changed (a scan added, changed or removed songs; a person edited a shown name). Never goes backwards (services/libraryChanged.ts).
-  libraryChangedAt            DateTime? @default(now())
+  libraryChangedAt            DateTime? @default(dbgenerated("(timezone('utc'::text, now()))"))
   /// Country whose Apple podcast charts the podcasts page shows (ISO 3166 alpha-2, lowercase).
   podcastChartCountry         String    @default("us")
   lastUpdateCheck             DateTime?
