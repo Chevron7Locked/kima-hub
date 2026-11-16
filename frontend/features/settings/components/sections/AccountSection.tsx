@@ -76,6 +76,9 @@ export function AccountSection() {
         load2FAStatus();
     }, [load2FAStatus]);
 
+    // Shown from the first character typed, so the button's refusing the password is explained before it is pressed.
+    const typedPasswordProblem = newPassword ? passwordProblem(newPassword) : null;
+
     const handleChangePassword = async () => {
         if (!currentPassword || !newPassword || !confirmPassword) {
             setPasswordStatus("error");
@@ -196,12 +199,19 @@ export function AccountSection() {
                             onChange={setCurrentPassword}
                             placeholder="Current password"
                         />
-                        <SettingsInput
-                            type="password"
-                            value={newPassword}
-                            onChange={setNewPassword}
-                            placeholder="New password (min 6 characters)"
-                        />
+                        <div>
+                            <SettingsInput
+                                type="password"
+                                value={newPassword}
+                                onChange={setNewPassword}
+                                placeholder="New password (min 6 characters)"
+                            />
+                            {typedPasswordProblem && (
+                                <p role="alert" className="mt-1.5 text-xs text-danger-light">
+                                    {typedPasswordProblem}
+                                </p>
+                            )}
+                        </div>
                         <SettingsInput
                             type="password"
                             value={confirmPassword}

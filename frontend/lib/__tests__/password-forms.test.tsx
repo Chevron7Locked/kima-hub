@@ -61,6 +61,21 @@ describe("change password", () => {
         expect(api.post).not.toHaveBeenCalled();
     });
 
+    it("says what is wrong under the new password field while it is typed", async () => {
+        await fill("12345");
+        expect(dom.host.querySelector('[role="alert"]')?.textContent).toContain("at least 6 characters");
+        type(field("New password (min 6 characters)"), tooLong);
+        expect(dom.host.querySelector('[role="alert"]')?.textContent).toContain("at most 72 characters");
+        type(field("New password (min 6 characters)"), "123456");
+        expect(dom.host.querySelector('[role="alert"]')).toBeNull();
+    });
+
+    it("says nothing about the new password before anything is typed", async () => {
+        act(() => dom.root.render(<AccountSection />));
+        await act(async () => button("Change").click());
+        expect(dom.host.querySelector('[role="alert"]')).toBeNull();
+    });
+
     it("sends a password the rule accepts", async () => {
         await fill("a".repeat(72));
         await act(async () => button("Change Password").click());
