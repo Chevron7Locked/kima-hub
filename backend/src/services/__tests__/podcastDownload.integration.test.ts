@@ -176,3 +176,13 @@ it("keeps nothing when a feed refresh gives the episode a new address after the 
     expect(fs.existsSync(path.join(cacheRoot, "podcast-audio", `${id}.mp3`))).toBe(false);
     expect(fs.existsSync(path.join(cacheRoot, "podcast-audio", `${id}.tmp`))).toBe(false);
 }, 30_000);
+
+it("leaves no audio behind when its record cannot be written", async () => {
+    const id = `${P}-full`;
+    // A listener who does not exist: the record's write fails after the audio has been moved into place.
+    downloadInBackground(id, `${base}/full.mp3`, "pod_dl_no_such_user");
+    while (isDownloading(id)) await new Promise((ok) => setTimeout(ok, 100));
+
+    expect(fs.existsSync(path.join(cacheRoot, "podcast-audio", `${id}.mp3`))).toBe(false);
+    expect(await prisma.podcastDownload.count({ where: { episodeId: id } })).toBe(0);
+}, 40_000);

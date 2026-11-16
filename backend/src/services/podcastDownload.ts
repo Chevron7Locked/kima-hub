@@ -219,6 +219,8 @@ async function performDownload(
         // the episode's. The address is checked, the file put in place and its record written under the episode's row
         // lock, so a refresh that changes the address waits, then finds the record and drops the copy.
         const fileSizeMb = stats.size / 1024 / 1024;
+        let renamed = false;
+        const now = new Date();
         const filed = await prisma.$transaction(async (tx) => {
             const rows = await tx.$queryRaw<{ audioUrl: string }[]>`
                 SELECT "audioUrl" FROM "PodcastEpisode" WHERE id = ${episodeId} FOR UPDATE`;
@@ -226,13 +228,18 @@ async function performDownload(
 
             // The episode's size is now the size of the copy held.
             await fs.rename(tempPath, finalPath);
+            renamed = true;
             await tx.podcastEpisode.update({ where: { id: episodeId }, data: { fileSize: stats.size } });
             await tx.podcastDownload.upsert({
                 where: { userId_episodeId: { userId, episodeId } },
-                create: { userId, episodeId, localPath: finalPath, fileSizeMb, downloadedAt: new Date(), lastAccessedAt: new Date() },
-                update: { localPath: finalPath, fileSizeMb, downloadedAt: new Date(), lastAccessedAt: new Date() },
+                create: { userId, episodeId, localPath: finalPath, fileSizeMb, downloadedAt: now, lastAccessedAt: now },
+                update: { localPath: finalPath, fileSizeMb, downloadedAt: now, lastAccessedAt: now },
             });
             return true;
+        }, { timeout: 15_000 }).catch(async (error) => {
+            // The rows rolled back, so a file already moved into place has no record: it goes too.
+            if (renamed) await fs.unlink(finalPath).catch(() => {});
+            throw error;
         });
         if (!filed) {
             await fs.unlink(tempPath).catch(() => {});

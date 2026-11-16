@@ -210,6 +210,24 @@ describe("a cached copy of an episode", () => {
         expect(ep).toMatchObject({ audioUrl: "https://cdn.example.invalid/new.mp3", duration: 2400, fileSize: 9000 });
     });
 
+    it("is dropped when a download filed it after the refresh read the episode, before the new address was saved", async () => {
+        await prisma.podcastDownload.deleteMany({ where: { episodeId: `${P}-ep1` } });
+        const real = prisma.podcastEpisode.updateMany.bind(prisma.podcastEpisode);
+        const spy = jest.spyOn(prisma.podcastEpisode, "updateMany").mockImplementationOnce(((args: any) => {
+            // The refresh's snapshot showed no copy; one is filed now, under the old address.
+            return prisma.podcastDownload
+                .create({ data: { userId: USER, episodeId: `${P}-ep1`, localPath: cached, fileSizeMb: 0.1 } })
+                .then(() => real(args));
+        }) as any);
+        parseFeed.mockResolvedValue(feed([feedEpisode("g1", { audioUrl: "https://cdn.example.invalid/new.mp3" })]));
+
+        await refreshPodcastFeed(P);
+        spy.mockRestore();
+
+        expect(fs.existsSync(cached)).toBe(false);
+        expect(await prisma.podcastDownload.count({ where: { episodeId: `${P}-ep1` } })).toBe(0);
+    });
+
     it("is kept when only the title changes", async () => {
         parseFeed.mockResolvedValue(feed([feedEpisode("g1", { audioUrl: "https://cdn.example.invalid/old.mp3", title: "Renamed" })]));
         await refreshPodcastFeed(P);

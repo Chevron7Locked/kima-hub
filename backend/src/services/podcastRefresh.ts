@@ -64,7 +64,6 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
         }
         // A new address is new audio: the cached copy and its measured figures belong to the old one.
         const audioChanged = have.audioUrl !== ep.audioUrl;
-        if (audioChanged && have.downloads.length > 0) await dropCachedEpisode(have.id);
         const measured = have.downloads.length > 0 && !audioChanged;
         const changes: Prisma.PodcastEpisodeUpdateManyMutationInput = {};
         if (have.title !== ep.title) changes.title = ep.title;
@@ -77,6 +76,9 @@ export async function refreshPodcastFeed(podcastId: string): Promise<{ newEpisod
         if (Object.keys(changes).length > 0) {
             await prisma.podcastEpisode.updateMany({ where: { id: have.id }, data: changes });
         }
+        // Dropped after the new address is saved, whatever this refresh's read of the episode showed: a download that
+        // filed its copy since then is found here, and one that starts to file now sees the new address and discards.
+        if (audioChanged) await dropCachedEpisode(have.id);
     }
 
     await prisma.podcast.update({
