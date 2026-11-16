@@ -83,6 +83,11 @@ describe('the shape of an album in the list', () => {
         expect(await entry('/getAlbumList2.view', 'albumList2')).toMatchObject({ name: id('c'), artistId: `${P}-ar`, songCount: 1 });
     });
 
+    // Express routes a call whatever its letter case, so the shape follows the route that answered, not the path's text.
+    it('is an AlbumID3 for getAlbumList2 however its name is cased', async () => {
+        expect(await entry('/getalbumlist2.view', 'albumList2')).toMatchObject({ name: id('c'), songCount: 1 });
+    });
+
     it('is a Child folder in the legacy getAlbumList', async () => {
         const album = await entry('/getAlbumList.view', 'albumList');
 

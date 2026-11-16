@@ -334,8 +334,9 @@ const ALBUM_LIST_SELECT = Prisma.sql`
     JOIN "Artist" ar ON a."artistId" = ar.id
 `;
 
-// getAlbumList2 is ID3-tagged; getAlbumList is the legacy folder-based alias
-libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req, res) => {
+// getAlbumList2 lists AlbumID3; the legacy getAlbumList lists Child folders. Which one answers is decided by the route
+// it is mounted on, not by the request's path text (a router matches any letter case).
+const albumListRoute = (id3: boolean) => wrap(async (req, res) => {
     const type = one(req, "type") || "newest";
     const size = clamp(parseIntParam(one(req, "size"), 10), 0, 500);
     const offset = Math.max(0, parseIntParam(one(req, "offset"), 0));
@@ -489,8 +490,7 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
             });
     }
 
-    // getAlbumList2 lists AlbumID3; the legacy getAlbumList lists Child folders, as getMusicDirectory does.
-    const id3 = req.path.includes("getAlbumList2");
+    // The legacy list gives Child folders, as getMusicDirectory does.
     const albumList = albums.map((a) => {
         const artistName = a.artist.displayName || a.artist.name;
         const genres = shownAlbumGenres(a, a.artist);
@@ -503,7 +503,9 @@ libraryRouter.all(["/getAlbumList2.view", "/getAlbumList.view"], wrap(async (req
     });
 
     subsonicOk(req, res, { [id3 ? "albumList2" : "albumList"]: { album: albumList } });
-}));
+});
+libraryRouter.all("/getAlbumList2.view", albumListRoute(true));
+libraryRouter.all("/getAlbumList.view", albumListRoute(false));
 
 // ===================== GENRES =====================
 
