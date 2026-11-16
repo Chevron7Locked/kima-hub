@@ -22,7 +22,8 @@ async function clearRows() {
     await prisma.discoveryAlbum.deleteMany({ where: { userId: { in: [USER, OTHER_USER] } } });
     await prisma.downloadJob.deleteMany({ where: { userId: { in: [USER, OTHER_USER] } } });
     await prisma.unavailableAlbum.deleteMany({ where: { userId: { in: [USER, OTHER_USER] } } });
-    await prisma.track.deleteMany({ where: { id: { startsWith: P } } }); // its plays go with it
+    await prisma.play.deleteMany({ where: { id: { startsWith: P } } }); // a song's plays now stay when it goes
+    await prisma.track.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.album.deleteMany({ where: { id: { startsWith: P } } });
     await prisma.artist.deleteMany({ where: { id: { startsWith: P } } });
 }
