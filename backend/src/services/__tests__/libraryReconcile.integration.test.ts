@@ -1185,9 +1185,9 @@ describe("which copy takes over", () => {
     describe("a copy on the same album is the same recording", () => {
         const REC_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
         const REC_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-        const song = (id: string, title: string, recordingMbid: string | null, gone = false) =>
+        const song = (id: string, title: string, recordingMbid: string | null, gone = false, trackNo = 1, discNumber: number | null = null) =>
             prisma.track.create({
-                data: { id: `${P}${id}`, albumId: `${P}alb`, trackNo: 1, title, duration: 200, filePath: `/tmp/${P}${id}.mp3`,
+                data: { id: `${P}${id}`, albumId: `${P}alb`, trackNo, discNumber, title, duration: 200, filePath: `/tmp/${P}${id}.mp3`,
                     fileModified: new Date(), fileSize: 1, recordingMbid, ...(gone ? { missingSince: new Date(Date.now() - 5 * MIN) } : {}) },
             });
 
@@ -1199,6 +1199,68 @@ describe("which copy takes over", () => {
             expect((await sweep()).removed).toBe(1);
 
             expect((await where()).play).toBe(`${P}c`);
+        });
+
+        it("a re-rip with new numbering is a copy: the same recording on the same album under another track number", async () => {
+            await song("g", "Schema", REC_A, true, 3);
+            await song("c", "Schema", REC_A, false, 5);
+            await seedHistoryAndQueue();
+
+            expect((await sweep()).removed).toBe(1);
+
+            expect((await where()).play).toBe(`${P}c`);
+            expect(await prisma.play.count({ where: { userId: `${P}user`, trackId: null } })).toBe(0);
+        });
+
+        it("a re-rip that moved to another disc is a copy", async () => {
+            await song("g", "Schema", REC_A, true, 3, 1);
+            await song("c", "Schema", REC_A, false, 3, 2);
+            await seedHistoryAndQueue();
+
+            await sweep();
+
+            expect((await where()).play).toBe(`${P}c`);
+        });
+
+        it("the copy in the same slot comes before a copy of the same recording in another slot", async () => {
+            await song("g", "Schema", REC_A, true, 3);
+            await song("slot", "Schema", REC_A, false, 3);
+            await song("moved", "Schema", REC_A, false, 5);
+            await prisma.track.update({ where: { id: `${P}slot` }, data: { mime: "audio/mpeg", bitrate: 64 } });
+            await prisma.track.update({ where: { id: `${P}moved` }, data: { mime: "audio/flac", bitrate: 900 } });
+            await seedHistoryAndQueue();
+
+            await sweep();
+
+            expect((await where()).play).toBe(`${P}slot`);
+        });
+
+        it("the same recording on the same album under new numbering comes before a better copy on another album", async () => {
+            await song("g", "Schema", REC_A, true, 3);
+            await song("moved", "Schema", REC_A, false, 5);
+            await prisma.track.update({ where: { id: `${P}moved` }, data: { mime: "audio/mpeg", bitrate: 64 } });
+            await prisma.album.create({
+                data: { id: `${P}alb3`, artistId: `${P}art`, rgMbid: `${P}-rg3`, identityKey: `${P}-alb3-key`, title: "Recon Album Three", primaryType: "Album" },
+            });
+            await prisma.track.create({
+                data: { id: `${P}elsewhere`, albumId: `${P}alb3`, title: "Schema", trackNo: 1, duration: 200, filePath: `/tmp/${P}elsewhere.flac`,
+                    fileModified: new Date(), fileSize: 1, recordingMbid: REC_A, mime: "audio/flac", bitrate: 900 },
+            });
+            await seedHistoryAndQueue();
+
+            await sweep();
+
+            expect((await where()).play).toBe(`${P}moved`);
+        });
+
+        it("a song of another recording in a new slot is no copy, though its title matches", async () => {
+            await song("g", "Schema", REC_A, true, 3);
+            await song("c", "Schema", REC_B, false, 5);
+            await seedHistoryAndQueue();
+
+            await sweep();
+
+            expect((await where()).play).toBeNull();
         });
 
         it("two songs with different recording ids are not copies, though their titles match: the plays are kept", async () => {

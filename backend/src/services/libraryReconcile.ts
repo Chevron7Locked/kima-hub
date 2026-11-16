@@ -320,7 +320,8 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
 
 /**
  * For each retiring track, the copies of the same song on the same album (same disc and track number, same title
- * ignoring case), from one candidate query: its history goes to the best copy on a library album, and its queue places
+ * ignoring case; or, when a re-rip numbered the album differently, the same recording id under another disc or track
+ * number), from one candidate query, the copy in the same slot ahead of one in another slot: its history goes to the best copy on a library album, and its queue places
  * to the best of those a person can play. A copy on a Discover album is no copy at all (a Discover song reaches nothing
  * that is not Discover), and neither is one whose file is flagged missing (it retires itself). A corrupt copy is a
  * copy for history only: a queue or playlist is never pointed at a file a person could not play, but a fixed file has
@@ -333,7 +334,9 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
  *
  * On the same album a copy is the same recording when both songs have a recording id (`recordingMbid`): two songs whose
  * ids differ are different recordings, whatever their titles, and a song's id with none on the other says nothing. The
- * title match decides only when either song has no recording id.
+ * title match decides only when either song has no recording id, and only within the same slot. Order of choice: same
+ * slot, then the same recording id on the same album in another slot, then (for a song with no copy on its album) the
+ * recording id on another album.
  */
 async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Promise<Replacement[]> {
     // Titles are compared here, not in SQL: the database lower-cases ASCII only.
@@ -345,13 +348,15 @@ async function findReplacements(tx: Prisma.TransactionClient, ids: string[]): Pr
           FROM "Track" g
           JOIN "Track" k
             ON k."albumId" = g."albumId"
-           AND k."trackNo" = g."trackNo"
-           AND k."discNumber" IS NOT DISTINCT FROM g."discNumber"
            AND k.id <> g.id
+           AND ((k."trackNo" = g."trackNo" AND k."discNumber" IS NOT DISTINCT FROM g."discNumber")
+                OR (g."recordingMbid" IS NOT NULL AND k."recordingMbid" = g."recordingMbid"))
           JOIN "Album" ka ON ka.id = k."albumId" AND ka.location = 'LIBRARY'
          WHERE g.id = ANY(${ids}::text[])
            AND k."missingSince" IS NULL
-         ORDER BY g.id, ${bestCopyFirst()}
+         ORDER BY g.id,
+                  (k."trackNo" = g."trackNo" AND k."discNumber" IS NOT DISTINCT FROM g."discNumber") DESC,
+                  ${bestCopyFirst()}
     `;
     const pairs = pairsOf(
         sameSlot.filter((row) =>
