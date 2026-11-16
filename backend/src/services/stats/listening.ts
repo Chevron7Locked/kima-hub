@@ -41,7 +41,8 @@ export interface ListeningStats {
         bpm: number | null;
         plays: number;
     }>;
-    topArtists: Array<{ id: string; name: string; plays: number; estimatedSeconds: number }>;
+    /** `id` is null for an artist that exists only in kept plays: it is no longer in the library. */
+    topArtists: Array<{ id: string | null; name: string; plays: number; estimatedSeconds: number }>;
     topTracks: Array<{ id: string; title: string; artist: string; plays: number }>;
 }
 
@@ -83,13 +84,12 @@ export async function listeningStats(
             >(Prisma.sql`${fold}
             SELECT count(*)::int                                    AS plays,
                    coalesce(sum(LEAST(p.duration, ${PLAY_CREDIT_CAP_SECONDS}::int)), 0)::int AS est,
-                   count(DISTINCT p."trackId")::int                 AS tracks,
-                   count(DISTINCT al."artistId")::int               AS artists,
-                   count(DISTINCT p."albumId")::int                 AS albums,
+                   count(DISTINCT p.fkey)::int                      AS tracks,
+                   count(DISTINCT p.artist_key)::int                AS artists,
+                   count(DISTINCT p.album_key)::int                 AS albums,
                    min(p."playedAt")                                AS first_play,
                    max(p."playedAt")                                AS last_play
-            FROM p
-            JOIN "Album" al ON al.id = p."albumId"`),
+            FROM p`),
 
             db.$queryRaw<Array<{ source: string; n: number }>>(Prisma.sql`${fold}
             SELECT p.source::text AS source, count(*)::int AS n FROM p GROUP BY 1`),
@@ -125,14 +125,14 @@ export async function listeningStats(
                    count(*)::int          AS n
             FROM p GROUP BY 1 ORDER BY 1`),
 
-            db.$queryRaw<Array<{ id: string; name: string; n: number; est: number }>>(Prisma.sql`${fold}
-            SELECT ar.id AS id, coalesce(ar."displayName", ar.name) AS name,
+            // An artist a kept play names that no longer exists has no row to join: it counts under its stored name, with no id.
+            db.$queryRaw<Array<{ id: string | null; name: string; n: number; est: number }>>(Prisma.sql`${fold}
+            SELECT ar.id AS id, coalesce(ar."displayName", ar.name, p.kept_artist) AS name,
                    count(*)::int AS n,
                    coalesce(sum(LEAST(p.duration, ${PLAY_CREDIT_CAP_SECONDS}::int)), 0)::int AS est
             FROM p
-            JOIN "Album"  al ON al.id = p."albumId"
-            JOIN "Artist" ar ON ar.id = al."artistId"
-            GROUP BY 1, 2 ORDER BY n DESC LIMIT 8`),
+            LEFT JOIN "Artist" ar ON ar.id = p.artist_key
+            GROUP BY p.artist_key, 1, 2 ORDER BY n DESC, 2 LIMIT 8`),
 
             db.$queryRaw<Array<{ id: string; title: string; artist: string; n: number }>>(Prisma.sql`${fold}
             SELECT t.id AS id, coalesce(t."displayTitle", t.title)   AS title,
@@ -211,25 +211,24 @@ export async function hourDetail(
     const local = Prisma.sql`p."playedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${tz}`;
 
     const [tracks, artists, total] = await withListens(userId, period, ({ fold, db }) => Promise.all([
+        // A kept play names its song and artist as they were written on it.
         db.$queryRaw<Array<{ title: string; artist: string; n: number }>>(Prisma.sql`
             ${fold}
-            SELECT coalesce(t."displayTitle", t.title) AS title,
-                   coalesce(ar."displayName", ar.name) AS artist,
+            SELECT coalesce(t."displayTitle", t.title, p.kept_title) AS title,
+                   coalesce(ar."displayName", ar.name, p.kept_artist) AS artist,
                    count(*)::int AS n
             FROM p
-            JOIN "Track"  t  ON t.id  = p."trackId"
-            JOIN "Album"  al ON al.id = p."albumId"
-            JOIN "Artist" ar ON ar.id = al."artistId"
+            LEFT JOIN "Track"  t  ON t.id  = p."trackId"
+            LEFT JOIN "Artist" ar ON ar.id = p.artist_key
             WHERE EXTRACT(DOW  FROM ${local})::int = ${weekday}
               AND EXTRACT(HOUR FROM ${local})::int = ${hour}
             GROUP BY 1, 2 ORDER BY n DESC, 1 LIMIT 6`),
 
         db.$queryRaw<Array<{ name: string; n: number }>>(Prisma.sql`
             ${fold}
-            SELECT coalesce(ar."displayName", ar.name) AS name, count(*)::int AS n
+            SELECT coalesce(ar."displayName", ar.name, p.kept_artist) AS name, count(*)::int AS n
             FROM p
-            JOIN "Album"  al ON al.id = p."albumId"
-            JOIN "Artist" ar ON ar.id = al."artistId"
+            LEFT JOIN "Artist" ar ON ar.id = p.artist_key
             WHERE EXTRACT(DOW  FROM ${local})::int = ${weekday}
               AND EXTRACT(HOUR FROM ${local})::int = ${hour}
             GROUP BY 1 ORDER BY n DESC, 1 LIMIT 4`),

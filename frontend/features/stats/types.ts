@@ -22,7 +22,8 @@ export interface ListeningStats {
         bpm: number | null;
         plays: number;
     }>;
-    topArtists: Array<{ id: string; name: string; plays: number; estimatedSeconds: number }>;
+    /** `id` is null for an artist that is no longer in the library: only its kept plays name it. */
+    topArtists: Array<{ id: string | null; name: string; plays: number; estimatedSeconds: number }>;
     topTracks: Array<{ id: string; title: string; artist: string; plays: number }>;
 }
 

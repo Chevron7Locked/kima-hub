@@ -63,6 +63,9 @@ function judge(span: number, gapAfter: number | null, required: number | null): 
     return span + gapAfter < required ? "skipped" : "unclear";
 }
 
+/** A play of a song still in the library: the audit judges these; a kept play (its song is gone) only breaks a gap. */
+type LibraryPlay = Extract<PlayHistoryRow, { library: true }>;
+
 /** A listen still open: more rows of its track may yet join it. */
 interface OpenListen {
     listen: Listen;
@@ -82,7 +85,7 @@ async function walkListens(userId: string, onListen: (listen: Listen) => void, r
     const open = new Map<string, OpenListen>();
     let began = 0;
     // The last library play seen, until the play after it (of any song, in either location) gives its gap.
-    let waiting: PlayHistoryRow | null = null;
+    let waiting: LibraryPlay | null = null;
 
     const complete = ({ listen, recordedHeard }: OpenListen) => {
         listen.verdict = recordedHeard
@@ -91,7 +94,7 @@ async function walkListens(userId: string, onListen: (listen: Listen) => void, r
         onListen(listen);
     };
 
-    const settle = (p: PlayHistoryRow, gapAfter: number | null) => {
+    const settle = (p: LibraryPlay, gapAfter: number | null) => {
         const window = Math.max(MIN_LISTEN_WINDOW_SECONDS, p.track.duration);
         const current = open.get(p.trackId);
         // Measured from where the listen began, not from its latest row: measuring from

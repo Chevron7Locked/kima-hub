@@ -508,8 +508,8 @@ function TopLists({ listening, period }: { listening: ListeningStats; period: Pe
                 kind="artist"
                 period={period}
                 items={listening.topArtists.map((a) => ({
-                    key: a.id,
-                    id: a.id,
+                    key: a.id ?? `gone:${a.name}`,
+                    id: a.id ?? undefined,
                     primary: a.name,
                     count: a.plays,
                 }))}

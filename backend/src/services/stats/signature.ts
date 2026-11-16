@@ -49,10 +49,10 @@ export async function signature(
         Promise.all([
         db.$queryRaw<Array<{ for_half: number; for_eighty: number; distinct: number }>>(Prisma.sql`
             ${fold},
-            c AS (SELECT "trackId", count(*)::int n FROM p GROUP BY 1),
-            r AS (SELECT n, sum(n) OVER (ORDER BY n DESC, "trackId") running,
+            c AS (SELECT fkey, count(*)::int n FROM p GROUP BY 1),
+            r AS (SELECT n, sum(n) OVER (ORDER BY n DESC, fkey) running,
                          sum(n) OVER () total,
-                         row_number() OVER (ORDER BY n DESC, "trackId") rank FROM c)
+                         row_number() OVER (ORDER BY n DESC, fkey) rank FROM c)
             SELECT (SELECT min(rank)::int FROM r WHERE running >= total / 2.0)      AS for_half,
                    (SELECT min(rank)::int FROM r WHERE running >= total * 0.8)      AS for_eighty,
                    (SELECT max(rank)::int FROM r)                                   AS distinct`),
@@ -60,15 +60,15 @@ export async function signature(
         db.$queryRaw<Array<{ moves: number; same_album: number; in_order: number }>>(Prisma.sql`
             ${fold},
             seq AS (
-                SELECT "albumId", "trackNo",
-                       LAG("albumId") OVER (ORDER BY "playedAt", id) prev_album,
+                SELECT album_key, "trackNo",
+                       LAG(album_key) OVER (ORDER BY "playedAt", id) prev_album,
                        LAG("trackNo")  OVER (ORDER BY "playedAt", id) prev_no,
                        EXTRACT(EPOCH FROM ("playedAt" - LAG("playedAt") OVER (ORDER BY "playedAt", id))) gap
                 FROM p)
             SELECT count(*) FILTER (WHERE gap < ${SESSION_GAP_SECONDS})::int AS moves,
-                   coalesce(round(100.0 * count(*) FILTER (WHERE gap < ${SESSION_GAP_SECONDS} AND "albumId" = prev_album)
+                   coalesce(round(100.0 * count(*) FILTER (WHERE gap < ${SESSION_GAP_SECONDS} AND album_key = prev_album)
                        / nullif(count(*) FILTER (WHERE gap < ${SESSION_GAP_SECONDS}), 0), 1), 0)::float8 AS same_album,
-                   coalesce(round(100.0 * count(*) FILTER (WHERE gap < ${SESSION_GAP_SECONDS} AND "albumId" = prev_album AND "trackNo" = prev_no + 1)
+                   coalesce(round(100.0 * count(*) FILTER (WHERE gap < ${SESSION_GAP_SECONDS} AND album_key = prev_album AND "trackNo" = prev_no + 1)
                        / nullif(count(*) FILTER (WHERE gap < ${SESSION_GAP_SECONDS}), 0), 1), 0)::float8 AS in_order
             FROM seq`),
 

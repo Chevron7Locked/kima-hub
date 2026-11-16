@@ -22,6 +22,21 @@
  * its `playHistoryPages` carry every play, so a Discover play still ends the gap after a library one) leave Discover plays out of
  * their statistics. Every other reader keeps its own meaning.
  * Plays are read only here: no other module reads the Play table (the writes that record, relabel, move or delete rows stay with their owners).
+ *
+ * Kept plays: a song removed with no copy to take its history leaves its plays (`Play.trackId` null, with the song's
+ * title, artist, album, recording and length written on each, and whether its album was a library or a Discover album).
+ * Each reader keeps its meaning and counts a kept play wherever it can attribute it:
+ * - the stats page (`withListens`) folds kept library plays with the rest, so its plays, listening time, clock, sources,
+ *   distinct songs, artists and albums and per-artist counts are what they were before the delete. A kept play's artist and
+ *   album are the ones of that name that exist now, else its stored names. What needs the song's audio (the taste plot,
+ *   drift, key, era of an album not found, shape) or the song itself (top songs, the songs of an hour or a region) reads
+ *   the songs that are there;
+ * - `countPlaysBefore` and `playHistoryPages` count every row, kept ones included (the audit sequences a kept play, so it still
+ *   ends a gap, but reports and removes library songs only);
+ * - every reader that offers, seeds or ranks songs (`playCounts`, `mostPlayedTrackIds`, `recentPlayArtists`,
+ *   `recentListenArtists`, `neverPlayedSql`, `playedMoreThanSql`, `listenedMoreThanSql`, `playRowsSql`, `albumsPlayedAtLeast`,
+ *   `listenersOf`) reads plays of songs that are there, and so never sees a kept play;
+ * - a Discover play is never kept (a Discover song's plays are Discover's, and a kept one stays out of every statistic).
  */
 
 import { Prisma, type Artist, type ListenSource } from "@prisma/client";
@@ -82,19 +97,17 @@ export function listenRows(
     touchedSince?: Date,
     libraryOnly?: true,
 ): Prisma.Sql {
-    return Prisma.sql`
-        WITH RECURSIVE ordered AS (
-            SELECT p.id, p."trackId", p."playedAt", p.source,
+    // The stats page also reads the plays of songs that left the library with no copy (kept plays): they fold like any
+    // other, by the song's recording or, failing that, its stored names, and carry the keys the page counts by.
+    const withKept = libraryOnly && !onlyTrackId && !touchedSince;
+    const live = Prisma.sql`
+            SELECT p.id, p."trackId", p."trackId" AS fkey, p."playedAt", p.source,
                    t.duration, t."albumId", t."trackNo",
                    t.energy, t.valence, t.bpm, t.key, t."keyScale",
-                   t.instrumentalness, t."dynamicRange", t.acousticness,
-                   GREATEST(t.duration, ${MIN_LISTEN_WINDOW_SECONDS}) AS listen_window,
-                   -- A gap wider than the track is long settles the row on its
-                   -- own: nothing that far from its predecessor can be the same
-                   -- listen, whatever happened before it.
-                   coalesce(EXTRACT(EPOCH FROM (p."playedAt" - LAG(p."playedAt")
-                       OVER (PARTITION BY p."trackId" ORDER BY p."playedAt", p.id))), 1e9)
-                       > GREATEST(t.duration, ${MIN_LISTEN_WINDOW_SECONDS}) AS opens_run
+                   t.instrumentalness, t."dynamicRange", t.acousticness${libraryOnly
+                       ? Prisma.sql`,
+                   lib."artistId" AS artist_key, t."albumId" AS album_key, NULL::text AS kept_title, NULL::text AS kept_artist`
+                       : Prisma.empty}
             FROM "Play" p
             JOIN "Track" t ON t.id = p."trackId"
             ${libraryOnly ? Prisma.sql`JOIN "Album" lib ON lib.id = t."albumId" AND lib.location = 'LIBRARY'` : Prisma.empty}
@@ -102,7 +115,43 @@ export function listenRows(
               ${onlyTrackId ? Prisma.sql`AND p."trackId" = ${onlyTrackId}` : Prisma.empty}
               ${touchedSince
                   ? Prisma.sql`AND p."trackId" IN (SELECT r."trackId" FROM "Play" r WHERE r."userId" = ${userId} AND r."playedAt" >= ${touchedSince})`
-                  : Prisma.empty}
+                  : Prisma.empty}`;
+    // A kept play's artist and album are the ones of that name that exist now, so its listen counts with theirs; with none,
+    // the stored names stand in for them. Its audio features are not kept, so only the counts that need none read it.
+    const kept = withKept
+        ? Prisma.sql`
+          UNION ALL
+            SELECT p.id, NULL, 'kept:' || coalesce(p."keptRecordingMbid",
+                       concat_ws(chr(31), p."keptArtistName", p."keptAlbumTitle", p."keptTitle")),
+                   p."playedAt", p.source, p."keptDuration", kb.id, NULL,
+                   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                   coalesce(ka.id, 'kept:' || p."keptArtistName"),
+                   coalesce(kb.id, 'kept:' || concat_ws(chr(31), p."keptArtistName", p."keptAlbumTitle")),
+                   p."keptTitle", p."keptArtistName"
+            FROM "Play" p
+            LEFT JOIN LATERAL (SELECT a.id FROM "Artist" a WHERE a.name = p."keptArtistName" ORDER BY a.id LIMIT 1) ka ON TRUE
+            LEFT JOIN LATERAL (SELECT b.id FROM "Album" b
+                                WHERE b."artistId" = ka.id AND b.title = p."keptAlbumTitle" AND b.location = 'LIBRARY'
+                                ORDER BY b.id LIMIT 1) kb ON TRUE
+            WHERE p."userId" = ${userId} AND p."trackId" IS NULL AND p."keptLibrary"`
+        : Prisma.empty;
+    const extra = libraryOnly ? Prisma.sql`, s.artist_key, s.album_key, s.kept_title, s.kept_artist` : Prisma.empty;
+    return Prisma.sql`
+        WITH RECURSIVE src AS (${live}${kept}
+        ),
+        ordered AS (
+            SELECT s.id, s."trackId", s.fkey, s."playedAt", s.source,
+                   s.duration, s."albumId", s."trackNo",
+                   s.energy, s.valence, s.bpm, s.key, s."keyScale",
+                   s.instrumentalness, s."dynamicRange", s.acousticness${extra},
+                   GREATEST(s.duration, ${MIN_LISTEN_WINDOW_SECONDS}) AS listen_window,
+                   -- A gap wider than the track is long settles the row on its
+                   -- own: nothing that far from its predecessor can be the same
+                   -- listen, whatever happened before it.
+                   coalesce(EXTRACT(EPOCH FROM (s."playedAt" - LAG(s."playedAt")
+                       OVER (PARTITION BY s.fkey ORDER BY s."playedAt", s.id))), 1e9)
+                       > GREATEST(s.duration, ${MIN_LISTEN_WINDOW_SECONDS}) AS opens_run
+            FROM src s
         ),
         -- Two passes, because Postgres will not let a window function appear
         -- inside another one's PARTITION BY: number the runs first, then
@@ -110,14 +159,14 @@ export function listenRows(
         grouped AS (
             SELECT o.*,
                    sum(CASE WHEN o.opens_run THEN 1 ELSE 0 END)
-                       OVER (PARTITION BY o."trackId" ORDER BY o."playedAt", o.id) AS run_id
+                       OVER (PARTITION BY o.fkey ORDER BY o."playedAt", o.id) AS run_id
             FROM ordered o
         ),
         runs AS (
             SELECT g.*,
-                   row_number() OVER (PARTITION BY g."trackId", g.run_id
+                   row_number() OVER (PARTITION BY g.fkey, g.run_id
                                       ORDER BY g."playedAt", g.id) AS seq,
-                   count(*) OVER (PARTITION BY g."trackId", g.run_id) AS run_len
+                   count(*) OVER (PARTITION BY g.fkey, g.run_id) AS run_len
             FROM grouped g
         ),
         -- Only a run of two or more rows has anything to decide: a lone row is
@@ -126,7 +175,7 @@ export function listenRows(
         -- term's input at every level, so a wide table of every play made the
         -- cost grow faster than the history did.
         bursts AS MATERIALIZED (
-            SELECT r.id, r."trackId", r.run_id, r.seq, r."playedAt", r.listen_window
+            SELECT r.id, r.fkey, r.run_id, r.seq, r."playedAt", r.listen_window
             FROM runs r
             WHERE r.run_len > 1
         ),
@@ -135,11 +184,11 @@ export function listenRows(
         -- it, carrying the timestamp the current listen began at. Depth here is
         -- the longest single burst of rows, not the track's whole history.
         walk AS (
-            SELECT b.id, b."trackId", b.run_id, b.seq, b."playedAt" AS listen_started, TRUE AS starts_listen
+            SELECT b.id, b.fkey, b.run_id, b.seq, b."playedAt" AS listen_started, TRUE AS starts_listen
             FROM bursts b
             WHERE b.seq = 1
           UNION ALL
-            SELECT b.id, b."trackId", b.run_id, b.seq,
+            SELECT b.id, b.fkey, b.run_id, b.seq,
                    -- Greater-or-equal: at exactly one duration the track has
                    -- finished, so that row opens a new listen. The recording
                    -- path and the audit draw the line in the same place.
@@ -147,7 +196,7 @@ export function listenRows(
                         THEN b."playedAt" ELSE w.listen_started END,
                    EXTRACT(EPOCH FROM (b."playedAt" - w.listen_started)) >= b.listen_window
             FROM bursts b
-            JOIN walk w ON w."trackId" = b."trackId"
+            JOIN walk w ON w.fkey = b.fkey
                        AND w.run_id = b.run_id
                        AND b.seq = w.seq + 1
         ),
@@ -203,7 +252,8 @@ export function neverPlayedSql(userId: string, song = "t"): Prisma.Sql {
  * plays took 2.2 s at 500,000 songs.
  */
 export function playedMoreThanSql(userId: string, count: number): Prisma.Sql {
-    return Prisma.sql`SELECT p."trackId" FROM "Play" p WHERE p."userId" = ${userId} GROUP BY p."trackId" HAVING count(*) > ${count}`;
+    // A kept play has no song: left in, its null would make every `NOT IN` unknown.
+    return Prisma.sql`SELECT p."trackId" FROM "Play" p WHERE p."userId" = ${userId} AND p."trackId" IS NOT NULL GROUP BY p."trackId" HAVING count(*) > ${count}`;
 }
 
 /** The ids of songs this listener has listened to more than `count` times, counting listens, not rows. A subquery, as `playedMoreThanSql`. */
@@ -213,10 +263,11 @@ export function listenedMoreThanSql(userId: string, count: number): Prisma.Sql {
 
 /**
  * This listener's Play rows as a subquery to join or select from under an alias (`JOIN (${playRowsSql(id)}) p ON ...`):
- * every column of the row, one per Play row. `since` drops rows before it; `heard` keeps the rows the listen rule recorded.
+ * every column of the row, one per Play row of a song that is there (a kept play has no song). `since` drops rows before it;
+ * `heard` keeps the rows the listen rule recorded.
  */
 export function playRowsSql(userId: string, args: { since?: Date; heard?: true } = {}): Prisma.Sql {
-    return Prisma.sql`SELECT p.* FROM "Play" p WHERE p."userId" = ${userId}${
+    return Prisma.sql`SELECT p.* FROM "Play" p WHERE p."userId" = ${userId} AND p."trackId" IS NOT NULL${
         args.since ? Prisma.sql` AND p."playedAt" >= ${args.since}` : Prisma.empty
     }${args.heard ? Prisma.sql` AND p.heard` : Prisma.empty}`;
 }
@@ -234,6 +285,7 @@ export async function playCounts(
         by: ["trackId"],
         where: {
             userId,
+            trackId: { not: null },
             ...(args.song && { track: args.song }),
             ...(args.since && { playedAt: { gte: args.since } }),
             ...(args.sources && { source: { in: args.sources } }),
@@ -243,7 +295,7 @@ export async function playCounts(
         orderBy: [{ _count: { id: "desc" } }, { _max: { playedAt: "desc" } }, { trackId: "asc" }],
         take: args.take,
     });
-    return counted.map((c) => ({ trackId: c.trackId, plays: c._count.id, lastPlayedAt: c._max.playedAt! }));
+    return counted.flatMap((c) => (c.trackId === null ? [] : [{ trackId: c.trackId, plays: c._count.id, lastPlayedAt: c._max.playedAt! }]));
 }
 
 /** The ids of this listener's most played songs among those `song` lets through, most played first, counting every Play row. */
@@ -275,21 +327,26 @@ export async function albumsPlayedAtLeast(
 /** How many Play rows `playHistoryPages` reads at a time. */
 export const PLAY_HISTORY_PAGE_SIZE = 5000;
 
-/** One Play row of the history, with its song's title, length and artist, and whether the song is on a library album. */
-export interface PlayHistoryRow {
+/** The song of a play: its title, length and artist. */
+interface PlayedSong {
+    title: string;
+    displayTitle: string | null;
+    duration: number;
+    album: { artist: { name: string; displayName: string | null } };
+}
+
+/**
+ * One Play row of the history. A library play has its song; any other (a Discover play, or a kept play, whose song is
+ * gone) is there to be sequenced only, so its song may be missing.
+ */
+export type PlayHistoryRow = {
     id: string;
-    trackId: string;
     playedAt: Date;
     heard: boolean;
-    /** The song is on a library album, told by the album's location. */
-    library: boolean;
-    track: {
-        title: string;
-        displayTitle: string | null;
-        duration: number;
-        album: { artist: { name: string; displayName: string | null } };
-    };
-}
+} & (
+    | { /** The song is on a library album, told by the album's location. */ library: true; trackId: string; track: PlayedSong }
+    | { library: false; trackId: string | null; track: PlayedSong | null }
+);
 
 /** The rows of one page: strictly after `after` in (playedAt, id) order, at most `take` of them. */
 async function playHistoryPage(
@@ -322,11 +379,16 @@ async function playHistoryPage(
             },
         },
     });
-    return rows.map(({ track: { album: { location, artist }, ...track }, ...play }) => ({
-        ...play,
-        library: location === "LIBRARY",
-        track: { ...track, album: { artist } },
-    }));
+    return rows.map((row): PlayHistoryRow => {
+        const { track: song, trackId, ...play } = row;
+        // A kept play has no song, and is not reported: the audit sequences it only.
+        if (!song || trackId === null) return { ...play, library: false, trackId: null, track: null };
+        const { album: { location, artist }, ...track } = song;
+        const shaped = { ...track, album: { artist } };
+        return location === "LIBRARY"
+            ? { ...play, library: true, trackId, track: shaped }
+            : { ...play, library: false, trackId, track: shaped };
+    });
 }
 
 /**
@@ -439,5 +501,5 @@ export async function recentPlayArtists(
         take: args.take,
         select: { track: { select: { album: { select: { artist: true } } } } },
     });
-    return plays.map((p) => p.track.album.artist);
+    return plays.flatMap((p) => (p.track ? [p.track.album.artist] : []));
 }
