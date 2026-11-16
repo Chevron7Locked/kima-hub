@@ -14,6 +14,7 @@
  * in memory: a process that stops inside the window forgets it, and a marker write that fails (logged) drops the notes it was
  * for; either way the client sees the new value at the next change of the library.
  */
+import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { getEffectiveYear } from "../utils/dateFilters";
@@ -118,10 +119,17 @@ export async function flushShownChanges(): Promise<void> {
     }
 }
 
+/** The picture columns of each model: the found one and the person's own. */
+const PICTURE_COLUMNS = {
+    artist: { table: "Artist", found: "heroUrl", own: "userHeroUrl" },
+    album: { table: "Album", found: "coverUrl", own: "userCoverUrl" },
+} as const;
+
 /**
  * `prisma.<model>.updateMany` for a column that holds a picture, with the notes it owes: every row whose `column` equals
  * `from` is given `to`, and a row whose shown picture changed is noted. For the one-time repairs that rewrite a stored
- * address wherever it stands.
+ * address wherever it stands. One statement writes the rows and answers them, so each note describes a row as it was
+ * when written, whatever else changed it meanwhile.
  */
 export async function rewritePictureColumn(
     model: ShownKind,
@@ -129,21 +137,18 @@ export async function rewritePictureColumn(
     from: string,
     to: string,
 ): Promise<number> {
-    const rows: Array<{ id: string; found: string | null; own: string | null }> = [];
-    let count: number;
-    if (model === "artist") {
-        const read = await prisma.artist.findMany({ where: { [column]: from }, select: { id: true, heroUrl: true, userHeroUrl: true } });
-        rows.push(...read.map((r) => ({ id: r.id, found: r.heroUrl, own: r.userHeroUrl })));
-        count = (await prisma.artist.updateMany({ where: { [column]: from }, data: { [column]: to } })).count;
-    } else {
-        const read = await prisma.album.findMany({ where: { [column]: from }, select: { id: true, coverUrl: true, userCoverUrl: true } });
-        rows.push(...read.map((r) => ({ id: r.id, found: r.coverUrl, own: r.userCoverUrl })));
-        count = (await prisma.album.updateMany({ where: { [column]: from }, data: { [column]: to } })).count;
-    }
-    const writesOwn = column === "userHeroUrl" || column === "userCoverUrl";
+    const { table, found, own } = PICTURE_COLUMNS[model];
+    if (column !== found && column !== own) throw new Error(`rewritePictureColumn: ${column} is not a picture column of ${model}`);
+    // `table` and `column` come from the closed sets above, never from a caller's text.
+    const rows = await prisma.$queryRaw<Array<{ id: string; found: string | null; own: string | null }>>(Prisma.sql`
+        UPDATE ${Prisma.raw(`"${table}"`)} SET ${Prisma.raw(`"${column}"`)} = ${to}
+         WHERE ${Prisma.raw(`"${column}"`)} = ${from}
+     RETURNING id, ${Prisma.raw(`"${found}"`)} AS found, ${Prisma.raw(`"${own}"`)} AS own`);
+    const writesOwn = column === own;
     for (const row of rows) {
-        const now = writesOwn ? { found: row.found, own: to } : { found: to, own: row.own };
-        notePictureChange(model, row.id, { was: shownPicture(row.found, row.own), now: shownPicture(now.found, now.own) });
+        // The written column held `from` before; the other one is as it is now.
+        const before = writesOwn ? { found: row.found, own: from } : { found: from, own: row.own };
+        notePictureChange(model, row.id, { was: shownPicture(before.found, before.own), now: shownPicture(row.found, row.own) });
     }
-    return count;
+    return rows.length;
 }

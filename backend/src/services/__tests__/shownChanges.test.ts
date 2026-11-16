@@ -228,6 +228,37 @@ describe("rewritePictureColumn", () => {
     });
 });
 
+describe("rewritePictureColumn against a concurrent edit", () => {
+    it("notes what the rows held when they were written, not what they held when first read", async () => {
+        const s = await seed("rwrace", "playable");
+        await prisma.artist.update({ where: { id: s.artist }, data: { heroUrl: "native:artists/x.jpg" } });
+
+        // A person sets their own picture and holds the row while the rewrite queues behind them: the artist shows
+        // their picture before and after, so nothing a client shows changed.
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        let locked!: () => void;
+        const isLocked = new Promise<void>((resolve) => { locked = resolve; });
+        const editing = prisma.$transaction(async (tx) => {
+            await tx.artist.update({ where: { id: s.artist }, data: { userHeroUrl: pic("mine") } });
+            locked();
+            await held;
+        });
+        await isLocked;
+
+        const moved = await markerMoves(async () => {
+            const rewriting = rewritePictureColumn("artist", "heroUrl", "native:artists/x.jpg", "native:artists/x.jpg?v=0123456789");
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            release();
+            await editing;
+            expect(await rewriting).toBe(1);
+            await flushShownChanges();
+        });
+
+        expect(moved).toBe(false);
+    });
+});
+
 describe("shownPicture", () => {
     it("is the person's own picture, else the found one, else null", () => {
         expect(shownPicture(pic("f"), pic("o"))).toBe(pic("o"));

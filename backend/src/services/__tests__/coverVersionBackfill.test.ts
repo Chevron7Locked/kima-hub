@@ -165,7 +165,16 @@ describe("backfillCoverVersionsOnce", () => {
     it("puts a root-folder cover back where it was when its values cannot be rewritten, so they still point at a file", async () => {
         const version = await put(path.join(covers, `${P}_back.jpg`));
         const a = await album({ coverUrl: `native:${P}_back.jpg` });
-        const failing = jest.spyOn(prisma.album, "updateMany").mockRejectedValueOnce(new Error("database away"));
+        // The rewrite is one UPDATE ... RETURNING statement; the first one on an album fails.
+        const realQuery = prisma.$queryRaw.bind(prisma);
+        let failed = false;
+        const failing = jest.spyOn(prisma, "$queryRaw").mockImplementation(((query: { sql?: string }) => {
+            if (!failed && query.sql?.includes('UPDATE "Album"')) {
+                failed = true;
+                return Promise.reject(new Error("database away"));
+            }
+            return realQuery(query as never);
+        }) as never);
 
         const result = await backfillCoverVersionsOnce({});
         failing.mockRestore();
