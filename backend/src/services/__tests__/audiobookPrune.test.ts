@@ -16,6 +16,9 @@ jest.mock("../audiobookshelf", () => ({
     audiobookshelfService: { getAllAudiobooks: jest.fn() },
 }));
 
+import fs from "fs";
+import os from "os";
+import path from "path";
 import { audiobookCacheService } from "../audiobookCache";
 import { audiobookshelfService } from "../audiobookshelf";
 import { prisma } from "../../utils/db";
@@ -71,6 +74,51 @@ describe("syncAll -- prune pass", () => {
 
         expect(await ids()).toEqual([`${P}live-1`]);
         expect(result.pruned).toBe(3);
+    });
+
+    describe("the cached cover of a book that is pruned", () => {
+        const dir = path.join(os.tmpdir(), `kima-prune-covers-${process.pid}`);
+        const elsewhere = path.join(os.tmpdir(), `kima-prune-elsewhere-${process.pid}`);
+        const seedWithCover = (id: string, localCoverPath: string) =>
+            prisma.audiobook.create({
+                data: { id: `${P}${id}`, title: id, sortName: id, audioUrl: `${P}${id}`, localCoverPath },
+            });
+
+        beforeEach(() => {
+            fs.rmSync(dir, { recursive: true, force: true });
+            fs.rmSync(elsewhere, { recursive: true, force: true });
+            fs.mkdirSync(dir, { recursive: true });
+            fs.mkdirSync(elsewhere, { recursive: true });
+            (audiobookCacheService as any).coverCacheDir = dir;
+        });
+        afterAll(() => {
+            fs.rmSync(dir, { recursive: true, force: true });
+            fs.rmSync(elsewhere, { recursive: true, force: true });
+        });
+
+        it("is removed with its smaller copies, and the cover of a book still listed stays", async () => {
+            for (const name of ["gone.jpg", "gone_w300.jpg", "live.jpg"]) fs.writeFileSync(path.join(dir, name), "x");
+            await seedWithCover("gone", path.join(dir, "gone.jpg"));
+            await seedWithCover("live", path.join(dir, "live.jpg"));
+            listed([minimalBook("live", "Live")]);
+            jest.spyOn(audiobookCacheService as any, "syncAudiobook").mockResolvedValue(true);
+
+            await audiobookCacheService.syncAll();
+
+            expect(fs.readdirSync(dir)).toEqual(["live.jpg"]);
+        });
+
+        it("leaves a file outside the cover cache folder, which a stored path may name", async () => {
+            const outside = path.join(elsewhere, "precious.jpg");
+            fs.writeFileSync(outside, "x");
+            await seedWithCover("gone", outside);
+            listed([minimalBook("live", "Live")]);
+            jest.spyOn(audiobookCacheService as any, "syncAudiobook").mockResolvedValue(true);
+
+            await audiobookCacheService.syncAll();
+
+            expect(fs.existsSync(outside)).toBe(true);
+        });
     });
 
     describe("on a library bigger than a page of ids", () => {

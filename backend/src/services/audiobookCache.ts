@@ -6,7 +6,7 @@ import { prisma } from "../utils/db";
 import fs from "fs/promises";
 import path from "path";
 import type { StopCheck } from "../utils/stopCheck";
-import { audiobookCoversPath, MAX_PICTURE_BYTES, readCapped, storeAsJpeg } from "./imageStorage";
+import { audiobookCoversPath, dropResizedCopies, MAX_PICTURE_BYTES, readCapped, storeAsJpeg } from "./imageStorage";
 
 /**
  * Service to sync audiobooks from Audiobookshelf and cache them locally
@@ -174,23 +174,39 @@ class AudiobookCacheService {
                 logger.info("[AUDIOBOOK] Prune stopped for shutdown");
                 break;
             }
-            const page: { id: string }[] = await prisma.audiobook.findMany({
+            const page: { id: string; localCoverPath: string | null }[] = await prisma.audiobook.findMany({
                 where: after === null ? undefined : { id: { gt: after } },
-                select: { id: true },
+                select: { id: true, localCoverPath: true },
                 orderBy: { id: "asc" },
                 take: PRUNE_PAGE_SIZE,
             });
             if (page.length === 0) break;
             after = page[page.length - 1].id;
 
-            const absent = page.map((row) => row.id).filter((id) => !liveIds.has(id));
-            if (absent.length > 0) {
-                const deleted = await prisma.audiobook.deleteMany({ where: { id: { in: absent } } });
+            const gone = page.filter((row) => !liveIds.has(row.id));
+            if (gone.length > 0) {
+                const deleted = await prisma.audiobook.deleteMany({ where: { id: { in: gone.map((row) => row.id) } } });
                 pruned += deleted.count;
+                for (const row of gone) await this.removeCachedCover(row.localCoverPath);
             }
             if (page.length < PRUNE_PAGE_SIZE) break;
         }
         return pruned;
+    }
+
+    /**
+     * Removes the cached cover of a book that is gone, with its smaller copies. Only a file directly in the cover cache
+     * folder is removed: the stored path is a database value, and no other file is ours to delete. A failure only leaves
+     * the file, as the prune itself is done.
+     */
+    private async removeCachedCover(localCoverPath: string | null): Promise<void> {
+        if (!localCoverPath || path.dirname(path.resolve(localCoverPath)) !== path.resolve(this.coverCacheDir)) return;
+        try {
+            await fs.rm(localCoverPath, { force: true });
+            await dropResizedCopies(localCoverPath);
+        } catch (error: any) {
+            logger.warn(`[AUDIOBOOK] Could not remove the cached cover ${localCoverPath}: ${error.message}`);
+        }
     }
 
     /**
