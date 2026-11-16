@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Your listening history survives when a song leaves the library.** When the same recording is on another album in your library, for example a deluxe edition, its plays, like and playlist places move there. When no copy is left, its plays stay in your stats under the song's name, and return to the song if it comes back.
 - **Only admins can read `/api/metrics`.** A metrics scraper needs an admin's app key; a member's key is now refused.
 - **Subsonic apps no longer manage accounts.** Changing a password or creating, editing or deleting users from a Subsonic app now answers "not supported"; manage accounts in the web app.
 - **Saving settings reloads only what changed.** Changing one setting no longer drops the Soulseek connection or reloads Lidarr, Audiobookshelf and fanart; each reloads only when its own settings change, and turning Audiobookshelf on or off takes effect at once.
