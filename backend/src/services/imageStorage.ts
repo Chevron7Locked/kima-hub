@@ -271,9 +271,20 @@ export async function readCapped(response: Response): Promise<Buffer | null> {
 
 const PROXIED_PICTURE_TYPES: ReadonlySet<string> = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
 
-/** The reply's picture type without parameters, in lower case, when it is one a browser draws as a plain image; else null. */
+/** Names servers and browsers send for a jpeg or a png, with the registered name each stands for. */
+const PICTURE_TYPE_ALIASES: Readonly<Record<string, string>> = {
+    "image/jpg": "image/jpeg",
+    "image/pjpeg": "image/jpeg",
+    "image/x-png": "image/png",
+};
+
+/**
+ * The reply's picture type without parameters, in lower case and under its registered name, when it is one a browser
+ * draws as a plain image; else null.
+ */
 function pictureTypeOf(response: Response): string | null {
-    const type = /^\s*(image\/[^\s;]+)/i.exec(response.headers.get("content-type") ?? "")?.[1]?.toLowerCase();
+    const sent = /^\s*(image\/[^\s;]+)/i.exec(response.headers.get("content-type") ?? "")?.[1]?.toLowerCase();
+    const type = sent && (PICTURE_TYPE_ALIASES[sent] ?? sent);
     return type && PROXIED_PICTURE_TYPES.has(type) ? type : null;
 }
 

@@ -14,7 +14,7 @@ jest.mock("../../config", () => ({
 jest.mock("../../utils/ssrf", () => ({ fetchChecked: jest.fn() }));
 
 import { fetchChecked } from "../../utils/ssrf";
-import { coverFileForWidth, downloadAndStoreImage, nativeFileExists } from "../imageStorage";
+import { coverFileForWidth, downloadAndStoreImage, nativeFileExists, readPicture } from "../imageStorage";
 
 describe("downloadAndStoreImage and a stop", () => {
     const fetchMock = fetchChecked as jest.Mock;
@@ -90,6 +90,27 @@ describe("downloadAndStoreImage writes", () => {
         expect(await downloadAndStoreImage("https://example.com/c", "w2", "album")).toMatch(/^native:albums\/w2\.jpg\?v=[0-9a-f]{10}$/);
         const sharp = (await import("sharp")).default;
         expect((await sharp(path.join(albums, "w2.jpg")).metadata()).format).toBe("jpeg");
+    });
+
+    it.each([
+        ["image/jpg", "jpeg"],
+        ["image/pjpeg", "jpeg"],
+        ["image/x-png", "png"],
+        ["IMAGE/JPG; charset=binary", "jpeg"],
+    ] as const)("takes %s, which servers and browsers send for a jpeg or a png", async (type, format) => {
+        fetchMock.mockResolvedValue(imageResponse(await picture(format), type));
+
+        expect(await downloadAndStoreImage("https://example.com/c", "alias", "album")).toMatch(/^native:albums\/alias\.jpg\?v=[0-9a-f]{10}$/);
+    });
+
+    it.each([
+        ["image/jpg", "image/jpeg"],
+        ["image/pjpeg", "image/jpeg"],
+        ["image/x-png", "image/png"],
+    ])("serves a proxied %s as %s, the name a browser knows", async (type, served) => {
+        const read = await readPicture(imageResponse(await picture("jpeg"), type));
+
+        expect(read?.contentType).toBe(served);
     });
 
     it("stores nothing when the bytes are not a picture, whatever the content type says", async () => {
