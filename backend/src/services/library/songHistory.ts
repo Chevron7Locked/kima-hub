@@ -186,13 +186,25 @@ export async function settleHistoryOfLeavingSongs(
     options: { leaving?: string[]; canWait?: boolean } = {},
 ): Promise<Set<string>> {
     if (ids.length === 0) return new Set();
+    // A waiting delete takes each listener's history lock before the song rows, the order a recording takes them in (the
+    // history lock, then the row its play needs): the other order could deadlock with a repair queued between them.
+    const locked = new Set<string>();
+    const lockListeners = async () => {
+        for (const userId of new Set((await listenersOf(tx, ids)).map((p) => p.userId))) {
+            if (locked.has(userId)) continue;
+            locked.add(userId);
+            await lockPlayHistory(tx, userId);
+        }
+    };
+    if (options.canWait !== false) await lockListeners();
     // A play recorded for a song waits on its row, so the listeners read below are all the song has in this transaction.
     await tx.$queryRaw`SELECT id FROM "Track" WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
     let busy = new Set<string>();
     if (options.canWait === false) {
         busy = await songsWithBusyPlayHistory(tx, ids);
     } else {
-        for (const userId of new Set((await listenersOf(tx, ids)).map((p) => p.userId))) await lockPlayHistory(tx, userId);
+        // A listener whose play landed between the first read and the row locks.
+        await lockListeners();
     }
     const settling = busy.size > 0 ? ids.filter((id) => !busy.has(id)) : ids;
     const played = [...new Set((await listenersOf(tx, settling)).map((p) => p.trackId))];

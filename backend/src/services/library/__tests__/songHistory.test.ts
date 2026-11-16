@@ -495,6 +495,47 @@ describe("a delete honours the play-history lock of the listeners whose plays it
         expect(await kept()).toHaveLength(1);
     });
 
+    it("an artist delete waits too", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {} });
+        await play("gone");
+        const repair = repairing(id("user"));
+        await repair.started;
+        let finished = false;
+        const deleting = deleteArtists([a]).then((r) => {
+            finished = true;
+            return r;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        expect(finished).toBe(false);
+
+        repair.release();
+        await repair.done;
+        await deleting;
+
+        expect(await kept()).toHaveLength(1);
+    });
+
+    it("a delete waiting for a repair holds no song row: a recording takes the history lock first, then the row, so the other order could deadlock", async () => {
+        const a = await artist("a");
+        await album("old", a, "LIBRARY", { gone: {} });
+        await play("gone");
+        const repair = repairing(id("user"));
+        await repair.started;
+        const deleting = deleteSongs([id("gone")]);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        try {
+            // NOWAIT fails at once when the delete holds the row.
+            await prisma.$transaction(async (tx) => {
+                await tx.$queryRaw`SELECT id FROM "Track" WHERE id = ${id("gone")} FOR UPDATE NOWAIT`;
+            });
+        } finally {
+            repair.release();
+            await repair.done;
+            await deleting;
+        }
+    });
+
     it("does not wait for a listener of other songs", async () => {
         const a = await artist("a");
         await album("old", a, "LIBRARY", { gone: {} });

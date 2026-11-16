@@ -54,12 +54,14 @@ import { markLibraryChangedQuietly } from "../libraryChanged";
 import { moveOwnerArtist } from "../mbidReassign";
 import { retryOnDeadlock } from "../../utils/dbConflict";
 import { settleHistoryOfLeavingSongs } from "./songHistory";
+import { PLAY_HISTORY_REPAIR_MAX_MS } from "../playRecording";
 
 type Tx = Prisma.TransactionClient;
 
 /** A statement takes at most 32767 bind parameters; ids go through in batches well under that. */
 const BATCH = 5000;
-const TRANSACTION_MS = 120_000;
+// A delete that can wait for a repair of a listener's play history may wait as long as a repair may hold its lock.
+const TRANSACTION_MS = PLAY_HISTORY_REPAIR_MAX_MS + 120_000;
 
 export interface Deletion {
     /** Songs deleted by `deleteSongs`. Songs that went with their album are not counted here. */
@@ -203,15 +205,19 @@ export async function deleteSongs(
         const owed = emptyOwed("a song deleted");
         owed.playlists.push(...(options.alsoTell ?? []));
         const albumIds = new Set<string>();
+        // Every album of the whole delete is locked up front, in id order (as `removeAlbums` does): a later batch taking an
+        // album while this delete holds an earlier batch's songs could meet a scan holding that album and wanting a song.
+        const owning = new Set<string>();
+        for (const batch of batches(ids)) {
+            for (const row of await tx.track.findMany({ where: { id: { in: batch } }, select: { albumId: true } })) owning.add(row.albumId);
+        }
+        if (owning.size > 0) await tx.$queryRaw`SELECT id FROM "Album" WHERE id = ANY(${[...owning]}::text[]) ORDER BY id FOR UPDATE`;
         for (const batch of batches(ids)) {
             const rows = await tx.track.findMany({
                 where: { id: { in: batch } },
                 select: { id: true, albumId: true, album: { select: { artistId: true } } },
             });
             if (rows.length === 0) continue;
-            // The albums are locked before their songs change (the order a scan takes them), so a scan holding an album
-            // and wanting one of these songs never meets this delete holding the song and wanting the album.
-            await tx.$queryRaw`SELECT id FROM "Album" WHERE id = ANY(${[...new Set(rows.map((row) => row.albumId))]}::text[]) ORDER BY id FOR UPDATE`;
             // History follows a copy of the recording, else the plays stay (see `songHistory`). Every song of the whole
             // delete is excluded as a copy, so a later batch's song never receives it.
             const busy = await settleHistoryOfLeavingSongs(

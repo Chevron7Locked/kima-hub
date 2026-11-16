@@ -156,8 +156,8 @@ export async function reconcileDeletedTracks(
     // Then every genre left with no songs goes, library-wide (only when songs were retired).
     await tx.genre.deleteMany({ where: { trackGenres: { none: {} } } });
 
-    logger.info(`[RECONCILE] retired ${ids.length} track(s) confirmed gone by consecutive scans`);
-    return { removed: ids.length, artifacts, playlists, settle: deletion.settle };
+    logger.info(`[RECONCILE] retired ${deletion.songs} track(s) confirmed gone by consecutive scans`);
+    return { removed: deletion.songs, artifacts, playlists, settle: deletion.settle };
 }
 
 /**
