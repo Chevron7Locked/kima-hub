@@ -226,7 +226,7 @@ interface EnrichmentState {
 }
 
 /** track/audio/vibe/scan failures come from TrackStage records, artist and podcast ones from the failure ledger. */
-export type EnrichmentFailureType = "artist" | "podcast" | "track" | "audio" | "vibe" | "scan";
+type EnrichmentFailureType = "artist" | "podcast" | "track" | "audio" | "vibe" | "scan";
 
 export interface EnrichmentFailure {
     id: string;

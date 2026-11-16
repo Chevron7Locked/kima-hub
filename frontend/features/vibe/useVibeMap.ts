@@ -8,7 +8,7 @@ import type { MapTrack, VibeMode } from "./types";
  * computed in the background: the server answers "computing" (`computing` true, no `mapData`) and it is asked again
  * every 4 s until it is ready.
  */
-export function useVibeMapQuery() {
+function useVibeMapQuery() {
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["vibe-map"],
         queryFn: () => api.getVibeMap(),

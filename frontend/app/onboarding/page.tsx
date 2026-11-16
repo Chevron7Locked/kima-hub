@@ -28,8 +28,8 @@ export default function OnboardingPage() {
     >({});
     const [initialLoading, setInitialLoading] = useState(true);
     const [error, setError] = useState("");
-    const showPasswordMismatch = error === "Passwords don't match";
-    // Set by this form's own check of the password, so the field is marked without reading a message.
+    // Set by this form's own checks of the password, so the fields are marked without reading a message.
+    const [passwordMismatch, setPasswordMismatch] = useState(false);
     const [passwordRefused, setPasswordRefused] = useState(false);
 
     const [username, setUsername] = useState("");
@@ -66,8 +66,10 @@ export default function OnboardingPage() {
         e.preventDefault();
         setError("");
         setPasswordRefused(false);
+        setPasswordMismatch(false);
 
         if (password !== confirmPassword) {
+            setPasswordMismatch(true);
             setError("Passwords don't match");
             return;
         }
@@ -358,7 +360,7 @@ export default function OnboardingPage() {
                                                     )
                                                 }
                                                 className={`w-full px-4 py-3 bg-white/5 border rounded-lg text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-transparent transition-all ${
-                                                    showPasswordMismatch ?
+                                                    passwordMismatch ?
                                                     "border-danger/50"
                                                     : "border-white/10"
                                                 }`}

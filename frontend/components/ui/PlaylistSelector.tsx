@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { useDialog } from "@/hooks/useDialog";
 import { useAddToPlaylistMutation } from "@/hooks/useQueries";
 import { announcePlaylistEvent } from "@/lib/playlist-events";
+import type { PlaylistEntry } from "@/lib/playlist-track";
 import { usePlaylistCreate } from "@/lib/playlist-create";
 
 interface PlaylistSelectorProps {
@@ -17,12 +18,6 @@ interface PlaylistSelectorProps {
     trackIds?: string[];
     /** Called once the songs are added (not when the person skips). */
     onAdded?: () => void;
-}
-
-/** An entry of a playlist as the playlist page's request returns it. */
-interface PlaylistEntry {
-    trackId?: string;
-    track?: { id?: string };
 }
 
 /** Songs the chosen playlist already holds, put to the person before any copy is added. */
@@ -293,7 +288,7 @@ export function PlaylistSelector({
         try {
             const playlist = await api.getPlaylist(playlistId);
             const items = Array.isArray(playlist?.items) ? (playlist.items as PlaylistEntry[]) : [];
-            return new Set(items.flatMap((item) => item.trackId ?? item.track?.id ?? []));
+            return new Set(items.map((item) => item.track.id));
         } catch (error) {
             console.error("Failed to read the playlist before adding:", error);
             return new Set();

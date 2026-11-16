@@ -13,13 +13,20 @@ export interface QueueEntry {
 const session = Math.random().toString(36).slice(2, 8);
 let counter = 0;
 
+/** An entry that has its key: what the functions below hand back, so a caller reads `queueKey` without asserting it. */
+export type Keyed<T extends QueueEntry> = T & { queueKey: string };
+
+function isKeyed<T extends QueueEntry>(entry: T): entry is Keyed<T> {
+    return !!entry.queueKey;
+}
+
 /** Whether the key was generated here, rather than being a playlist item's id. */
 export function isGeneratedKey(queueKey: string | null | undefined): boolean {
     return !!queueKey && queueKey.startsWith("q-");
 }
 
 /** A key no entry has had before. */
-export function newQueueKey(): string {
+function newQueueKey(): string {
     counter += 1;
     return `q-${session}-${counter}`;
 }
@@ -28,11 +35,11 @@ export function newQueueKey(): string {
  * The queue with every entry keyed. A key already set stays, unless an earlier entry of the same queue holds it, in
  * which case the later entry gets a new one. The same array comes back when nothing needed a key.
  */
-export function withQueueKeys<T extends QueueEntry>(queue: T[]): T[] {
+export function withQueueKeys<T extends QueueEntry>(queue: T[]): Keyed<T>[] {
     const seen = new Set<string>();
     let changed = false;
-    const keyed = queue.map((entry) => {
-        if (entry.queueKey && !seen.has(entry.queueKey)) {
+    const keyed = queue.map((entry): Keyed<T> => {
+        if (isKeyed(entry) && !seen.has(entry.queueKey)) {
             seen.add(entry.queueKey);
             return entry;
         }
@@ -41,11 +48,12 @@ export function withQueueKeys<T extends QueueEntry>(queue: T[]): T[] {
         seen.add(queueKey);
         return { ...entry, queueKey };
     });
-    return changed ? keyed : queue;
+    // Nothing changed means every entry already passed `isKeyed`, so the array it is given is the keyed one.
+    return changed ? keyed : (queue as Keyed<T>[]);
 }
 
 /** Entries joining a queue: each gets a new key, whatever key it came with, so adding one twice makes two entries. */
-export function freshQueueKeys<T extends QueueEntry>(entries: T[]): T[] {
+export function freshQueueKeys<T extends QueueEntry>(entries: T[]): Keyed<T>[] {
     return entries.map((entry) => ({ ...entry, queueKey: newQueueKey() }));
 }
 

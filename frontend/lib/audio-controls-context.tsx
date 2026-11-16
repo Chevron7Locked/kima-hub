@@ -322,7 +322,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             // A place the list does not have (a stale index, a list that shrank) starts it from the top.
             const startIndex = Number.isInteger(requestedIndex) && requestedIndex >= 0 && requestedIndex < songs.length ? requestedIndex : 0;
             const tracks = withQueueKeys(songs);
-            state.setQueueOrigin(source ? { source, keys: new Set(tracks.map((t) => t.queueKey!)) } : null);
+            state.setQueueOrigin(source ? { source, keys: new Set(tracks.map((t) => t.queueKey)) } : null);
             stationRef.current = null;
 
             if (!skipOperationCheck && state.activeOperation.type !== 'idle') {
@@ -711,7 +711,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
             shuffleInsertPosRef.current = next.shufflePos;
 
             // Added to the queue, not replacing it: the queue still came from the page that started it.
-            state.extendQueueOrigin([track.queueKey!]);
+            state.extendQueueOrigin([track.queueKey]);
             state.setQueue(next.queue);
             if (isShuffleRef.current) state.setShuffleIndices(next.shuffleIndices);
         },
@@ -722,7 +722,7 @@ export function AudioControlsProvider({ children }: { children: ReactNode }) {
         (songs: Track[]) => {
             const added = freshQueueKeys(songs);
             const next = appendTracks(queueSnapshot(), added);
-            state.extendQueueOrigin(added.map((song) => song.queueKey!));
+            state.extendQueueOrigin(added.map((song) => song.queueKey));
             queueRef.current = next.queue;
             shuffleIndicesRef.current = next.shuffleIndices;
             state.setQueue(next.queue);

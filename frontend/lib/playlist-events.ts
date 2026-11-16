@@ -10,3 +10,13 @@ export function announcePlaylistEvent<K extends keyof PlaylistEvents>(
 ) {
     window.dispatchEvent(new CustomEvent(name, { detail: detail[0] }));
 }
+
+/** Listens for one playlist signal, its detail typed (null when it carried none); returns the function that stops listening. */
+export function subscribePlaylistEvent<K extends keyof PlaylistEvents>(
+    name: K,
+    handler: (detail: PlaylistEvents[K] | null) => void
+): () => void {
+    const listener = (e: Event) => handler((e as CustomEvent<PlaylistEvents[K] | null>).detail);
+    window.addEventListener(name, listener);
+    return () => window.removeEventListener(name, listener);
+}

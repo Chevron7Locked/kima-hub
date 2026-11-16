@@ -33,6 +33,7 @@ import { plural } from "@/lib/format";
 import { MediaCard } from "@/components/cards/MediaCard";
 import { mosaicCovers } from "@/features/playlist/coverMosaic";
 import { queueSource } from "@/lib/queue-source";
+import { subscribePlaylistEvent } from "@/lib/playlist-events";
 
 type ActionPanel = "create" | "importUrl" | "importFile" | null;
 
@@ -554,13 +555,12 @@ export default function PlaylistsPage() {
             queryClient.invalidateQueries({ queryKey: queryKeys.playlists() });
         };
 
-        window.addEventListener("playlist-created", handlePlaylistEvent);
-        window.addEventListener("playlist-deleted", handlePlaylistEvent);
+        const stops = [
+            subscribePlaylistEvent("playlist-created", handlePlaylistEvent),
+            subscribePlaylistEvent("playlist-deleted", handlePlaylistEvent),
+        ];
 
-        return () => {
-            window.removeEventListener("playlist-created", handlePlaylistEvent);
-            window.removeEventListener("playlist-deleted", handlePlaylistEvent);
-        };
+        return () => stops.forEach((stop) => stop());
     }, [queryClient]);
 
     const handlePlayPlaylist = async (playlistId: string) => {

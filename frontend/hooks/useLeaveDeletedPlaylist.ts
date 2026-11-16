@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "./useQueries";
+import { subscribePlaylistEvent } from "@/lib/playlist-events";
 
 /**
  * On a playlist's page: when that playlist is gone, move to the playlist list once, and drop the playlist from the
@@ -32,12 +33,11 @@ export function useLeaveDeletedPlaylist(playlistId: string, query: { data: unkno
     }, []);
 
     useEffect(() => {
-        const onDeleted = (e: Event) => {
-            if ((e as CustomEvent<{ playlistId?: string }>).detail?.playlistId === playlistId) leave(playlistId);
-        };
-        window.addEventListener("playlist-deleted", onDeleted);
+        const stop = subscribePlaylistEvent("playlist-deleted", (detail) => {
+            if (detail?.playlistId === playlistId) leave(playlistId);
+        });
         return () => {
-            window.removeEventListener("playlist-deleted", onDeleted);
+            stop();
             if (goneRef.current === playlistId) queryClient.removeQueries({ queryKey: queryKeys.playlist(playlistId) });
         };
     }, [playlistId, queryClient, leave]);

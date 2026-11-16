@@ -16,7 +16,7 @@ import { api } from "@/lib/api";
 import { episodeForPlayer, type ShowWithEpisodes } from "./podcast-episode";
 import { STORAGE_KEYS } from "./storage-keys";
 import { useAudioController } from "./audio-controller-context";
-import { withQueueKeys, withoutQueueKeys } from "./queue-key";
+import { withQueueKeys, withoutQueueKeys, type Keyed } from "./queue-key";
 
 
 /** A song as the player holds it. */
@@ -44,8 +44,8 @@ export interface QueueOrigin {
 }
 
 /** The origin of a queue whose every entry came from the source. */
-function originOf(queue: Track[], source: string): QueueOrigin {
-    return { source, keys: new Set(queue.map((entry) => entry.queueKey!)) };
+function originOf(queue: Keyed<Track>[], source: string): QueueOrigin {
+    return { source, keys: new Set(queue.map((entry) => entry.queueKey)) };
 }
 
 export interface AudiobookTrack {
@@ -166,10 +166,6 @@ function parseStorageJson<T>(key: string, fallback: T): T {
     try { return JSON.parse(raw) as T; } catch { return fallback; }
 }
 
-/**
- * Only a 404 means the item is gone. Any other failure, such as a timeout or a
- * 500, is retried later rather than discarding what the user was listening to.
- */
 // Polls are 30 s apart, so a save that keeps failing is tried again at most every 8th check (about four minutes).
 const MAX_CHECKS_TO_SKIP = 7;
 
@@ -200,6 +196,10 @@ function hasStatus(err: unknown, status: number): boolean {
     return (err as { status?: number } | null)?.status === status;
 }
 
+/**
+ * Only a 404 means the item is gone. Any other failure, such as a timeout or a
+ * 500, is retried later rather than discarding what the user was listening to.
+ */
 function isGone(err: unknown): boolean {
     return hasStatus(err, 404);
 }

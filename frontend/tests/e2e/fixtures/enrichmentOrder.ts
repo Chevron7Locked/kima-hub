@@ -48,7 +48,7 @@ export interface StageRow {
 }
 
 /** How long after the container was created its log may begin. The first line normally comes within a second; 60 s leaves room for a slow start. */
-export const LOG_START_TOLERANCE_MS = 60_000;
+const LOG_START_TOLERANCE_MS = 60_000;
 
 export interface OrderInput {
     lines: LogLine[];
