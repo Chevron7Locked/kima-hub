@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Subsonic apps show the same album year as the web:** your own year edit first, then the original release year, in album lists, year filters, random songs and sorting.
+- **Albums in Subsonic apps show the album's own genres,** falling back to the artist's.
+- **Year and genre changes reach Subsonic apps:** editing or resetting an album's year or genres, and years or genres filled in by identification or enrichment, show up once the edit or enrichment cycle finishes.
+- **An emptied artist picture of your own falls back to the found one.**
 - Subsonic apps pick up an artist's genre edit or reset.
 - Subsonic apps pick up artist pictures and album covers Kima finds or replaces on its own.
 - Subsonic podcast image addresses are given only when they are real web addresses.
