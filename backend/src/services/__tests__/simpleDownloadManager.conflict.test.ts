@@ -5,7 +5,7 @@
  */
 
 import { prisma } from "../../utils/db";
-import { isSerializationFailure } from "../../utils/dbConflict";
+import { isTransactionConflict } from "../../utils/dbConflict";
 import { useLidarrCancelScenario } from "../../__tests__/helpers/lidarrCancelScenario";
 import { simpleDownloadManager } from "../simpleDownloadManager";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -135,7 +135,7 @@ describe("onImportFailed meeting another transaction's write", () => {
 
         expect(runs()).toBe(3);
         expect(error).toBeInstanceOf(Error);
-        expect(isSerializationFailure(error)).toBe(true);
+        expect(isTransactionConflict(error)).toBe(true);
         expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: JOB } })).attempts).toBe(1);
     });
 });
