@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Subsonic song genre filters follow each song's own tags:** filtering songs by genre and the genre list's song counts use a song's own tags, falling back to its album's genres. Album lists by genre and album counts are unchanged.
+- **A song's genres show its most-voted tag first** in Subsonic apps.
+- **A settings change is seen at once** by everything that reads settings right after it is saved.
 - **Subsonic songs show their own genre tags** when Kima has them, and their album's genres otherwise.
 - **Subsonic apps on a server not set to UTC no longer see the library change time hours off.**
 - **Subsonic genre filters match the genre exactly:** "rock" no longer also lists "punk rock". Kima radio and stations keep their broader match.
