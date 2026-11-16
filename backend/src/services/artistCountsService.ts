@@ -46,7 +46,7 @@ async function calculateArtistCounts(
       },
     }),
     prisma.track.count({
-      where: { ...PLAYABLE_SONG, album: { ...PLAYABLE_SONG.album, artistId } },
+      where: { AND: [PLAYABLE_SONG, { album: { artistId } }] },
     }),
   ]);
 

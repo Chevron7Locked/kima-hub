@@ -18,7 +18,7 @@
  * - A Discover album has no keep (Discover is not the library; a like moves it, and its keep is written then), so
  *   deleting one has no keep to look at.
  * - A keep lives as long as its artist, which it cannot outlive (the foreign key cascades). An artist removed because
- *   nothing of it remains (no album left: `deleteEmptyArtists`) takes its keeps with it, as it always has: the scanner
+ *   nothing of it remains (no album left: `deleteEmptyArtists`) takes its keeps with it: the scanner
  *   writes a keep for every library album, so sparing artists that hold one would leave every emptied artist behind for
  *   enrichment and search to find. An artist merged into another hands its keeps to the successor (`deleteArtists` with
  *   `keepsTo`); the more protective source stands on a clash (`ownershipRank`). A person deleting an artist on purpose

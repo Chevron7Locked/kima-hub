@@ -12,7 +12,7 @@
  * song goes, and `keepPlays` first writes on each play what is needed to count it (title, artist, album, recording and
  * length), in the delete's own transaction. A Discover song's plays go with it: Discover is only Discover, nothing reads
  * them, and a kept play is therefore always a library play. Likes, playlist places, share links and the rest go with the
- * song, as they always have. The listens module reads kept plays (see its header).
+ * song. The listens module reads kept plays (see its header).
  *
  * A kept play whose recording a library song holds again attaches to that song (`adoptKeptPlays`): the identification
  * stage calls it as it writes a song's recording id, and the scan calls it for every recording left over, so a recording

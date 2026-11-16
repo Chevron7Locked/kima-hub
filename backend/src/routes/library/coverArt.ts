@@ -141,7 +141,7 @@ async function serveStoredCover(address: string, size: string | undefined, req: 
   }
 
   logger.warn(`[COVER-ART] Stored cover not found: ${file}, asking the artwork sources`);
-  // The file is named for its album, under albums/ (or, for a cover stored before the one-time pass, in the covers folder itself).
+  // The file is named for its album, under albums/ (or, for a cover stored without one, in the covers folder itself).
   const albumId = path.basename(nativePath, ".jpg");
   try {
     const album = await prisma.album.findUnique({

@@ -90,7 +90,7 @@ export function isArtistNamed(artist: { name: string; identityKey: string }, nam
     return identityKey ? artist.identityKey === identityKey : artist.name === name;
 }
 
-const MBID_FORMAT =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MBID_FORMAT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** True for a value shaped like a MusicBrainz id; temp- and row ids fail. */
 export function isMbid(value: unknown): value is string {

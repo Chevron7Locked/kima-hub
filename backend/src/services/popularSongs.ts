@@ -21,6 +21,7 @@
 import { prisma } from "../utils/db";
 import { redisClient } from "../utils/redis";
 import { logger } from "../utils/logger";
+import type { Prisma } from "@prisma/client";
 import { PLAYABLE_SONG } from "../utils/playableSong";
 import { isMbid } from "./artistIdentity";
 import { nameKey } from "./nameFold";
@@ -201,7 +202,7 @@ async function releaseDates(mbid: string | null, deadlineMs: number): Promise<Ma
 
 export async function popularSongs(args: PopularSongsArgs): Promise<PopularSong[]> {
     const deadlineMs = args.deadlineMs ?? DEFAULT_DEADLINE_MS;
-    const playable = { ...PLAYABLE_SONG, album: { ...PLAYABLE_SONG.album, artistId: args.artist.id } };
+    const playable: Prisma.TrackWhereInput = { AND: [PLAYABLE_SONG, { album: { artistId: args.artist.id } }] };
 
     const [owned, listens, ranked] = await Promise.all([
         prisma.track.findMany({

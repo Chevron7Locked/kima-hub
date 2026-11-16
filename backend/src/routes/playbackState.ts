@@ -74,7 +74,7 @@ router.post("/", async (req, res) => {
 
         // A save may name the time of the state it saw (`updatedAt`, as the server last answered it): it then writes
         // only while that is still the stored time, so a state another device saved since is never overwritten by
-        // one decided on older word. Omitted, the save writes whatever is stored, as every client has until now.
+        // one decided on older word. Omitted, the save writes whatever is stored, because a client that predates the time sends none.
         let expectedAt: Date | null = null;
         if (expectedUpdatedAt !== undefined) {
             expectedAt = seenTime(expectedUpdatedAt);
@@ -283,8 +283,8 @@ router.delete("/", async (req, res) => {
 
         // A clear may name the time of the state it saw (`?expectedUpdatedAt=`, as a read answered it): it then clears
         // only while that is still the stored time, so a state another device saved since is not wiped by a decision
-        // made on the older one. Omitted, it clears whatever is stored, as every client has until now (the iOS app sends
-        // none). A DELETE carries no body that every proxy forwards, so the time travels in the address.
+        // made on the older one. Omitted, it clears whatever is stored, because a client that predates the time (the iOS app) sends
+        // none. A DELETE carries no body that every proxy forwards, so the time travels in the address.
         const named = req.query.expectedUpdatedAt;
         const seen = named === undefined ? null : seenTime(named);
         if (named !== undefined && !seen) return refuseRequest(req, res, SEEN_TIME_REQUIRED);
