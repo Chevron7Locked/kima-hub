@@ -30,7 +30,7 @@ import { playlistsHoldingTrackIds, type HeldPlaylist } from "./playlistEvents";
 import { deleteSongs } from "./library/albumDelete";
 import { bestCopyFirst, carryHistory, holdCopies, pairsOf, recordingCopies, type Replacement } from "./library/songHistory";
 import { songsWithBusyPlayHistory } from "./playRecording";
-import { entriesOf, hydrateQueue, ON_LIBRARY_ALBUM, type QueueEntry } from "./savedQueue";
+import { entriesOf, hydrateQueue, ON_LIBRARY_ALBUM_LOCATION, type QueueEntry } from "./savedQueue";
 
 interface ReconcileResult {
     /**
@@ -206,7 +206,7 @@ async function updatePlaybackStates(tx: Prisma.TransactionClient, retired: strin
     // A copy whose album went to Discover since it was chosen is no copy ("Discover is only Discover"): the state
     // naming the retired song then names nothing, as the saved queue does (`updateSavedQueues`).
     const onLibrary = new Set(
-        (await tx.track.findMany({ where: { id: { in: [...movedTo.values()] }, ...ON_LIBRARY_ALBUM }, select: { id: true } })).map((t) => t.id),
+        (await tx.track.findMany({ where: { id: { in: [...movedTo.values()] }, ...ON_LIBRARY_ALBUM_LOCATION }, select: { id: true } })).map((t) => t.id),
     );
     const gone = [...movedTo.keys()].filter((id) => onLibrary.has(movedTo.get(id)!));
     const kept = gone.map((id) => movedTo.get(id)!);
@@ -285,7 +285,7 @@ async function updateSavedQueues(tx: Prisma.TransactionClient, retired: string[]
     }
     // Read again with the check a save makes: a copy chosen as a library song whose album went to Discover since is no
     // copy, and a queue is never pointed at a Discover song.
-    const described = new Map<string, QueueEntry>((await hydrateQueue([...copyIds], tx, ON_LIBRARY_ALBUM)).map((e) => [e.id, e]));
+    const described = new Map<string, QueueEntry>((await hydrateQueue([...copyIds], tx, ON_LIBRARY_ALBUM_LOCATION)).map((e) => [e.id, e]));
     // What an entry becomes: itself, or for a retired one its copy, or nothing.
     const becomes = (entry: unknown): unknown[] => {
         if (!retiredEntry(entry)) return [entry];

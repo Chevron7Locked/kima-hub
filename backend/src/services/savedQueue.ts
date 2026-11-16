@@ -7,7 +7,7 @@
  *   ids (a web save sends entries, of which only the id is read), and the entry stored is Kima's own description of the
  *   song. An id Kima does not know is left out.
  * - A Discover song is never stored in a queue ("Discover is only Discover"): a save leaves it out like an unknown id
- *   (`ON_LIBRARY_ALBUM`, which the library sweep also reads a replacing copy with).
+ *   (`ON_LIBRARY_ALBUM_LOCATION`, which the library sweep also reads a replacing copy with).
  *   A song whose file went missing, or that was read as corrupt, is stored (it may come back) and hidden on read. A
  *   client sends back the queue it was shown, which lacks those songs, so a save that replaces the queue keeps the ones
  *   the stored queue holds, each beside the songs it sat between (`planQueue`).
@@ -35,7 +35,7 @@
  * The interface is what a caller does with a person's playback state: read a web request into a save (`readWebSave`),
  * save it (`saveWebState`), read the state a client is shown (`readPlaybackState`), clear it (`clearPlaybackState`),
  * save a Subsonic app's queue (`saveQueueOfIds`) and read it for one (`playableQueue`). The locks, the plan and the
- * write are inside, in one order, so no caller knows it. `entriesOf`, `hydrateQueue` and `ON_LIBRARY_ALBUM` are what the
+ * write are inside, in one order, so no caller knows it. `entriesOf`, `hydrateQueue` and `ON_LIBRARY_ALBUM_LOCATION` are what the
  * library sweep reads a queue it rewrites with.
  */
 import { prisma, Prisma } from "../utils/db";
@@ -254,11 +254,10 @@ async function holdSongs(tx: Pick<Prisma.TransactionClient, "$queryRaw">, ids: r
 }
 
 /**
- * What a stored queue holds songs to: a song on a library album (the same check the listens module makes of a play's
- * album), which is a Discover song's only exclusion. It is not the playable-song rule: a song whose file is missing or
- * corrupt is stored (it may come back) and hidden when the queue is read.
+ * A location filter, not the playable-song rule: a stored queue keeps a song whose file is missing or corrupt (it may
+ * come back) and hides it on read, so only a Discover song is left out, by its album's location.
  */
-export const ON_LIBRARY_ALBUM = { album: { location: "LIBRARY" } } satisfies Prisma.TrackWhereInput;
+export const ON_LIBRARY_ALBUM_LOCATION = { album: { location: "LIBRARY" } } satisfies Prisma.TrackWhereInput;
 
 /**
  * What a save that sends song ids takes before it reads them, the order the sweep takes them in so the two never wait
@@ -280,7 +279,7 @@ async function lockForQueueSave(
 ): Promise<ReadonlySet<string>> {
     await takeTurn(tx, userId);
     const storable =
-        ids.length === 0 ? new Set<string>() : new Set((await tx.track.findMany({ where: { id: { in: [...new Set(ids)] }, ...ON_LIBRARY_ALBUM }, select: { id: true } })).map((t) => t.id));
+        ids.length === 0 ? new Set<string>() : new Set((await tx.track.findMany({ where: { id: { in: [...new Set(ids)] }, ...ON_LIBRARY_ALBUM_LOCATION }, select: { id: true } })).map((t) => t.id));
     const candidates = ids.filter((id) => storable.has(id));
     const taken = new Set<string>();
     // That read takes no lock, so a song it saw may be gone once the hold gets its turn (the sweep retired it): the
@@ -334,7 +333,7 @@ async function planQueue(
     limit: number,
     held: ReadonlySet<string>,
 ): Promise<{ queue: QueueEntry[] | null; currentIndex: number; placeKept: boolean; sameAsShown: boolean }> {
-    const known = await hydrateQueue(ids.filter((id) => held.has(id)), tx, ON_LIBRARY_ALBUM);
+    const known = await hydrateQueue(ids.filter((id) => held.has(id)), tx, ON_LIBRARY_ALBUM_LOCATION);
     const sent = known.slice(0, limit);
     const place = storedPlaceOf(ids, new Set(known.map((item) => item.id)), sent.length, clientIndex);
 
@@ -347,7 +346,7 @@ async function planQueue(
 
     const behind = hiddenBehind(sent.map((item) => item.id), storedIds, playable);
     const described = new Map(
-        (await hydrateQueue([...new Set([...behind.values()].flat())], tx, ON_LIBRARY_ALBUM)).map((item) => [item.id, item] as const),
+        (await hydrateQueue([...new Set([...behind.values()].flat())], tx, ON_LIBRARY_ALBUM_LOCATION)).map((item) => [item.id, item] as const),
     );
     let room = limit - sent.length;
     const queue: QueueEntry[] = [];

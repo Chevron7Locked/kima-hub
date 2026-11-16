@@ -24,7 +24,7 @@ import path from "path";
 import { prisma } from "../db";
 import { artistIdentityKey, normalizeArtistName } from "../../services/artistIdentity";
 import { config } from "../../config";
-import { PLAYABLE_SONG, playableSongSql } from "../playableSong";
+import { PLAYABLE_SONG, ownedSongSql, playableSongSql } from "../playableSong";
 import { albumHasPlayableSongSql, artistHasPlayableSongSql } from "../../services/libraryFilters";
 import { compatRouter } from "../../routes/subsonic/compat";
 import { playbackRouter } from "../../routes/subsonic/playback";
@@ -937,6 +937,18 @@ it("builds an artist's sound profile from its playable songs only", async () => 
 
 it("refuses a table name that is not a plain identifier", () => {
     expect(() => playableSongSql(`t"; DROP TABLE "Track"; --`, "al")).toThrow();
+});
+
+// The enrichment offer rule is the one exception that keeps a corrupt song: its stages are retried or closed.
+it("offers a library song whose file is there, unreadable included, and neither a missing file nor a Discover song, to enrichment", async () => {
+    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT t.id FROM "Track" t WHERE t.id = ANY(${Object.values(SONG)}::text[]) AND ${ownedSongSql("t")} ORDER BY t.id
+    `;
+    expect(rows.map((r) => r.id)).toEqual([SONG.corrupt, SONG.playable]);
+});
+
+it("refuses an enrichment offer name that is not a plain identifier", () => {
+    expect(() => ownedSongSql(`t"; DROP TABLE "Track"; --`)).toThrow(/not a table name or alias/);
 });
 
 it("refuses an album or artist name that is not an identifier, or that the pieces use inside", () => {

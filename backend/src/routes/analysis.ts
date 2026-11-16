@@ -5,7 +5,7 @@ import { redisClient } from "../utils/redis";
 import { getSystemSettings, saveSystemSettings } from "../utils/systemSettings";
 import { eventBus } from "../services/eventBus";
 import { startEnrichmentNow } from "../workers/unifiedEnrichment";
-import { ownedSongSql } from "../workers/enrichment/ownedSong";
+import { ownedSongSql } from "../utils/playableSong";
 import * as stageRecords from "../services/stages/stageRecords";
 import os from "os";
 import { isInternalSecret } from "../utils/internalSecret";

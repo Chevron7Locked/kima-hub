@@ -21,7 +21,7 @@ import {
     resumeVibeQueuing,
 } from "./audioCompletionSubscriber";
 import { createRunState } from "./enrichment/runState";
-import { ownedSongSql } from "./enrichment/ownedSong";
+import { ownedSongSql } from "../utils/playableSong";
 import { createMoodStep } from "./enrichment/moods";
 import { runSimilarityStep } from "./enrichment/similarity";
 import { ANALYSIS_QUEUE, pushToAnalyzer, runAudioAnalysis } from "./enrichment/audioAnalysisJob";
