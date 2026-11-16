@@ -4,6 +4,7 @@
 import express from "express";
 import request from "supertest";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { prisma } from "../../utils/db";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import authRoutes from "../auth";
@@ -42,6 +43,9 @@ const appVerify = (code: string, deviceName: unknown = "an iphone") =>
 // Sends the app's request now, instead of when it is first awaited.
 const startAppVerify = (code: string, deviceName?: unknown) => appVerify(code, deviceName).then((res) => res);
 
+// The one answer every refused code gets, so a guesser cannot tell a code that never existed from one that ran out or was used.
+const REFUSED = { status: 400, error: "Invalid or expired code" };
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const approve = (token: string, code: string) =>
@@ -49,6 +53,8 @@ const approve = (token: string, code: string) =>
 
 const deny = (token: string, code: string) =>
     request(app).post(`/api/device-link/deny/${code}`).set("Authorization", `Bearer ${token}`);
+
+const generate = (token: string) => request(app).post("/api/device-link/generate").set("Authorization", `Bearer ${token}`);
 
 const status = (code: string, token?: string) => {
     const req = request(app).get(`/api/device-link/status/${code}`);
@@ -61,14 +67,95 @@ afterAll(async () => {
 });
 
 describe("a wrong code", () => {
-    it("gets 404 at once", async () => {
+    it("is refused at once", async () => {
         await freshCode((await signedInUser()).id);
         const started = Date.now();
 
         const res = await appVerify("WRONG9");
 
-        expect(res.status).toBe(404);
+        expect(res.status).toBe(REFUSED.status);
         expect(Date.now() - started).toBeLessThan(2000);
+    });
+});
+
+describe("a refused code", () => {
+    it("gets the same answer whether it never existed, was used, or has expired", async () => {
+        const owner = await signedInUser();
+        const used = await prisma.deviceLinkCode.create({
+            data: { code: "ZUSED1", userId: owner.id, expiresAt: new Date(Date.now() + 300_000), usedAt: new Date() },
+        });
+        const expired = await prisma.deviceLinkCode.create({
+            data: { code: "ZOLD01", userId: owner.id, expiresAt: new Date(Date.now() - 1000) },
+        });
+
+        const answers = [];
+        for (const code of ["WRONG9", used.code, expired.code]) {
+            const res = await appVerify(code);
+            answers.push({ status: res.status, error: res.body.error });
+        }
+
+        expect(answers).toEqual([REFUSED, REFUSED, REFUSED]);
+    });
+});
+
+describe("regenerating a code while a request waits on the old one", () => {
+    it("tells the waiting request its code is no longer valid, not that it was used", async () => {
+        const owner = await signedInUser();
+        const { code } = await freshCode(owner.id);
+        const held = startAppVerify(code, "the waiting one");
+        await sleep(1000);
+
+        const regenerated = await generate(owner.token);
+        const res = await held;
+
+        expect(regenerated.status).toBe(200);
+        expect(res.status).toBe(REFUSED.status);
+        expect(res.body.error).toBe(REFUSED.error);
+        expect(res.body.apiKey).toBeUndefined();
+        expect((await status(regenerated.body.code, owner.token)).body.status).toBe("pending");
+    });
+
+    it("leaves a waiting request on an already used code alone", async () => {
+        const owner = await signedInUser();
+        const { code } = await freshCode(owner.id);
+        const held = startAppVerify(code);
+        await sleep(1000);
+        await approve(owner.token, code);
+        expect((await held).status).toBe(200);
+
+        expect((await generate(owner.token)).status).toBe(200);
+
+        expect((await status(code, owner.token)).body.status).toBe("used");
+    });
+});
+
+describe("generating a code", () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it("picks another code when the first one it drew is taken, even when the check before the create missed it", async () => {
+        const owner = await signedInUser();
+        await prisma.deviceLinkCode.create({
+            data: { code: "AAAAAA", userId: (await signedInUser()).id, expiresAt: new Date(Date.now() + 300_000) },
+        });
+        const realRandomInt = crypto.randomInt as (max: number) => number;
+        let draws = 0;
+        jest.spyOn(crypto, "randomInt").mockImplementation(((max: number) => (draws++ < 6 ? 0 : realRandomInt(max))) as never);
+        jest.spyOn(prisma.deviceLinkCode, "findUnique").mockResolvedValueOnce(null as never);
+
+        const res = await generate(owner.token);
+
+        expect(res.status).toBe(200);
+        expect(res.body.code).not.toBe("AAAAAA");
+        expect(res.body.code).toMatch(/^[A-Z2-9]{6}$/);
+    });
+
+    it("gives every request its own code when many arrive at once", async () => {
+        const owners = await Promise.all([signedInUser(), signedInUser(), signedInUser(), signedInUser()]);
+
+        const results = await Promise.all(owners.map((o) => generate(o.token)));
+
+        expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200]);
+        expect(new Set(results.map((r) => r.body.code)).size).toBe(4);
     });
 });
 
@@ -111,8 +198,8 @@ describe("a right code", () => {
         expect(devices.status).toBe(200);
         expect(devices.body.map((d: { name: string }) => d.name)).toContain("test iphone");
         const again = await appVerify(code);
-        expect(again.status).toBe(400);
-        expect(again.body.error).toBe("Code already used");
+        expect(again.status).toBe(REFUSED.status);
+        expect(again.body.error).toBe(REFUSED.error);
     });
 
     it("is refused with 403 when the owner denies it, and the code is gone", async () => {
@@ -128,7 +215,7 @@ describe("a right code", () => {
         expect(res.body.error).toEqual(expect.any(String));
         expect(res.body.apiKey).toBeUndefined();
         const retry = await appVerify(code);
-        expect(retry.status).toBe(404);
+        expect(retry.status).toBe(REFUSED.status);
     });
 
     it("is refused with 408 after 45 seconds with no answer, and the code still works", async () => {
@@ -169,7 +256,7 @@ describe("wrong codes", () => {
         const owner = await signedInUser();
         const { code } = await freshCode(owner.id);
 
-        for (let i = 0; i < 40; i++) expect((await appVerify("WRONG9")).status).toBe(404);
+        for (let i = 0; i < 40; i++) expect((await appVerify("WRONG9")).status).toBe(REFUSED.status);
 
         const held = startAppVerify(code);
         await sleep(1000);
@@ -248,8 +335,8 @@ describe("a code that expires while its request waits", () => {
         expect((await approve(owner.token, code)).status).toBe(200);
         const res = await held;
 
-        expect(res.status).toBe(400);
-        expect(res.body.error).toBe("Code expired");
+        expect(res.status).toBe(REFUSED.status);
+        expect(res.body.error).toBe(REFUSED.error);
         expect(res.body.apiKey).toBeUndefined();
         expect((await status(code, owner.token)).body.status).toBe("expired");
     });

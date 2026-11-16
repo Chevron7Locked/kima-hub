@@ -1,9 +1,10 @@
-import { Router } from "express";
+import { Response, Router } from "express";
 import { logger } from "../utils/logger";
 import { prisma } from "../utils/db";
 import crypto from "crypto";
+import { Prisma } from "@prisma/client";
 import { cleanDeviceName, createApiKey, listApiKeys, revokeApiKey } from "../services/users/apiKeyStore";
-import { approve, deny, waitForAnswer, waitingDevice } from "../services/users/deviceLinkApproval";
+import { approve, deny, waitForAnswer, waitingDevice, withdraw } from "../services/users/deviceLinkApproval";
 import { refuseRequest } from "../utils/errors";
 
 const router = Router();
@@ -12,6 +13,9 @@ const router = Router();
 function ownedCode(code: string, userId: string) {
     return prisma.deviceLinkCode.findFirst({ where: { code: code.toUpperCase(), userId } });
 }
+
+/** The one answer for every refused code, so a guesser cannot tell a code that never existed from one that ran out or was used. */
+const refusedCode = (res: Response) => res.status(400).json({ error: "Invalid or expired code" });
 
 // Generate a random 6-character alphanumeric code
 function generateLinkCode(): string {
@@ -23,42 +27,31 @@ function generateLinkCode(): string {
     return code;
 }
 
+const MAX_CODE_DRAWS = 10;
+
 router.post("/generate", async (req, res) => {
     try {
         const userId = req.user!.id;
 
-        // Delete any existing unused codes for this user
-        await prisma.deviceLinkCode.deleteMany({
-            where: {
-                userId,
-                usedAt: null,
-            },
-        });
+        // A device still waiting on a code the owner replaces is told the code is gone, not left to run out its wait.
+        // One statement, so a code is withdrawn exactly when it is deleted.
+        const replaced = await prisma.$queryRaw<{ id: string }[]>`
+            DELETE FROM "DeviceLinkCode" WHERE "userId" = ${userId} AND "usedAt" IS NULL RETURNING "id"`;
+        for (const { id } of replaced) withdraw(id);
 
-        // Generate a unique code
-        let code: string;
-        let attempts = 0;
-        do {
-            code = generateLinkCode();
-            attempts++;
-            if (attempts > 10) {
+        // The unique index is the check: a draw another request took first fails the create, and the next draw is tried.
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        let linkCode;
+        for (let draw = 1; !linkCode; draw++) {
+            if (draw > MAX_CODE_DRAWS) {
                 return res.status(500).json({ error: "Failed to generate unique code" });
             }
-        } while (
-            await prisma.deviceLinkCode.findUnique({
-                where: { code },
-            })
-        );
-
-        // Create the code with 5-minute expiry
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-        const linkCode = await prisma.deviceLinkCode.create({
-            data: {
-                code,
-                userId,
-                expiresAt,
-            },
-        });
+            try {
+                linkCode = await prisma.deviceLinkCode.create({ data: { code: generateLinkCode(), userId, expiresAt } });
+            } catch (error) {
+                if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
+            }
+        }
 
         res.json({
             code: linkCode.code,
@@ -87,16 +80,8 @@ router.post("/verify", async (req, res) => {
             include: { user: true },
         });
 
-        if (!linkCode) {
-            return res.status(404).json({ error: "Invalid code" });
-        }
-
-        if (linkCode.usedAt) {
-            return res.status(400).json({ error: "Code already used" });
-        }
-
-        if (new Date() > linkCode.expiresAt) {
-            return res.status(400).json({ error: "Code expired" });
+        if (!linkCode || linkCode.usedAt || new Date() > linkCode.expiresAt) {
+            return refusedCode(res);
         }
 
         const appLeft = new AbortController();
@@ -105,6 +90,7 @@ router.post("/verify", async (req, res) => {
         });
         const outcome = await waitForAnswer(linkCode.id, deviceName, appLeft.signal);
         if (outcome === "gone" || appLeft.signal.aborted) return;
+        if (outcome === "withdrawn") return refusedCode(res);
         if (outcome === "already-waiting") {
             return res.status(409).json({ error: "A device is already waiting on this code" });
         }
@@ -118,7 +104,7 @@ router.post("/verify", async (req, res) => {
         // Claim the code atomically so two concurrent /verify requests cannot both
         // mint a key. Codes are single-use: consumed even if minting then fails.
         const claimed = await prisma.deviceLinkCode.updateMany({
-            where: { id: linkCode.id, usedAt: null, expiresAt: { gt: new Date(Date.now()) } },
+            where: { id: linkCode.id, usedAt: null, expiresAt: { gt: new Date() } },
             data: {
                 usedAt: new Date(),
                 deviceName,
@@ -126,8 +112,7 @@ router.post("/verify", async (req, res) => {
         });
         if (claimed.count !== 1) {
             // The owner may have approved after the code ran out while the request waited.
-            const error = Date.now() >= linkCode.expiresAt.getTime() ? "Code expired" : "Code already used";
-            return res.status(400).json({ error });
+            return refusedCode(res);
         }
 
         // Generate an API key for this device. The plaintext value goes back to

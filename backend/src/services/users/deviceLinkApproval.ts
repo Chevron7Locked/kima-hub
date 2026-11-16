@@ -4,10 +4,13 @@
  * drops the waiters.
  */
 
-/** What a held request is told: the owner's ruling, that nobody answered, that another request already waits, or that it went away. */
-export type Outcome = "approved" | "denied" | "no-answer" | "already-waiting" | "gone";
+/**
+ * What a held request is told: the owner's ruling, that nobody answered, that another request already waits, that its
+ * code was withdrawn (the owner made a new one), or that it went away.
+ */
+export type Outcome = "approved" | "denied" | "no-answer" | "already-waiting" | "withdrawn" | "gone";
 
-type EndOfWait = "approved" | "denied" | "no-answer";
+type EndOfWait = "approved" | "denied" | "no-answer" | "withdrawn";
 
 const WAIT_MS = 45_000;
 
@@ -54,6 +57,9 @@ export const approve = (codeId: string) => endWait(codeId, "approved");
 
 /** Refuses the one held request for `codeId`; false when nothing is held. */
 export const deny = (codeId: string) => endWait(codeId, "denied");
+
+/** Ends the held request for `codeId` because the code no longer exists; false when nothing is held. */
+export const withdraw = (codeId: string) => endWait(codeId, "withdrawn");
 
 /** The name the device gave, when a request for `codeId` is waiting. */
 export function waitingDevice(codeId: string): string | null {
