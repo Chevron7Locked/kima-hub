@@ -101,7 +101,6 @@ class NotificationPolicyService {
                 return await this.evaluateProcessingJob(job, eventType);
 
             case "failed":
-            case "exhausted":
                 return await this.evaluateTerminalJob(job, eventType, "failed", {
                     reason: "Download failed",
                     notificationType: "download_failed",

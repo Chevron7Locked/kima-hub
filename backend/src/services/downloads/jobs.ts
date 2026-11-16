@@ -4,7 +4,7 @@
  *
  * Each move runs in one statement and only from a state it can leave, so a job two
  * paths reach is settled once and told once: start and complete leave pending or
- * processing, fail and cancel the same, retry leaves failed or exhausted. Each
+ * processing, fail and cancel the same, retry leaves failed. Each
  * merges its metadata into what the row holds (a null value clears a field), so a
  * webhook that wrote in between keeps what it wrote. The moves that end a job tell
  * the user through the notification policy, and the Discover batch and the Spotify

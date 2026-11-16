@@ -7,13 +7,13 @@
  */
 
 /** Every status a download job can have. */
-export const JOB_STATUSES: readonly string[] = ["pending", "processing", "completed", "failed", "exhausted"];
+export const JOB_STATUSES: readonly string[] = ["pending", "processing", "completed", "failed"];
 
 /** A job that has not settled: waiting to start, or running. */
 export const ACTIVE_STATUSES: string[] = ["pending", "processing"];
 
 /** A job that ended without its album: failed, or cancelled by the user (a cancel is a failure the user asked for). */
-export const FAILED_STATUSES: string[] = ["failed", "exhausted"];
+export const FAILED_STATUSES: string[] = ["failed"];
 
 /** A settled job has left pending and processing: completed or failed. */
 export const SETTLED_STATUSES: string[] = ["completed", ...FAILED_STATUSES];

@@ -44,7 +44,7 @@ afterAll(async () => {
 });
 
 describe("POST /notifications/downloads/:id/clear", () => {
-    it.each(["completed", "failed", "exhausted"])("dismisses a %s download", async (status) => {
+    it.each(["completed", "failed"])("dismisses a %s download", async (status) => {
         const j = await job(status, "rg-1");
 
         await request(app).post(`/notifications/downloads/${j.id}/clear`).expect(200, { success: true });

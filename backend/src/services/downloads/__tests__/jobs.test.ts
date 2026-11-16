@@ -538,13 +538,13 @@ describe("what the module says about a job", () => {
     });
 
     it("lists the statuses a job can have", () => {
-        expect([...downloadJobs.JOB_STATUSES]).toEqual(["pending", "processing", "completed", "failed", "exhausted"]);
+        expect([...downloadJobs.JOB_STATUSES]).toEqual(["pending", "processing", "completed", "failed"]);
     });
 
     it("groups them as active, failed and settled, with every status in one of active or settled", () => {
         expect(downloadJobs.ACTIVE_STATUSES).toEqual(["pending", "processing"]);
-        expect(downloadJobs.FAILED_STATUSES).toEqual(["failed", "exhausted"]);
-        expect(downloadJobs.SETTLED_STATUSES).toEqual(["completed", "failed", "exhausted"]);
+        expect(downloadJobs.FAILED_STATUSES).toEqual(["failed"]);
+        expect(downloadJobs.SETTLED_STATUSES).toEqual(["completed", "failed"]);
         expect([...downloadJobs.ACTIVE_STATUSES, ...downloadJobs.SETTLED_STATUSES].sort()).toEqual([...downloadJobs.JOB_STATUSES].sort());
     });
 });
@@ -869,7 +869,7 @@ describe("findActive asks what the active-album index enforces", () => {
 });
 
 describe("dismiss takes a settled job off the list and leaves a running one", () => {
-    it.each(["completed", "failed", "exhausted"])("dismisses a %s job", async (status) => {
+    it.each(["completed", "failed"])("dismisses a %s job", async (status) => {
         const j = await job(`dl_dismiss_${status}`, { status });
 
         expect(await downloadJobs.dismiss(USER, j.id)).toBe("dismissed");

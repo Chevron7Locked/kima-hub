@@ -65,7 +65,7 @@ export function HistoryTab() {
     };
 
     const completed = history.filter((h) => h.status === "completed");
-    const failed = history.filter((h) => h.status === "failed" || h.status === "exhausted");
+    const failed = history.filter((h) => h.status === "failed");
 
     if (loading) {
         return (
