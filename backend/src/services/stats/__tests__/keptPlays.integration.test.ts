@@ -75,9 +75,14 @@ async function seed(): Promise<void> {
 
 const totals = () => withListens(USER, "all", async (l) => {
     const s = await listeningStats(l, "UTC");
-    // Audio-feature figures read live songs only (a kept play carries none), so `shape` is left out with the top tracks.
-    const { topTracks: _tracks, shape: _shape, topArtists, ...rest } = s;
-    return { ...rest, topArtists: topArtists.map((a) => [a.name, a.plays, a.estimatedSeconds]) };
+    // Audio-feature figures read live songs only (a kept play carries none), so `shape` is left out with the top tracks,
+    // and `drift` keeps its months and play counts only: its sound averages change with which songs remain.
+    const { topTracks: _tracks, shape: _shape, topArtists, drift, ...rest } = s;
+    return {
+        ...rest,
+        drift: drift.map((m) => [m.month, m.plays]),
+        topArtists: topArtists.map((a) => [a.name, a.plays, a.estimatedSeconds]),
+    };
 });
 
 beforeAll(async () => {
