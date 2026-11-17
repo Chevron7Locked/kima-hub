@@ -25,7 +25,7 @@ import { nameKey } from "../nameFold";
 import type { ImportJob, ImportPreview, AlbumToDownload } from "./types";
 import { readMusicLink, musicLinkName, M3UEntry, M3UNothingMatched } from "./reading";
 import { previewOfTracklist, pendingTracksOf, matchEntries, matchM3UEntries } from "./matching";
-import { jobLoggers, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
+import { jobLoggers, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
 
 /** Thrown inside the playlist transaction when the job no longer takes a playlist, so the transaction rolls back. */
 class PlaylistNotWanted extends Error {}
@@ -1048,9 +1048,11 @@ class PlaylistImportService {
 
   /**
    * Remove all DB and Redis artifacts for an import job.
-   * Does NOT touch downloaded files on disk (those become part of the library).
+   * Does NOT touch downloaded files on disk (those become part of the library). Downloads still pending or processing
+   * are stopped at Lidarr first (`stopImportDownloadsAtSource`), so nothing goes on fetching for a removed import.
    */
   private async cleanupImportArtifacts(jobId: string): Promise<void> {
+    await stopImportDownloadsAtSource(jobId);
     await prisma.downloadJob.deleteMany({
       where: {
         metadata: {

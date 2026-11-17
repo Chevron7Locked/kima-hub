@@ -93,12 +93,36 @@ export async function updateImportJobFields(
 export const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed", "cancelled"];
 
 /**
+ * An import is over (failed or cancelled by its person): its downloads still pending or processing are stopped at the
+ * source, through the download manager's own cancel step, as a single download's cancel does. Lidarr's queue entry goes
+ * and the album is no longer watched, except what another live job (another import's, a person's own download) still
+ * shares. Nobody is told: the import's one notice is its own. A Lidarr that cannot be reached is logged, not raised:
+ * the import is over either way. Returns the unfinished downloads it found, for the caller to close or delete; settled
+ * ones are left alone. The manager is loaded when called, as it and the import load each other.
+ */
+export async function stopImportDownloadsAtSource(importJobId: string): Promise<{ id: string }[]> {
+  const unfinished = await prisma.downloadJob.findMany({
+    where: { metadata: { path: ["spotifyImportJobId"], equals: importJobId }, status: { in: jobMoves.ACTIVE_STATUSES } },
+    select: { id: true, status: true, lidarrRef: true, lidarrAlbumId: true },
+  });
+  if (unfinished.length === 0) return unfinished;
+  try {
+    const { simpleDownloadManager } = await import("../simpleDownloadManager");
+    await simpleDownloadManager.cancelJobs(unfinished);
+  } catch (error) {
+    logger.error(`[Spotify Import] Job ${importJobId}: could not stop its downloads in Lidarr:`, error);
+  }
+  return unfinished;
+}
+
+/**
  * Fails an import from outside the import (the stuck-work check, the stale-job cleanup). It leaves only a state that is
  * not final, so an import another path completed, cancelled or failed keeps its outcome and its reason. When it fails the
  * import it tells the person's open import page and their notification tray (as every other failure of an import does),
- * and cancels the import's downloads still pending or processing, so nothing goes on fetching for an import that is
- * over. The import is failed first: the check each cancelled download asks of its import then finds it closed and
- * leaves it, with its reason, and tells nobody again. A download that cannot be cancelled is logged, not raised: the
+ * and cancels the import's downloads still pending or processing, in Lidarr too (`stopImportDownloadsAtSource`) and
+ * then here, so nothing goes on fetching for an import that is over. The import is failed first: the check each
+ * cancelled download asks of its import then finds it closed and leaves it, with its reason, and tells nobody
+ * again. A download that cannot be cancelled is logged, not raised: the
  * import has failed either way. False, and nothing else done, when the import was already closed or is gone.
  */
 export async function failImportJob(importJobId: string, error: string): Promise<boolean> {
@@ -109,10 +133,7 @@ export async function failImportJob(importJobId: string, error: string): Promise
   if (row) notifyImportFailed(toImportJob(row));
 
   try {
-    const running = await prisma.downloadJob.findMany({
-      where: { metadata: { path: ["spotifyImportJobId"], equals: importJobId }, status: { in: jobMoves.ACTIVE_STATUSES } },
-      select: { id: true },
-    });
+    const running = await stopImportDownloadsAtSource(importJobId);
     if (running.length > 0) await jobMoves.cancel(running, "Import failed");
   } catch (cancelError) {
     logger.error(`[Spotify Import] Job ${importJobId}: could not cancel its downloads:`, cancelError);

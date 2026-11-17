@@ -6,7 +6,7 @@
 import { loadScenario, startLidarrReplay, type LidarrReplay } from "./lidarrReplay";
 import { useLidarr, useNoLidarr } from "./lidarrSettings";
 
-export function useLidarrCancelScenario(): { unmonitored: () => any[] } {
+export function useLidarrCancelScenario(): { unmonitored: () => any[]; removedFromQueue: () => string[]; replay: () => LidarrReplay } {
     let lidarr!: LidarrReplay;
 
     beforeEach(async () => {
@@ -22,5 +22,7 @@ export function useLidarrCancelScenario(): { unmonitored: () => any[] } {
     return {
         unmonitored: () =>
             lidarr.asked.filter((a) => a.method === "PUT" && a.path === "/api/v1/album/monitor").map((a) => (a.body as any).albumIds),
+        removedFromQueue: () => lidarr.asked.filter((a) => a.method === "DELETE").map((a) => a.path),
+        replay: () => lidarr,
     };
 }

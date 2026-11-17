@@ -10,9 +10,17 @@ import { failImportJob, getImportJob } from "../playlistImport";
 import { logger } from "../../utils/logger";
 import { notificationService } from "../notificationService";
 import * as downloadJobs from "../downloads/jobs";
+import { simpleDownloadManager } from "../simpleDownloadManager";
+import { useLidarrCancelScenario } from "../../__tests__/helpers/lidarrCancelScenario";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
+const { unmonitored, removedFromQueue, replay } = useLidarrCancelScenario();
+
 const USER = "zz-fail-import-user";
+// The download and album the recorded Lidarr run queued: Lidarr's queue still holds it when the import ends.
+const LIDARR_DOWNLOAD = "70C868D890F259E14337C4B7F37FA5E6A41B9C9F";
+const LIDARR_ALBUM = 308;
+const QUEUE_DELETE = "/api/v1/queue/1154813163?removeFromClient=true&blocklist=false&skipRedownload=true";
 
 const job = (status: string) =>
     prisma.spotifyImportJob.create({
@@ -22,11 +30,12 @@ const job = (status: string) =>
         },
     });
 
-const downloadJob = (importJobId: string, status: string) =>
+const downloadJob = (importJobId: string, status: string, extra: Record<string, unknown> = {}) =>
     prisma.downloadJob.create({
         data: {
             userId: USER, subject: `Album ${status}`, type: "album", status,
             metadata: { downloadType: "spotify_import", spotifyImportJobId: importJobId },
+            ...extra,
         },
     });
 
@@ -171,4 +180,98 @@ it("answers false for an import that is gone", async () => {
     expect(await failImportJob("import_gone", "x")).toBe(false);
     expect(heard).toEqual([]);
     expect(notifyFailed).not.toHaveBeenCalled();
+});
+
+describe("a failed import stops its downloads at Lidarr too", () => {
+    it("removes the running download from Lidarr's queue and stops watching its album, as a single cancel does", async () => {
+        const running = await job("downloading");
+        const processing = await downloadJob(running.id, "processing", { lidarrRef: LIDARR_DOWNLOAD, lidarrAlbumId: LIDARR_ALBUM });
+        const pending = await downloadJob(running.id, "pending", { lidarrAlbumId: 309 });
+
+        expect(await failImportJob(running.id, "Cleaned up as stale")).toBe(true);
+        await downloadJobs.whenIdle();
+
+        expect(removedFromQueue()).toEqual([QUEUE_DELETE]);
+        expect(unmonitored().flat().sort()).toEqual([LIDARR_ALBUM, 309]);
+        const rows = await prisma.downloadJob.findMany({ where: { id: { in: [processing.id, pending.id] } } });
+        expect(rows.map((r) => r.status)).toEqual(["failed", "failed"]);
+        expect(notifyFailed).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves Lidarr alone for settled downloads and for another import's", async () => {
+        const running = await job("downloading");
+        const other = await job("downloading");
+        await downloadJob(running.id, "completed", { lidarrRef: LIDARR_DOWNLOAD, lidarrAlbumId: LIDARR_ALBUM });
+        await downloadJob(running.id, "failed", { lidarrRef: "settled-ref", lidarrAlbumId: 400 });
+        await downloadJob(other.id, "processing", { lidarrRef: "others-ref", lidarrAlbumId: 401 });
+
+        expect(await failImportJob(running.id, "Cleaned up as stale")).toBe(true);
+        await downloadJobs.whenIdle();
+
+        expect(removedFromQueue()).toEqual([]);
+        expect(unmonitored()).toEqual([]);
+    });
+
+    it("leaves the download and album to another live job that wants them, as a single cancel does", async () => {
+        const running = await job("downloading");
+        await downloadJob(running.id, "processing", { lidarrRef: LIDARR_DOWNLOAD, lidarrAlbumId: LIDARR_ALBUM });
+        const own = await prisma.downloadJob.create({
+            data: { userId: USER, subject: "My own", type: "album", status: "processing", lidarrRef: LIDARR_DOWNLOAD, lidarrAlbumId: LIDARR_ALBUM, metadata: {} },
+        });
+
+        expect(await failImportJob(running.id, "Cleaned up as stale")).toBe(true);
+        await downloadJobs.whenIdle();
+
+        expect(removedFromQueue()).toEqual([]);
+        expect(unmonitored()).toEqual([]);
+        expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: own.id } })).status).toBe("processing");
+    });
+
+    it("tells the person once, not once per download", async () => {
+        const running = await job("downloading");
+        const notices = () => prisma.notification.count({ where: { userId: USER } });
+        const before = await notices();
+        await downloadJob(running.id, "processing", { lidarrRef: LIDARR_DOWNLOAD, lidarrAlbumId: LIDARR_ALBUM });
+        await downloadJob(running.id, "pending", { lidarrAlbumId: 309 });
+
+        await failImportJob(running.id, "Cleaned up as stale");
+        await downloadJobs.whenIdle();
+
+        expect(notifyFailed).toHaveBeenCalledTimes(1);
+        expect(await notices()).toBe(before);
+    });
+
+    it("still fails the import and closes the downloads when Lidarr cannot be asked", async () => {
+        const running = await job("downloading");
+        const processing = await downloadJob(running.id, "processing", { lidarrRef: LIDARR_DOWNLOAD, lidarrAlbumId: LIDARR_ALBUM });
+        const stop = jest.spyOn(simpleDownloadManager, "cancelJobs").mockRejectedValueOnce(new Error("lidarr down"));
+        const logged = jest.spyOn(logger, "error").mockImplementation(() => undefined);
+
+        expect(await failImportJob(running.id, "Cleaned up as stale")).toBe(true);
+        await downloadJobs.whenIdle();
+
+        expect(stop).toHaveBeenCalledTimes(1);
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining(running.id), expect.any(Error));
+        expect((await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: running.id } })).status).toBe("failed");
+        expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: processing.id } })).status).toBe("failed");
+        stop.mockRestore();
+        logged.mockRestore();
+    });
+
+    it("still fails the import when Lidarr answers every request with an error", async () => {
+        replay().at(0);
+        const warned = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const errored = jest.spyOn(logger, "error").mockImplementation(() => undefined);
+        const running = await job("downloading");
+        const processing = await downloadJob(running.id, "processing", { lidarrRef: LIDARR_DOWNLOAD, lidarrAlbumId: LIDARR_ALBUM });
+
+        expect(await failImportJob(running.id, "Cleaned up as stale")).toBe(true);
+        await downloadJobs.whenIdle();
+
+        warned.mockRestore();
+        errored.mockRestore();
+        expect((await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: running.id } })).status).toBe("failed");
+        expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: processing.id } })).status).toBe("failed");
+        expect(notifyFailed).toHaveBeenCalledTimes(1);
+    });
 });
