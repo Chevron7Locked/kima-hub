@@ -232,59 +232,9 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
                     conn.write(fileOffsetBuffer)
 
                     // Process any remaining file data in this chunk beyond the 4-byte token
-                    if (data.length > 4) {
-                      const fileData = data.subarray(4)
-                      download.receivedBytes += BigInt(fileData.length)
-                      download.stream.write(fileData)
-                      download.events.emit('data', fileData)
-                      download.events.emit('progress', {
-                        receivedBytes: download.receivedBytes,
-                        totalBytes: download.totalBytes,
-                        progress:
-                          download.totalBytes > 0n
-                            ? Number((download.receivedBytes * 100n) / download.totalBytes) / 100
-                            : 0,
-                      })
-
-                      const isComplete = download.receivedBytes >= download.totalBytes
-                      if (isComplete) {
-                        conn.end()
-                        download.stream.end()
-                        download.status = 'complete'
-                        download.events.emit('complete', download.receivedBytes)
-                        download.events.emit(
-                          'status',
-                          'complete',
-                          makeDownloadStatusData(download)
-                        )
-                        this.downloads = this.downloads.filter((d) => d !== download)
-                      }
-                    }
+                    if (data.length > 4) this.receiveFileData(download, conn, data.subarray(4))
                   } else {
-                    download.receivedBytes += BigInt(data.length)
-
-                    download.stream.write(data)
-                    download.events.emit('data', data)
-                    download.events.emit('progress', {
-                      receivedBytes: download.receivedBytes,
-                      totalBytes: download.totalBytes,
-                      progress:
-                        download.totalBytes > 0n
-                          ? Number((download.receivedBytes * 100n) / download.totalBytes) / 100
-                          : 0,
-                    })
-
-                    const isComplete = download.receivedBytes >= download.totalBytes
-                    if (isComplete) {
-                      conn.end()
-                      download.stream.end()
-                      download.status = 'complete'
-                      download.events.emit('complete', download.receivedBytes)
-                      download.events.emit('status', 'complete', makeDownloadStatusData(download))
-
-                      // remove from this.downloads
-                      this.downloads = this.downloads.filter((d) => d !== download)
-                    }
+                    this.receiveFileData(download, conn, data)
                   }
                 })
 
@@ -304,6 +254,30 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
         this.emit('client-error', error)
       }
     })
+  }
+
+  /** File bytes from a peer go to its download; at the full size the transfer ends and the download leaves the list. */
+  private receiveFileData(download: DownloadWithToken, conn: net.Socket, data: Buffer): void {
+    download.receivedBytes += BigInt(data.length)
+    download.stream.write(data)
+    download.events.emit('data', data)
+    download.events.emit('progress', {
+      receivedBytes: download.receivedBytes,
+      totalBytes: download.totalBytes,
+      progress:
+        download.totalBytes > 0n
+          ? Number((download.receivedBytes * 100n) / download.totalBytes) / 100
+          : 0,
+    })
+
+    if (download.receivedBytes >= download.totalBytes) {
+      conn.end()
+      download.stream.end()
+      download.status = 'complete'
+      download.events.emit('complete', download.receivedBytes)
+      download.events.emit('status', 'complete', makeDownloadStatusData(download))
+      this.downloads = this.downloads.filter((d) => d !== download)
+    }
   }
 
   private wirePeerMessageHandlers() {
