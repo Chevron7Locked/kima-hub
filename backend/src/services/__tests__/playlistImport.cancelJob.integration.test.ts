@@ -51,6 +51,8 @@ afterEach(async () => {
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     await prisma.spotifyImportJob.deleteMany({ where: { userId: USER } });
     await prisma.notification.deleteMany({ where: { userId: USER } });
+    // A removed download stays claimed, so Lidarr's report of it is not counted as a new failure: each test starts unclaimed.
+    await prisma.handledDownload.deleteMany({ where: { downloadId: LIDARR_DOWNLOAD } });
 });
 
 afterAll(async () => {
@@ -122,6 +124,17 @@ it("does not touch Lidarr for an import that already completed", async () => {
     expect(await prisma.spotifyImportJob.count({ where: { id: done.id } })).toBe(1);
 });
 
+it.each(["failed", "cancelled"])("stops the unfinished downloads of an import already %s when it is cleaned away", async (status) => {
+    const closed = await importRow(status);
+    await downloadJob(closed.id, "processing", { lidarrRef: LIDARR_DOWNLOAD, lidarrAlbumId: LIDARR_ALBUM });
+
+    await playlistImportService.cancelJob(closed.id);
+
+    expect(removedFromQueue()).toEqual([QUEUE_DELETE]);
+    expect(unmonitored()).toEqual([[LIDARR_ALBUM]]);
+    expect(await downloadRows(closed.id)).toBe(0);
+});
+
 it("still cancels the import when Lidarr cannot be asked", async () => {
     const running = await importRow("downloading");
     await downloadJob(running.id, "processing", { lidarrRef: LIDARR_DOWNLOAD, lidarrAlbumId: LIDARR_ALBUM });
@@ -149,6 +162,9 @@ it("still cancels the import when Lidarr answers every request with an error", a
 
     warned.mockRestore();
     errored.mockRestore();
+    // Lidarr was asked, and refused: nothing was removed from its queue.
+    expect(replay().asked.length).toBeGreaterThan(0);
+    expect(removedFromQueue()).toEqual([]);
     expect(await downloadRows(running.id)).toBe(0);
     expect(await prisma.spotifyImportJob.count({ where: { id: running.id } })).toBe(0);
 });

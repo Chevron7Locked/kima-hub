@@ -59,6 +59,8 @@ afterEach(async () => {
     stop();
     notifyFailed.mockRestore();
     await downloadJobs.whenIdle();
+    // A removed download stays claimed, so Lidarr's report of it is not counted as a new failure: each test starts unclaimed.
+    await prisma.handledDownload.deleteMany({ where: { downloadId: LIDARR_DOWNLOAD } });
     await prisma.downloadJob.deleteMany({ where: { userId: USER } });
     const ids = (await prisma.spotifyImportJob.findMany({ where: { userId: USER }, select: { id: true } })).map((j) => j.id);
     await Promise.all(ids.map((id) => redisClient.del(`import:job:${id}`)));
@@ -227,18 +229,19 @@ describe("a failed import stops its downloads at Lidarr too", () => {
         expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: own.id } })).status).toBe("processing");
     });
 
-    it("tells the person once, not once per download", async () => {
+    it("tells the person once in the tray, not once per download", async () => {
+        notifyFailed.mockRestore(); // the real notification service, so the tray rows are what is counted
         const running = await job("downloading");
-        const notices = () => prisma.notification.count({ where: { userId: USER } });
-        const before = await notices();
         await downloadJob(running.id, "processing", { lidarrRef: LIDARR_DOWNLOAD, lidarrAlbumId: LIDARR_ALBUM });
         await downloadJob(running.id, "pending", { lidarrAlbumId: 309 });
 
         await failImportJob(running.id, "Cleaned up as stale");
         await downloadJobs.whenIdle();
+        await new Promise((r) => setTimeout(r, 100));
 
-        expect(notifyFailed).toHaveBeenCalledTimes(1);
-        expect(await notices()).toBe(before);
+        const tray = await prisma.notification.findMany({ where: { userId: USER } });
+        expect(tray.map((n) => n.title)).toEqual(["Import failed"]);
+        await prisma.notification.deleteMany({ where: { userId: USER } });
     });
 
     it("still fails the import and closes the downloads when Lidarr cannot be asked", async () => {
@@ -270,6 +273,9 @@ describe("a failed import stops its downloads at Lidarr too", () => {
 
         warned.mockRestore();
         errored.mockRestore();
+        // Lidarr was asked, and refused: nothing was removed from its queue.
+        expect(replay().asked.length).toBeGreaterThan(0);
+        expect(removedFromQueue()).toEqual([]);
         expect((await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: running.id } })).status).toBe("failed");
         expect((await prisma.downloadJob.findUniqueOrThrow({ where: { id: processing.id } })).status).toBe("failed");
         expect(notifyFailed).toHaveBeenCalledTimes(1);
