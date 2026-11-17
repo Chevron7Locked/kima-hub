@@ -118,7 +118,7 @@ it("sorts a reset connection as a connection failure and cools the peer down", a
 async function runEarly(
     name: string,
     onPipe: (download: DownloadWithToken) => void,
-    options: { timeout?: number; folderAtDest?: boolean } = {},
+    options: { timeout?: number; folderAtDest?: boolean; recordingFails?: boolean } = {},
 ) {
     expectLog("error");
     const service = soulseekService as any;
@@ -134,7 +134,10 @@ async function runEarly(
     const removeDownload = jest.fn();
     service.client = { download: async () => download, removeDownload };
     jest.spyOn(service, "ensureConnected").mockResolvedValue(undefined);
-    const markUserFailed = jest.spyOn(service, "markUserFailed").mockResolvedValue(undefined);
+    const markUserFailed = jest.spyOn(service, "markUserFailed");
+    // `recordingFails`: noting the peer's failure throws (the database is down)
+    if (options.recordingFails) markUserFailed.mockRejectedValue(new Error("db down"));
+    else markUserFailed.mockResolvedValue(undefined);
     const limit = service.DOWNLOAD_TIMEOUT_INITIAL;
     if (options.timeout !== undefined) service.DOWNLOAD_TIMEOUT_INITIAL = options.timeout;
     const dest = path.join(dir, `${name}.flac`);
@@ -225,6 +228,117 @@ it("fails a download whose file cannot be written with the write error, and leav
     // the fault is this machine's, not the peer's
     expect(markUserFailed).not.toHaveBeenCalled();
     expect(cooledDown).toBe(false);
+});
+
+describe("a download always settles", () => {
+    it("with a failure when the work after its ending throws, and leaves nothing behind", async () => {
+        // the timeout ends it, and noting the peer's failure throws
+        const { result, leftBehind, download, removeDownload } = await runEarly("throws", () => {}, {
+            timeout: 1,
+            recordingFails: true,
+        });
+        expect(result).toEqual({ success: false, error: "db down" });
+        expect(leftBehind).toBe(false);
+        expect(removeDownload).toHaveBeenCalledWith(download);
+        expect(download.stream.destroyed).toBe(true);
+    });
+
+    it("with a failure when noting a stream error's peer throws, and leaves nothing behind", async () => {
+        const { result, leftBehind, download, removeDownload } = await runEarly(
+            "stream-throws",
+            (d) => d.stream.destroy(new Error("read ECONNRESET")),
+            { recordingFails: true }
+        );
+        expect(result).toEqual({ success: false, error: "db down" });
+        expect(leftBehind).toBe(false);
+        expect(removeDownload).toHaveBeenCalledWith(download);
+    });
+
+    it("with a failure when the file cannot be opened at all, and drops and closes the download", async () => {
+        jest.spyOn(fs, "createWriteStream").mockImplementation(() => {
+            throw new Error("EMFILE: too many open files");
+        });
+        const { result, download, removeDownload } = await runEarly("no-file", () => {});
+        expect(result).toEqual({ success: false, error: "EMFILE: too many open files" });
+        expect(removeDownload).toHaveBeenCalledWith(download);
+        expect(download.stream.destroyed).toBe(true);
+    });
+});
+
+describe("a finished download's size", () => {
+    it("must equal what was transferred, else it fails and the file is removed", async () => {
+        // the peer's count says 12 bytes arrived; 10 are on disk
+        const { result, leftBehind } = await runEarly("short-file", (d) => {
+            sendWholeFile(d);
+            d.receivedBytes = 12n;
+        });
+        expect(result).toEqual({ success: false, error: expect.stringMatching(/10 bytes.*12/) });
+        expect(leftBehind).toBe(false);
+    });
+});
+
+it("does not cool the peer down when the timeout comes after the peer sent everything", async () => {
+    // the peer's last byte is in and the stream ended; only the file is slow to finish
+    const { result, markUserFailed, cooledDown } = await runEarly("slow-flush", (d) => d.stream.end(), { timeout: 1 });
+    expect(result).toEqual({ success: false, error: "Download timed out" });
+    expect(markUserFailed).not.toHaveBeenCalled();
+    expect(cooledDown).toBe(false);
+});
+
+describe("a disk that is full or read-only", () => {
+    /** The file system refuses the write with `code`, as it does when the disk is full. */
+    function failWritesWith(code: string) {
+        const real = fs.createWriteStream.bind(fs);
+        jest.spyOn(fs, "createWriteStream").mockImplementation(((...args: Parameters<typeof fs.createWriteStream>) => {
+            const file = real(...args);
+            queueMicrotask(() => file.destroy(Object.assign(new Error(`${code}: write failed`), { code })));
+            return file;
+        }) as typeof fs.createWriteStream);
+    }
+
+    it.each(["ENOSPC", "EROFS", "EDQUOT"])("%s marks the failure as the disk's, with its error", async (code) => {
+        failWritesWith(code);
+        const { result, markUserFailed } = await runEarly(`disk-${code}`, () => {});
+        expect(result).toEqual({ success: false, error: `Write error: ${code}: write failed`, diskFault: true });
+        expect(markUserFailed).not.toHaveBeenCalled();
+    });
+
+    it("a refused folder is not a disk fault", async () => {
+        const { result } = await runEarly("not-disk", () => {}, { folderAtDest: true });
+        expect(result.diskFault).toBeUndefined();
+    });
+
+    const match = (username: string) => ({ username, filename: "a.flac", fullPath: "a.flac", size: 10, quality: "flac", score: 10 });
+    const diskFull = { success: false, error: "Write error: ENOSPC: write failed", diskFault: true };
+
+    it("stops downloadBestMatch at the first one and reports the disk error", async () => {
+        const service = soulseekService as any;
+        const track = jest.spyOn(service, "downloadTrack").mockResolvedValue(diskFull);
+        const result = await service.downloadBestMatch("artist", "title", "album", [match("a"), match("b"), match("c")], dir);
+        expect(track).toHaveBeenCalledTimes(1);
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/disk.*ENOSPC/i);
+    });
+
+    it("stops the retry loop at the first one and reports the disk error", async () => {
+        const service = soulseekService as any;
+        const track = jest.spyOn(service, "downloadTrack").mockResolvedValue(diskFull);
+        const result = await service.downloadWithRetry("artist", "title", "album", [match("a"), match("b"), match("c")], dir);
+        expect(track).toHaveBeenCalledTimes(1);
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/disk.*ENOSPC/i);
+    });
+
+    it("still tries the next peer after an ordinary failure", async () => {
+        const service = soulseekService as any;
+        const track = jest
+            .spyOn(service, "downloadTrack")
+            .mockResolvedValueOnce({ success: false, error: "read ECONNRESET" })
+            .mockResolvedValueOnce({ success: true });
+        const result = await service.downloadBestMatch("artist", "title", "album", [match("a"), match("b")], dir);
+        expect(track).toHaveBeenCalledTimes(2);
+        expect(result.success).toBe(true);
+    });
 });
 
 it("fails a download that sat unfinished past its limit at once, with a stuck-download reason", async () => {

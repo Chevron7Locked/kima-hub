@@ -9,6 +9,7 @@ import fs from "fs";
 import { mkdir } from "fs/promises";
 import PQueue from "p-queue";
 import { SlskClient, resolveSlskClient } from "../lib/soulseek/client";
+import type { Download } from "../lib/soulseek/downloads";
 import { configureSlskd } from "../lib/soulseek/slskd-client";
 import type { FileSearchResponse } from "../lib/soulseek/messages/from/peer";
 import { FileAttribute } from "../lib/soulseek/messages/common";
@@ -54,6 +55,22 @@ interface TrackMatch {
     quality: string;
     score: number;
 }
+
+/**
+ * How one download ended. `diskFault` marks a full or read-only disk: it is this machine's, so no other
+ * peer can do better and a search stops trying them.
+ */
+interface DownloadResult {
+    success: boolean;
+    error?: string;
+    diskFault?: boolean;
+}
+
+/** Write errors that mean the disk (not the peer, and not the path) is why nothing can be saved. */
+const DISK_FAULT_CODES = new Set(["ENOSPC", "EROFS", "EDQUOT"]);
+
+const diskFaultMessage = (error?: string) =>
+    `Disk error, no other peer tried: ${error ?? "unknown"}`;
 
 interface SearchTrackResult {
     found: boolean;
@@ -1199,7 +1216,7 @@ class SoulseekService {
         destPath: string,
         attemptNumber: number = 0,
         skipCooldown: boolean = false
-    ): Promise<{ success: boolean; error?: string }> {
+    ): Promise<DownloadResult> {
         const downloadStartTime = Date.now();
         this.activeDownloads++;
         this.maxConcurrentDownloads = Math.max(
@@ -1254,15 +1271,18 @@ class SoulseekService {
             `Downloading from ${match.username}: ${match.filename} -> ${destPath}`
         );
 
+        // Set once the client has handed the download over, so a throw after that point can let go of it.
+        let opened: Download | undefined;
         try {
             const download = await this.client.download(
                 match.username,
                 match.fullPath
             );
+            opened = download;
 
             const writeStream = fs.createWriteStream(destPath);
 
-            const result = await new Promise<{ success: boolean; error?: string }>(
+            const result = await new Promise<DownloadResult>(
                 (resolve) => {
                     let resolved = false;
 
@@ -1273,16 +1293,20 @@ class SoulseekService {
                         }
                     };
 
-                    // Every failure path ends here: a write stream destroyed while it is still opening
-                    // creates its file just before it closes, so the partial file is removed only once
-                    // the stream has closed.
-                    const removePartialFile = async () => {
-                        writeStream.destroy();
+                    const writeStreamClosed = async () => {
                         if (!writeStream.closed) {
                             await new Promise<void>((done) =>
                                 writeStream.once("close", () => done())
                             );
                         }
+                    };
+
+                    // Every failure path ends here: a write stream destroyed while it is still opening
+                    // creates its file just before it closes, so the partial file is removed only once
+                    // the stream has closed.
+                    const removePartialFile = async () => {
+                        writeStream.destroy();
+                        await writeStreamClosed();
                         try {
                             await fs.promises.rm(destPath, { force: true });
                         } catch {
@@ -1290,77 +1314,8 @@ class SoulseekService {
                         }
                     };
 
-                    const timeoutId = setTimeout(async () => {
-                        if (!resolved) {
-                            cleanup();
-                            sessionLog(
-                                "SOULSEEK",
-                                `Download timed out after ${timeout / 1000}s: ${match.filename}`,
-                                "WARN"
-                            );
-                            await this.recordUserFailure(match.username);
-                            this.client?.removeDownload(download);
-                            try {
-                                download.stream.destroy();
-                            } catch {
-                                // ignore
-                            }
-                            await removePartialFile();
-                            resolve({
-                                success: false,
-                                error: "Download timed out",
-                            });
-                        }
-                    }, timeout);
-
-                    download.stream.pipe(writeStream);
-
-                    download.events.on("complete", async () => {
-                        if (resolved) return;
-                        // The peer's last byte is in, not yet on disk: success waits for the write stream to
-                        // close. A write error before then fails the download (its handler runs first), and the
-                        // timeout stays armed meanwhile.
-                        if (!writeStream.closed) {
-                            await new Promise<void>((done) =>
-                                writeStream.once("close", () => done())
-                            );
-                        }
-                        if (resolved) return;
-                        clearTimeout(timeoutId);
-                        cleanup();
-                        // The p2p reader has dropped it already; the slskd client's stream ending on its own
-                        // has not, and the stuck-download sweep would find it later.
-                        this.client?.removeDownload(download);
-
-                        if (fs.existsSync(destPath)) {
-                            const stats = fs.statSync(destPath);
-                            sessionLog(
-                                "SOULSEEK",
-                                `Downloaded: ${match.filename} (${Math.round(stats.size / 1024)}KB)`
-                            );
-                            resolve({ success: true });
-                        } else {
-                            sessionLog(
-                                "SOULSEEK",
-                                "File not found after download",
-                                "ERROR"
-                            );
-                            resolve({
-                                success: false,
-                                error: "File not written",
-                            });
-                        }
-                    });
-
-                    download.events.on("error", async (err: any) => {
-                        if (resolved) return;
-                        clearTimeout(timeoutId);
-                        cleanup();
-                        sessionLog(
-                            "SOULSEEK",
-                            `Download ${download.filename} errored: ${err?.message ?? err}`,
-                            "ERROR"
-                        );
+                    // Lets go of a download that failed: off the client's list, its stream closed, its file gone.
+                    const abandon = async () => {
                         this.client?.removeDownload(download);
                         try {
                             download.stream.destroy();
@@ -1368,56 +1323,152 @@ class SoulseekService {
                             // ignore
                         }
                         await removePartialFile();
-                        resolve({
-                            success: false,
-                            error: err?.message ?? String(err),
-                        });
-                    });
-
-                    const onStreamError = async (err: Error) => {
-                        if (resolved) return;
-                        clearTimeout(timeoutId);
-                        cleanup();
-                        const errorInfo = this.categorizeError(err);
-                        sessionLog(
-                            "SOULSEEK",
-                            `Download failed (${errorInfo.type}): ${err.message}`,
-                            "ERROR"
-                        );
-                        if (errorInfo.skipUser) {
-                            await this.recordUserFailure(match.username);
-                        }
-                        this.client?.removeDownload(download);
-                        await removePartialFile();
-                        resolve({ success: false, error: err.message });
                     };
-                    download.stream.on("error", onStreamError);
-                    // An error the stream raised before this listener (a denial) is handled like a live one.
-                    if (download.streamError) void onStreamError(download.streamError);
 
-                    writeStream.on("error", async (err: Error) => {
+                    // Every ending of the download goes through here. The first one claims the download and
+                    // stops the timer, so later events are ignored; and whatever its work throws still
+                    // settles the promise with a failure, since nothing else would once the timer is off.
+                    const finish = async (work: () => Promise<DownloadResult>) => {
                         if (resolved) return;
                         clearTimeout(timeoutId);
                         cleanup();
-                        sessionLog(
-                            "SOULSEEK",
-                            `Write stream error: ${err.message}`,
-                            "ERROR"
-                        );
-                        this.client?.removeDownload(download);
+                        let result: DownloadResult;
                         try {
-                            download.stream.destroy();
-                        } catch {
-                            // ignore
+                            result = await work();
+                        } catch (err: any) {
+                            result = { success: false, error: err?.message ?? String(err) };
+                            try {
+                                sessionLog(
+                                    "SOULSEEK",
+                                    `Download ${match.filename} ended with an error: ${result.error}`,
+                                    "ERROR"
+                                );
+                                await abandon();
+                            } catch {
+                                // the failure is still reported below
+                            }
                         }
-                        // A write stream fails on this machine's file system (full disk, no permission,
-                        // read-only, a folder in the way), so the peer is not put on cooldown.
-                        await removePartialFile();
-                        resolve({
-                            success: false,
-                            error: `Write error: ${err.message}`,
+                        resolve(result);
+                    };
+
+                    const timeoutId = setTimeout(
+                        () =>
+                            void finish(async () => {
+                                sessionLog(
+                                    "SOULSEEK",
+                                    `Download timed out after ${timeout / 1000}s: ${match.filename}`,
+                                    "WARN"
+                                );
+                                // A stream the peer has already ended got everything: only this machine's file
+                                // was slow to finish, so the peer is not blamed.
+                                if (!download.stream.writableEnded) {
+                                    await this.recordUserFailure(match.username);
+                                }
+                                await abandon();
+                                return { success: false, error: "Download timed out" };
+                            }),
+                        timeout
+                    );
+
+                    try {
+                        // First, so that an error on the file is never left without a listener.
+                        writeStream.on("error", (err: NodeJS.ErrnoException) => {
+                            void finish(async () => {
+                                sessionLog(
+                                    "SOULSEEK",
+                                    `Write stream error: ${err.message}`,
+                                    "ERROR"
+                                );
+                                // A write stream fails on this machine's file system (full disk, no permission,
+                                // read-only, a folder in the way), so the peer is not put on cooldown.
+                                await abandon();
+                                return {
+                                    success: false,
+                                    error: `Write error: ${err.message}`,
+                                    ...(DISK_FAULT_CODES.has(err.code ?? "") ? { diskFault: true } : {}),
+                                };
+                            });
                         });
-                    });
+
+                        download.stream.pipe(writeStream);
+
+                        download.events.on("complete", async () => {
+                            if (resolved) return;
+                            // The peer's last byte is in, not yet on disk: success waits for the write stream to
+                            // close. A write error before then fails the download (its handler runs first), and
+                            // the timeout stays armed meanwhile.
+                            await writeStreamClosed();
+                            void finish(async () => {
+                                // The p2p reader has dropped it already; the slskd client's stream ending on its
+                                // own has not, and the stuck-download sweep would find it later.
+                                this.client?.removeDownload(download);
+
+                                if (!fs.existsSync(destPath)) {
+                                    sessionLog(
+                                        "SOULSEEK",
+                                        "File not found after download",
+                                        "ERROR"
+                                    );
+                                    return { success: false, error: "File not written" };
+                                }
+                                const stats = fs.statSync(destPath);
+                                // A file shorter or longer than what arrived was not written whole.
+                                if (BigInt(stats.size) !== download.receivedBytes) {
+                                    sessionLog(
+                                        "SOULSEEK",
+                                        `Size mismatch after download: ${stats.size} bytes on disk, ${download.receivedBytes} transferred`,
+                                        "ERROR"
+                                    );
+                                    await removePartialFile();
+                                    return {
+                                        success: false,
+                                        error: `File on disk is ${stats.size} bytes, but ${download.receivedBytes} were transferred`,
+                                    };
+                                }
+                                sessionLog(
+                                    "SOULSEEK",
+                                    `Downloaded: ${match.filename} (${Math.round(stats.size / 1024)}KB)`
+                                );
+                                return { success: true };
+                            });
+                        });
+
+                        download.events.on("error", (err: any) => {
+                            void finish(async () => {
+                                sessionLog(
+                                    "SOULSEEK",
+                                    `Download ${download.filename} errored: ${err?.message ?? err}`,
+                                    "ERROR"
+                                );
+                                await abandon();
+                                return { success: false, error: err?.message ?? String(err) };
+                            });
+                        });
+
+                        const onStreamError = (err: Error) =>
+                            finish(async () => {
+                                const errorInfo = this.categorizeError(err);
+                                sessionLog(
+                                    "SOULSEEK",
+                                    `Download failed (${errorInfo.type}): ${err.message}`,
+                                    "ERROR"
+                                );
+                                if (errorInfo.skipUser) {
+                                    await this.recordUserFailure(match.username);
+                                }
+                                this.client?.removeDownload(download);
+                                await removePartialFile();
+                                return { success: false, error: err.message };
+                            });
+                        download.stream.on("error", (err) => void onStreamError(err));
+                        // An error the stream raised before this listener (a denial) is handled like a live one.
+                        if (download.streamError) void onStreamError(download.streamError);
+                    } catch (err) {
+                        // Setting the listeners up threw: end the download like any other failure.
+                        void finish(async () => {
+                            throw err;
+                        });
+                    }
                 }
             );
 
@@ -1429,6 +1480,15 @@ class SoulseekService {
             return result;
         } catch (err: any) {
             this.activeDownloads--;
+            // A throw after the client handed the download over leaves it listed and its stream open.
+            if (opened) {
+                try {
+                    this.client?.removeDownload(opened);
+                    opened.stream.destroy();
+                } catch {
+                    // ignore
+                }
+            }
             const errorInfo = this.categorizeError(err);
             sessionLog(
                 "SOULSEEK",
@@ -1491,6 +1551,11 @@ class SoulseekService {
                 `Attempt ${attempt + 1} failed: ${errorMsg}`,
                 "WARN"
             );
+
+            // A full or read-only disk fails every peer the same way: stop here and say so.
+            if (downloadResult.diskFault) {
+                return { success: false, error: diskFaultMessage(errorMsg) };
+            }
         }
 
         return {
@@ -2020,6 +2085,11 @@ class SoulseekService {
                 "WARN"
             );
             errors.push(`${match.username}: ${result.error}`);
+
+            // A full or read-only disk fails every peer the same way: stop here and say so.
+            if (result.diskFault) {
+                return { success: false, error: diskFaultMessage(result.error) };
+            }
 
             if (attempt < matchesToTry.length - 1) {
                 const delayMs = attempt < 3 ? 1000 : Math.pow(2, attempt - 2) * 1000;
