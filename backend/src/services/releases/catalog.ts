@@ -148,10 +148,10 @@ export const RELEASES: Release[] = [
                 kind: "note",
                 key: "plays.kept",
                 title: "Your listening history stays",
-                summary: "A song's plays, like and playlist places follow it to another copy, and its plays stay in your stats when no copy is left.",
+                summary: "A song's plays, your like and its spots in your playlists follow it to another copy, and its plays stay in your stats when no copy is left.",
                 body:
                     "When a song leaves your library and the same recording is on another album you have, for example a " +
-                    "deluxe edition, its plays, like and playlist places move there.\n\n" +
+                    "deluxe edition, its plays, your like and its spots in your playlists move to that copy.\n\n" +
                     "When no copy is left, its plays stay in your stats under the song's name, and go back to the song if it returns.\n\n" +
                     "Your play history is rewritten and checked once on the first start after this update, which adds a short " +
                     "wait on a very large history.",
@@ -207,7 +207,7 @@ export const RELEASES: Release[] = [
                 title: "Fixes and small improvements",
                 summary: "Saved queues, imports, downloads, Discover, covers, enrichment and sign-in all behave more reliably.",
                 body:
-                    "- A song replaced by another copy keeps its plays, likes and playlist places, and deleting music cleans up its share links and empty albums\n" +
+                    "- A song replaced by another copy keeps its plays, likes and spots in playlists, and deleting music cleans up its share links and empty albums\n" +
                     "- Albums and artists with nothing to play leave the library lists, and recently added keeps its order after a rescan\n" +
                     "- The saved queue shows the right song and place, follows you between devices without overwriting newer state, and the web player skips songs it can't read\n" +
                     "- Playlist imports find the right songs, read M3U files the way music players do, and a cancelled import stays cancelled and stops its Lidarr downloads\n" +
