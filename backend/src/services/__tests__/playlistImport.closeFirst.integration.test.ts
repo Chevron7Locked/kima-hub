@@ -132,6 +132,16 @@ describe("cancelling an import", () => {
         expect(await downloadRows(running.id)).toBe(0);
     });
 
+    it("does not list a cancelled import that is waiting for its clean-up to be finished", async () => {
+        const left = await importRow("cancelled");
+        const open = await importRow("downloading");
+
+        const listed = await playlistImportService.getUserJobs(USER);
+
+        expect(listed.map((j) => j.id)).toEqual([open.id]);
+        expect(left.id).not.toBe(open.id);
+    });
+
     it("tells no one the import failed", async () => {
         const running = await importRow("downloading");
         await downloadJob(running.id, "pending");

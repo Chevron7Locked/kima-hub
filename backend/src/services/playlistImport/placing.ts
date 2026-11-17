@@ -55,7 +55,9 @@ class PlaylistNotWanted extends Error {}
  * fault met on the way out, so it is logged with the import's id.
  */
 function warnOfErrorAfterStop(importJobId: string, error: unknown): void {
-  if ((error as { name?: string } | null)?.name === "AbortError") return;
+  const { name, code } = (error ?? {}) as { name?: string; code?: string };
+  // The stop itself, as fetch, the abort signal and axios each name it.
+  if (name === "AbortError" || name === "CanceledError" || code === "ERR_CANCELED") return;
   logger.warn(`[Spotify Import] Job ${importJobId}: stopped, and its work ended with an error:`, error);
 }
 /** One build of an import at a time, whichever process runs it. */
@@ -1075,8 +1077,10 @@ class PlaylistImportService {
 
   async getUserJobs(userId: string): Promise<ImportJob[]> {
     // Get from database to include jobs across restarts
+    // A cancelled import is one whose removal has not finished (a finished cancel deletes the row): the stuck-work
+    // check finishes it, and the person, who cancelled it, does not see it meanwhile.
     const dbJobs = await prisma.spotifyImportJob.findMany({
-      where: { userId },
+      where: { userId, status: { not: "cancelled" } },
       orderBy: { createdAt: "desc" },
     });
 

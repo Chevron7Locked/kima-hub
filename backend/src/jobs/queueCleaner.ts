@@ -5,6 +5,9 @@ import * as downloadJobs from "../services/downloads/jobs";
 import { artistIdentityKey } from "../services/artistIdentity";
 import { editionlessKey } from "../services/albumIdentity";
 
+/** Imports the stuck-work check looks at: two that can stall, and a cancelled one whose clean-up stopped part-way. */
+const WATCHED_IMPORT_STATES = ["scanning", "downloading", "cancelled"];
+
 class QueueCleanerService {
     // Imported on first use and cached
     private discoverWeeklyService: typeof import("../services/discoverWeekly")["discoverWeeklyService"] | null = null;
@@ -34,7 +37,7 @@ class QueueCleanerService {
     async recoverStuckWork(): Promise<void> {
         const [batches, imports] = await Promise.all([
             prisma.discoveryBatch.count({ where: { status: { in: ["downloading", "scanning"] } } }),
-            prisma.spotifyImportJob.count({ where: { status: { in: ["scanning", "downloading", "cancelled"] } } }),
+            prisma.spotifyImportJob.count({ where: { status: { in: WATCHED_IMPORT_STATES } } }),
         ]);
         if (batches > 0) {
             const forced = await (await this.getDiscoverWeeklyService()).checkStuckBatches();
@@ -47,7 +50,7 @@ class QueueCleanerService {
     }
 
     /**
-     * Check for Spotify import jobs stuck in "scanning" or "downloading" status.
+     * Check for Spotify import jobs stuck in "scanning" or "downloading" status, or left "cancelled".
      * Re-triggers scan for jobs stuck scanning, or forces completion check
      * for jobs stuck downloading. A cancelled import is deleted by its own cancel, so one still there after a while
      * had its clean-up stop part-way: the clean-up is finished.
@@ -60,7 +63,7 @@ class QueueCleanerService {
 
         const stuckJobs = await prisma.spotifyImportJob.findMany({
             where: {
-                status: { in: ["scanning", "downloading", "cancelled"] },
+                status: { in: WATCHED_IMPORT_STATES },
             },
         });
 
