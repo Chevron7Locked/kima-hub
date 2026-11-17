@@ -11,6 +11,8 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { queueCleaner } from "../queueCleaner";
 import * as downloadJobs from "../../services/downloads/jobs";
 import * as scanRequest from "../../workers/scanRequest";
+import { importQueue } from "../../workers/queues";
+import { closeQueue } from "../../__tests__/helpers/closeQueue";
 
 jest.setTimeout(30_000);
 
@@ -29,6 +31,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+    await closeQueue(importQueue);
     await prisma.user.deleteMany({ where: { id: USER } });
     await closeEngineConnections();
 });
@@ -115,6 +118,18 @@ describe("an import left pending", () => {
             status: "failed",
             error: "Import never started",
         });
+        await prisma.spotifyImportJob.deleteMany({ where: { id: job.id } });
+    });
+
+    it("is left alone while the import queue still holds it, behind a long import", async () => {
+        const job = await pendingImport(45);
+        await importQueue.add("import", { importJobId: job.id, userId: USER, albumMbidsToDownload: [] }, { jobId: job.id, delay: 60 * 60_000 });
+
+        const recovered = await queueCleaner.checkStuckSpotifyImports();
+        await (await importQueue.getJob(job.id))?.remove();
+
+        expect(recovered).toBe(0);
+        expect((await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("pending");
         await prisma.spotifyImportJob.deleteMany({ where: { id: job.id } });
     });
 

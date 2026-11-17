@@ -1,9 +1,13 @@
 import { prisma } from "../utils/db";
 import { logger } from "../utils/logger";
 import { requestScan } from "../workers/scanRequest";
+import { importQueue } from "../workers/queues";
 import * as downloadJobs from "../services/downloads/jobs";
 import { artistIdentityKey } from "../services/artistIdentity";
 import { editionlessKey } from "../services/albumIdentity";
+
+/** What the import queue calls a job that is still to run: waiting its turn, running, or held back. */
+const QUEUED_JOB_STATES = ["waiting", "active", "delayed", "prioritized", "waiting-children"];
 
 /** Imports the stuck-work check looks at: three that can stall, and a cancelled one whose clean-up stopped part-way. */
 const WATCHED_IMPORT_STATES = ["pending", "scanning", "downloading", "cancelled"];
@@ -59,7 +63,7 @@ class QueueCleanerService {
         const SCANNING_RETRY_TIMEOUT = 10 * 60 * 1000; // 10 minutes - retry scan
         const SCANNING_FAIL_TIMEOUT = 30 * 60 * 1000; // 30 minutes - force fail
         const DOWNLOADING_TIMEOUT = 30 * 60 * 1000; // 30 minutes - force completion check
-        const PENDING_TIMEOUT = 30 * 60 * 1000; // 30 minutes - a queued import whose worker never began
+        const PENDING_TIMEOUT = 30 * 60 * 1000; // 30 minutes - an import that is no longer in the queue and never began
         const CANCEL_CLEANUP_GRACE = 10 * 60 * 1000; // 10 minutes - a cancel still being carried out is left alone
 
         const stuckJobs = await prisma.spotifyImportJob.findMany({
@@ -87,6 +91,10 @@ class QueueCleanerService {
                 }
             } else if (job.status === "pending") {
                 if (jobAge <= PENDING_TIMEOUT) continue;
+                // One import runs at a time, so one queued behind a long import waits with its row untouched: it is
+                // failed only when the queue no longer holds it.
+                const queued = await importQueue.getJob(job.id);
+                if (queued && QUEUED_JOB_STATES.includes(await queued.getState())) continue;
                 logger.debug(
                     `[IMPORT STUCK] Job ${job.id} pending for ${Math.round(jobAge / 60000)}min - it never started, failing`
                 );
