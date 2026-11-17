@@ -481,6 +481,35 @@ describe("a download is written beside its destination and moved in once whole",
     });
 });
 
+describe("a finished file that cannot be moved in because of this machine", () => {
+    it.each(["ENOSPC", "EROFS", "EDQUOT"])("%s is a disk fault and leaves no .part", async (code) => {
+        jest.spyOn(fs.promises, "rename").mockRejectedValue(
+            Object.assign(new Error(`${code}: no room`), { code }),
+        );
+        expectLog("error");
+        const { result, partLeft, markUserFailed } = await runEarly(`rename-${code}`, sendWholeFile);
+        expect(result).toEqual({
+            success: false,
+            error: `Cannot move the download into place: ${code}: no room`,
+            diskFault: true,
+        });
+        expect(partLeft).toBe(false);
+        expect(markUserFailed).not.toHaveBeenCalled();
+    });
+});
+
+describe("a destination name too long once .part is added", () => {
+    it("is this machine's fault: the peer is not cooled down", async () => {
+        jest.spyOn(fs, "createWriteStream").mockImplementation(() => {
+            throw Object.assign(new Error("ENAMETOOLONG: name too long"), { code: "ENAMETOOLONG" });
+        });
+        const { result, markUserFailed, cooledDown } = await runEarly("toolong", () => {});
+        expect(result.success).toBe(false);
+        expect(markUserFailed).not.toHaveBeenCalled();
+        expect(cooledDown).toBe(false);
+    });
+});
+
 describe("the active download count", () => {
     const active = () => (soulseekService as any).activeDownloads as number;
     const match = { username: "cooling", filename: "a.flac", fullPath: "a.flac", size: 10, quality: "flac", score: 10 };

@@ -70,7 +70,11 @@ interface DownloadResult {
 const DISK_FAULT_CODES = new Set(["ENOSPC", "EROFS", "EDQUOT"]);
 
 /** Faults of this machine while setting a download up (no handles left, no permission): the peer is not to blame. */
-const LOCAL_FAULT_CODES = new Set(["EMFILE", "ENFILE", "EACCES", "EPERM", ...DISK_FAULT_CODES]);
+const LOCAL_FAULT_CODES = new Set(["EMFILE", "ENFILE", "EACCES", "EPERM", "ENAMETOOLONG", ...DISK_FAULT_CODES]);
+
+/** `{ diskFault: true }` for an error whose code says the disk is full or read-only, else nothing. */
+const diskFaultOf = (err: { code?: string } | undefined) =>
+    DISK_FAULT_CODES.has(err?.code ?? "") ? { diskFault: true } : {};
 
 const diskFaultMessage = (error?: string) =>
     `Disk error, no other peer tried: ${error ?? "unknown"}`;
@@ -1276,7 +1280,7 @@ class SoulseekService {
             return {
                 success: false,
                 error: `Cannot create destination directory: ${err.message}`,
-                ...(DISK_FAULT_CODES.has(err.code ?? "") ? { diskFault: true } : {}),
+                ...diskFaultOf(err),
             };
         }
 
@@ -1346,7 +1350,7 @@ class SoulseekService {
                         try {
                             result = await work();
                         } catch (err: any) {
-                            result = { success: false, error: err?.message ?? String(err) };
+                            result = { success: false, error: err?.message ?? String(err), ...diskFaultOf(err) };
                             try {
                                 sessionLog(
                                     "SOULSEEK",
@@ -1395,7 +1399,7 @@ class SoulseekService {
                                 return {
                                     success: false,
                                     error: `Write error: ${err.message}`,
-                                    ...(DISK_FAULT_CODES.has(err.code ?? "") ? { diskFault: true } : {}),
+                                    ...diskFaultOf(err),
                                 };
                             });
                         });
@@ -1438,7 +1442,10 @@ class SoulseekService {
                                 try {
                                     await fs.promises.rename(partPath, destPath);
                                 } catch (err: any) {
-                                    throw new Error(`Cannot move the download into place: ${err.message}`);
+                                    throw Object.assign(
+                                        new Error(`Cannot move the download into place: ${err.message}`),
+                                        { code: err.code }
+                                    );
                                 }
                                 sessionLog(
                                     "SOULSEEK",
@@ -1519,7 +1526,7 @@ class SoulseekService {
             return {
                 success: false,
                 error: err.message,
-                ...(DISK_FAULT_CODES.has(err.code ?? "") ? { diskFault: true } : {}),
+                ...diskFaultOf(err),
             };
         }
     }
