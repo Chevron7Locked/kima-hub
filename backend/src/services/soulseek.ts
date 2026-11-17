@@ -69,6 +69,9 @@ interface DownloadResult {
 /** Write errors that mean the disk (not the peer, and not the path) is why nothing can be saved. */
 const DISK_FAULT_CODES = new Set(["ENOSPC", "EROFS", "EDQUOT"]);
 
+/** Faults of this machine while setting a download up (no handles left, no permission): the peer is not to blame. */
+const LOCAL_FAULT_CODES = new Set(["EMFILE", "ENFILE", "EACCES", "EPERM", ...DISK_FAULT_CODES]);
+
 const diskFaultMessage = (error?: string) =>
     `Disk error, no other peer tried: ${error ?? "unknown"}`;
 
@@ -1037,8 +1040,9 @@ class SoulseekService {
     }
 
     private async recordUserFailure(username: string): Promise<void> {
-        await this.markUserFailed(username);
+        // The cooldown is in memory and set first: a database that fails must not leave the peer uncooled.
         this.userConnectionCooldowns.set(username, Date.now() + this.USER_CONNECTION_COOLDOWN);
+        await this.markUserFailed(username);
     }
 
     private categorizeError(error: Error): {
@@ -1217,7 +1221,6 @@ class SoulseekService {
         attemptNumber: number = 0,
         skipCooldown: boolean = false
     ): Promise<DownloadResult> {
-        const downloadStartTime = Date.now();
         this.activeDownloads++;
         this.maxConcurrentDownloads = Math.max(
             this.maxConcurrentDownloads,
@@ -1227,6 +1230,20 @@ class SoulseekService {
             "SOULSEEK",
             `Active downloads: ${this.activeDownloads}/${this.maxConcurrentDownloads} max`
         );
+        try {
+            return await this.runDownload(match, destPath, attemptNumber, skipCooldown);
+        } finally {
+            this.activeDownloads--;
+        }
+    }
+
+    private async runDownload(
+        match: TrackMatch,
+        destPath: string,
+        attemptNumber: number,
+        skipCooldown: boolean
+    ): Promise<DownloadResult> {
+        const downloadStartTime = Date.now();
 
         const timeout =
             attemptNumber === 0
@@ -1236,17 +1253,14 @@ class SoulseekService {
         try {
             await this.ensureConnected("request");
         } catch (err: any) {
-            this.activeDownloads--;
             return { success: false, error: err.message };
         }
 
         if (!this.client) {
-            this.activeDownloads--;
             return { success: false, error: "Not connected" };
         }
 
         if (!skipCooldown && this.isUserInCooldown(match.username)) {
-            this.activeDownloads--;
             return { success: false, error: "User in cooldown" };
         }
 
@@ -1259,10 +1273,10 @@ class SoulseekService {
                 `Failed to create directory ${destDir}: ${err.message}`,
                 "ERROR"
             );
-            this.activeDownloads--;
             return {
                 success: false,
                 error: `Cannot create destination directory: ${err.message}`,
+                ...(DISK_FAULT_CODES.has(err.code ?? "") ? { diskFault: true } : {}),
             };
         }
 
@@ -1280,18 +1294,14 @@ class SoulseekService {
             );
             opened = download;
 
-            const writeStream = fs.createWriteStream(destPath);
+            // The file is written beside its destination and moved in once whole, so a failed try never
+            // touches a good file already at the destination.
+            const partPath = `${destPath}.part`;
+            const writeStream = fs.createWriteStream(partPath);
 
             const result = await new Promise<DownloadResult>(
                 (resolve) => {
                     let resolved = false;
-
-                    const cleanup = () => {
-                        if (!resolved) {
-                            resolved = true;
-                            this.activeDownloads--;
-                        }
-                    };
 
                     const writeStreamClosed = async () => {
                         if (!writeStream.closed) {
@@ -1308,7 +1318,7 @@ class SoulseekService {
                         writeStream.destroy();
                         await writeStreamClosed();
                         try {
-                            await fs.promises.rm(destPath, { force: true });
+                            await fs.promises.rm(partPath, { force: true });
                         } catch {
                             // ignore cleanup errors
                         }
@@ -1331,7 +1341,7 @@ class SoulseekService {
                     const finish = async (work: () => Promise<DownloadResult>) => {
                         if (resolved) return;
                         clearTimeout(timeoutId);
-                        cleanup();
+                        resolved = true;
                         let result: DownloadResult;
                         try {
                             result = await work();
@@ -1403,7 +1413,7 @@ class SoulseekService {
                                 // own has not, and the stuck-download sweep would find it later.
                                 this.client?.removeDownload(download);
 
-                                if (!fs.existsSync(destPath)) {
+                                if (!fs.existsSync(partPath)) {
                                     sessionLog(
                                         "SOULSEEK",
                                         "File not found after download",
@@ -1411,7 +1421,7 @@ class SoulseekService {
                                     );
                                     return { success: false, error: "File not written" };
                                 }
-                                const stats = fs.statSync(destPath);
+                                const stats = fs.statSync(partPath);
                                 // A file shorter or longer than what arrived was not written whole.
                                 if (BigInt(stats.size) !== download.receivedBytes) {
                                     sessionLog(
@@ -1424,6 +1434,11 @@ class SoulseekService {
                                         success: false,
                                         error: `File on disk is ${stats.size} bytes, but ${download.receivedBytes} were transferred`,
                                     };
+                                }
+                                try {
+                                    await fs.promises.rename(partPath, destPath);
+                                } catch (err: any) {
+                                    throw new Error(`Cannot move the download into place: ${err.message}`);
                                 }
                                 sessionLog(
                                     "SOULSEEK",
@@ -1474,12 +1489,10 @@ class SoulseekService {
 
             const duration = (Date.now() - downloadStartTime) / 1000;
             const status = result.success ? 'success' : 'failed';
-            soulseekDownloadsTotal.inc({ status });
-            soulseekDownloadDuration.observe({ status }, duration);
+            this.recordDownloadMetrics(status, duration);
 
             return result;
         } catch (err: any) {
-            this.activeDownloads--;
             // A throw after the client handed the download over leaves it listed and its stream open.
             if (opened) {
                 try {
@@ -1495,15 +1508,29 @@ class SoulseekService {
                 `Download setup error (${errorInfo.type}): ${err.message}`,
                 "ERROR"
             );
-            if (errorInfo.skipUser) {
+            // No handles left, no permission, a full disk: this machine's fault, not the peer's.
+            if (errorInfo.skipUser && !LOCAL_FAULT_CODES.has(err.code ?? "")) {
                 await this.recordUserFailure(match.username);
             }
 
             const duration = (Date.now() - downloadStartTime) / 1000;
-            soulseekDownloadsTotal.inc({ status: 'failed' });
-            soulseekDownloadDuration.observe({ status: 'failed' }, duration);
+            this.recordDownloadMetrics('failed', duration);
 
-            return { success: false, error: err.message };
+            return {
+                success: false,
+                error: err.message,
+                ...(DISK_FAULT_CODES.has(err.code ?? "") ? { diskFault: true } : {}),
+            };
+        }
+    }
+
+    /** A metrics failure must never turn a finished download into a failed one, or escape the caller. */
+    private recordDownloadMetrics(status: "success" | "failed", seconds: number): void {
+        try {
+            soulseekDownloadsTotal.inc({ status });
+            soulseekDownloadDuration.observe({ status }, seconds);
+        } catch (err) {
+            sessionLog("SOULSEEK", `Download metrics not recorded: ${(err as Error).message}`, "WARN");
         }
     }
 
@@ -1816,6 +1843,8 @@ class SoulseekService {
 
         // Download from the best groups, trying the next on failure
         const downloadedTrackIndices = new Set<number>();
+        // Set by the first download that finds the disk full or read-only: no other track or peer can do better.
+        let diskFault: string | undefined;
 
         for (let gi = 0; gi < groupsToTry.length; gi++) {
             const group = groupsToTry[gi];
@@ -1846,7 +1875,7 @@ class SoulseekService {
 
             const downloadPromises = Array.from(tracksToDownload.entries()).map(([trackIdx, file]) =>
                 downloadQueue.add(async () => {
-                    if (signal?.aborted) return;
+                    if (signal?.aborted || diskFault) return;
 
                     const track = tracks[trackIdx];
                     const ext = path.extname(file.file);
@@ -1869,6 +1898,7 @@ class SoulseekService {
                         downloadedTrackIndices.add(trackIdx);
                     } else {
                         groupFailures++;
+                        if (downloadResult.diskFault) diskFault ??= downloadResult.error ?? "disk fault";
                         results.errors.push(`${track.title}: ${downloadResult.error || "download failed"} (user: ${username})`);
                         sessionLog("SOULSEEK", `[Album Search] Download failed for "${track.title}" from ${username}: ${downloadResult.error}`, "WARN");
                     }
@@ -1888,6 +1918,8 @@ class SoulseekService {
                 break;
             }
 
+            if (diskFault) break;
+
             // If most downloads from this group failed, user is likely offline -- try next group
             if (groupFailures > 0 && groupFailures >= tracksToDownload.size * 0.5) {
                 sessionLog("SOULSEEK", `[Album Search] Group ${gi + 1} had ${groupFailures}/${tracksToDownload.size} failures, trying next group`);
@@ -1900,7 +1932,11 @@ class SoulseekService {
             .map((_, i) => i)
             .filter(i => !downloadedTrackIndices.has(i));
 
-        if (missingIndices.length > 0) {
+        if (diskFault) {
+            // The per-track fallback would meet the same disk, track after track.
+            results.failed += missingIndices.length;
+            results.errors.push(diskFaultMessage(diskFault));
+        } else if (missingIndices.length > 0) {
             sessionLog(
                 "SOULSEEK",
                 `[Album Search] ${missingIndices.length} tracks need per-track fallback`
