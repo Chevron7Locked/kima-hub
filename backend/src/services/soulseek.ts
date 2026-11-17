@@ -6,6 +6,7 @@
 import path from "path";
 import { pathInMusicFolder } from "../utils/musicFolderPath";
 import fs from "fs";
+import { randomUUID } from "crypto";
 import { mkdir } from "fs/promises";
 import PQueue from "p-queue";
 import { SlskClient, resolveSlskClient } from "../lib/soulseek/client";
@@ -71,6 +72,9 @@ const DISK_FAULT_CODES = new Set(["ENOSPC", "EROFS", "EDQUOT"]);
 
 /** Faults of this machine while setting a download up (no handles left, no permission): the peer is not to blame. */
 const LOCAL_FAULT_CODES = new Set(["EMFILE", "ENFILE", "EACCES", "EPERM", "ENAMETOOLONG", ...DISK_FAULT_CODES]);
+
+/** A partial file this old cannot belong to a download still going: a download that stalls ends within minutes. */
+const STALE_PART_AGE_MS = 60 * 60 * 1000;
 
 /** `{ diskFault: true }` for an error whose code says the disk is full or read-only, else nothing. */
 const diskFaultOf = (err: { code?: string } | undefined) =>
@@ -246,6 +250,8 @@ class SoulseekService {
     private maxConcurrentDownloads = 0;
 
     private userConnectionCooldowns = new Map<string, number>();
+    /** The partial-file sweep running for each downloads folder, so searches starting together share it. */
+    private partSweeps = new Map<string, Promise<void>>();
     private readonly USER_CONNECTION_COOLDOWN = 5000; // 5 s before retrying the same user
     private cooldownCleanupInterval: NodeJS.Timeout | null = null;
 
@@ -1300,7 +1306,8 @@ class SoulseekService {
 
             // The file is written beside its destination and moved in once whole, so a failed try never
             // touches a good file already at the destination.
-            const partPath = `${destPath}.part`;
+            // Its name is its own, so two tries at one destination never share (or delete) each other's file.
+            const partPath = `${destPath}.${randomUUID()}.part`;
             const writeStream = fs.createWriteStream(partPath);
 
             const result = await new Promise<DownloadResult>(
@@ -1531,6 +1538,50 @@ class SoulseekService {
         }
     }
 
+    /**
+     * Removes the `.part` files a crash or kill left under `<music folder>/Singles`, where downloads are written.
+     * Best-effort: whatever cannot be read or removed stays for the next search. Searches starting together share one pass.
+     */
+    async sweepStalePartFiles(musicPath: string): Promise<void> {
+        let root: string;
+        try {
+            root = pathInMusicFolder(musicPath, "Singles");
+        } catch (err) {
+            logger.debug(`[Soulseek] Not sweeping partial files: ${(err as Error).message}`);
+            return;
+        }
+        const running = this.partSweeps.get(root);
+        if (running) return running;
+        const sweep = (async () => {
+            const cutoff = Date.now() - STALE_PART_AGE_MS;
+            const folders = [root];
+            for (let dir = folders.pop(); dir !== undefined; dir = folders.pop()) {
+                try {
+                    for (const entry of await fs.promises.readdir(dir, { withFileTypes: true })) {
+                        const file = path.join(dir, entry.name);
+                        if (entry.isDirectory()) {
+                            folders.push(file);
+                        } else if (entry.isFile() && entry.name.endsWith(".part")) {
+                            try {
+                                if ((await fs.promises.stat(file)).mtimeMs < cutoff) {
+                                    await fs.promises.rm(file, { force: true });
+                                    logger.debug(`[Soulseek] Removed a stale partial file: ${file}`);
+                                }
+                            } catch (err) {
+                                logger.debug(`[Soulseek] Could not remove ${file}: ${(err as Error).message}`);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    // A folder that is missing (nothing downloaded yet) or unreadable: nothing to sweep here.
+                    logger.debug(`[Soulseek] Could not sweep ${dir}: ${(err as Error).message}`);
+                }
+            }
+        })().finally(() => this.partSweeps.delete(root));
+        this.partSweeps.set(root, sweep);
+        return sweep;
+    }
+
     /** A metrics failure must never turn a finished download into a failed one, or escape the caller. */
     private recordDownloadMetrics(status: "success" | "failed", seconds: number): void {
         try {
@@ -1610,6 +1661,8 @@ class SoulseekService {
         if (signal?.aborted || tracks.length === 0) {
             return results;
         }
+
+        await this.sweepStalePartFiles(musicPath);
 
         const { prepareArtistForSearch, titleFileScore, titleMatchKey } = await import("./soulseek-search-strategies");
         const { stripAlbumEdition, canonicalizeVariousArtists, VARIOUS_ARTISTS_CANONICAL } = await import("../utils/artistNormalization");
@@ -1878,7 +1931,8 @@ class SoulseekService {
             const downloadQueue = new PQueue({ concurrency: 3 });
             let groupFailures = 0;
 
-            signal?.addEventListener('abort', () => { downloadQueue.clear(); }, { once: true });
+            const onAbort = () => { downloadQueue.clear(); };
+            signal?.addEventListener('abort', onAbort, { once: true });
 
             const downloadPromises = Array.from(tracksToDownload.entries()).map(([trackIdx, file]) =>
                 downloadQueue.add(async () => {
@@ -1913,6 +1967,7 @@ class SoulseekService {
             );
 
             const downloadSettled = await Promise.allSettled(downloadPromises);
+            signal?.removeEventListener('abort', onAbort);
             for (const result of downloadSettled) {
                 if (result.status === "rejected") {
                     groupFailures++;
@@ -1994,6 +2049,8 @@ class SoulseekService {
         };
 
         if (signal?.aborted) return results;
+
+        await this.sweepStalePartFiles(musicPath);
 
         const downloadQueue = new PQueue({ concurrency: concurrency ?? 2 });
         const searchQueue = new PQueue({ concurrency: concurrency ?? 2 });

@@ -4,6 +4,7 @@
  * there is no socket.
  */
 import { EventEmitter } from "events";
+import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -113,6 +114,10 @@ it("sorts a reset connection as a connection failure and cools the peer down", a
     expect(t.markUserFailed).toHaveBeenCalledWith("peer");
 });
 
+/** The `.part` files written beside `dest`, whatever name each try gave its own. */
+const partsBeside = (dest: string) =>
+    fs.readdirSync(path.dirname(dest)).filter((n) => n.startsWith(`${path.basename(dest)}.`) && n.endsWith(".part"));
+
 /**
  * Runs downloadTrack for a fake download; `onPipe` fires once the service has attached everything, while the
  * write stream is still opening. `folderAtDest` puts a folder where the file is written, so it cannot be.
@@ -144,7 +149,10 @@ async function runEarly(
     if (options.timeout !== undefined) service.DOWNLOAD_TIMEOUT_INITIAL = options.timeout;
     const dest = path.join(dir, `${name}.flac`);
     // the file is written beside its destination and moved in, so the folder goes where the file is written
-    if (options.folderAtDest) fs.mkdirSync(`${dest}.part`);
+    if (options.folderAtDest) {
+        jest.spyOn(crypto, "randomUUID").mockReturnValue("blocked-0000-0000-0000-000000000000");
+        fs.mkdirSync(`${dest}.blocked-0000-0000-0000-000000000000.part`);
+    }
     // `existing`: a good file is already at the destination
     if (options.existing !== undefined) fs.writeFileSync(dest, options.existing);
     let result;
@@ -164,8 +172,8 @@ async function runEarly(
         removeDownload,
         markUserFailed,
         cooledDown: service.userConnectionCooldowns.has(name) as boolean,
-        leftBehind: fs.existsSync(dest) || (fs.existsSync(`${dest}.part`) && !options.folderAtDest),
-        partLeft: fs.existsSync(`${dest}.part`) && !options.folderAtDest,
+        leftBehind: fs.existsSync(dest) || partsBeside(dest).some((n) => !fs.statSync(path.join(dir, n)).isDirectory()),
+        partLeft: partsBeside(dest).some((n) => !fs.statSync(path.join(dir, n)).isDirectory()),
     };
 }
 
@@ -412,7 +420,7 @@ it("keeps a denial that lands before the service listens, and fails the download
 });
 
 describe("a download is written beside its destination and moved in once whole", () => {
-    it("writes to a .part file, then leaves only the finished file", async () => {
+    it("writes to a .part file of its own, then leaves only the finished file", async () => {
         const created: string[] = [];
         const real = fs.createWriteStream.bind(fs);
         jest.spyOn(fs, "createWriteStream").mockImplementation(((p: any, ...rest: any[]) => {
@@ -421,9 +429,23 @@ describe("a download is written beside its destination and moved in once whole",
         }) as typeof fs.createWriteStream);
         const { result, dest, partLeft } = await runEarly("part-ok", sendWholeFile);
         expect(result).toEqual({ success: true });
-        expect(created).toEqual([`${dest}.part`]);
+        expect(created).toHaveLength(1);
+        expect(created[0]).toMatch(new RegExp(`^${dest.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.[0-9a-f-]{36}\\.part$`));
         expect(fs.statSync(dest).size).toBe(10);
         expect(partLeft).toBe(false);
+    });
+
+    it("gives each try its own name, so two downloads to one destination never share a partial file", async () => {
+        const created: string[] = [];
+        const real = fs.createWriteStream.bind(fs);
+        jest.spyOn(fs, "createWriteStream").mockImplementation(((p: any, ...rest: any[]) => {
+            created.push(String(p));
+            return (real as any)(p, ...rest);
+        }) as typeof fs.createWriteStream);
+        await runEarly("part-twice", sendWholeFile);
+        await runEarly("part-twice", sendWholeFile);
+        expect(created).toHaveLength(2);
+        expect(created[0]).not.toBe(created[1]);
     });
 
     it("replaces a file already at the destination when the new one is whole", async () => {
@@ -475,7 +497,7 @@ describe("a download is written beside its destination and moved in once whole",
         );
         expect(result.success).toBe(false);
         expect(fs.statSync(dest).isDirectory()).toBe(true);
-        expect(fs.existsSync(`${dest}.part`)).toBe(false);
+        expect(partsBeside(dest)).toEqual([]);
         // this machine's folder is in the way, not the peer's fault
         expect(markUserFailed).not.toHaveBeenCalled();
     });
@@ -656,5 +678,107 @@ describe("an album search on a full disk", () => {
         expect(result.successful).toBe(0);
         expect(result.failed).toBe(5);
         expect(result.errors.join(" ")).toMatch(/disk.*ENOSPC/i);
+    });
+});
+
+describe("stale partial files under the downloads folder", () => {
+    const service = () => soulseekService as any;
+    const hoursAgo = (file: string, hours: number) => {
+        const when = new Date(Date.now() - hours * 3600_000);
+        fs.utimesSync(file, when, when);
+    };
+
+    function seed() {
+        const album = path.join(dir, "Singles", "Artist", "Album");
+        fs.mkdirSync(album, { recursive: true });
+        const old = path.join(album, "a.flac.11111111-1111-1111-1111-111111111111.part");
+        const fresh = path.join(album, "b.flac.22222222-2222-2222-2222-222222222222.part");
+        const song = path.join(album, "c.flac");
+        const oldSong = path.join(album, "d.flac");
+        for (const f of [old, fresh, song, oldSong]) fs.writeFileSync(f, "x");
+        hoursAgo(old, 2);
+        hoursAgo(oldSong, 2);
+        return { old, fresh, song, oldSong };
+    }
+
+    it("removes .part files older than an hour, and nothing else", async () => {
+        const { old, fresh, song, oldSong } = seed();
+        await service().sweepStalePartFiles(dir);
+        expect(fs.existsSync(old)).toBe(false);
+        expect(fs.existsSync(fresh)).toBe(true);
+        expect(fs.existsSync(song)).toBe(true);
+        expect(fs.existsSync(oldSong)).toBe(true);
+    });
+
+    it("carries on when the folder is missing or cannot be read", async () => {
+        await expect(service().sweepStalePartFiles(path.join(dir, "nowhere"))).resolves.toBeUndefined();
+        const { old } = seed();
+        jest.spyOn(fs.promises, "readdir").mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }));
+        await expect(service().sweepStalePartFiles(dir)).resolves.toBeUndefined();
+        expect(fs.existsSync(old)).toBe(true);
+    });
+
+    it("carries on past a file that cannot be removed", async () => {
+        const { old } = seed();
+        const second = path.join(path.dirname(old), "e.flac.33333333-3333-3333-3333-333333333333.part");
+        fs.writeFileSync(second, "x");
+        hoursAgo(second, 3);
+        const rm = fs.promises.rm.bind(fs.promises);
+        jest.spyOn(fs.promises, "rm").mockImplementation(((p: any, ...rest: any[]) =>
+            String(p) === old ? Promise.reject(new Error("EBUSY")) : (rm as any)(p, ...rest)) as any);
+        await service().sweepStalePartFiles(dir);
+        expect(fs.existsSync(old)).toBe(true);
+        expect(fs.existsSync(second)).toBe(false);
+    });
+
+    it("runs when an album search starts", async () => {
+        const sweep = jest.spyOn(service(), "sweepStalePartFiles").mockResolvedValue(undefined);
+        jest.spyOn(service(), "rateLimitedSearch").mockResolvedValue([]);
+        jest.spyOn(service(), "searchAndDownloadBatch").mockResolvedValue({ successful: 0, failed: 0, files: [], errors: [] });
+        await service().searchAndDownloadAlbum("artist", "album", [{ title: "song", position: 1 }], dir);
+        expect(sweep).toHaveBeenCalledWith(dir);
+    });
+
+    it("runs when a batch of tracks starts", async () => {
+        const sweep = jest.spyOn(service(), "sweepStalePartFiles").mockResolvedValue(undefined);
+        jest.spyOn(service(), "searchTrack").mockResolvedValue({ found: false, bestMatch: null, allMatches: [] });
+        await service().searchAndDownloadBatch([{ artist: "a", title: "t", album: "b" }], dir);
+        expect(sweep).toHaveBeenCalledWith(dir);
+    });
+});
+
+describe("an album search and its abort listener", () => {
+    it("takes the listener off the signal when each group ends", async () => {
+        const service = soulseekService as any;
+        const file = (n: number) => ({ filename: `u1\\album\\0${n} - song ${n}.flac`, size: 10n, attrs: new Map() });
+        jest.spyOn(service, "sweepStalePartFiles").mockResolvedValue(undefined);
+        jest.spyOn(service, "rateLimitedSearch").mockResolvedValue([
+            { username: "u1", slotsFree: true, files: [1, 2].map(file) },
+        ]);
+        jest.spyOn(service, "isUserBlocked").mockResolvedValue(false);
+        jest.spyOn(service, "downloadTrack").mockResolvedValue({ success: true });
+        const signal = new AbortController().signal;
+        const added: unknown[] = [];
+        const removed: unknown[] = [];
+        const add = signal.addEventListener.bind(signal);
+        const remove = signal.removeEventListener.bind(signal);
+        jest.spyOn(signal, "addEventListener").mockImplementation(((t: string, fn: unknown, o?: unknown) => {
+            if (t === "abort") added.push(fn);
+            return (add as any)(t, fn, o);
+        }) as any);
+        jest.spyOn(signal, "removeEventListener").mockImplementation(((t: string, fn: unknown, o?: unknown) => {
+            if (t === "abort") removed.push(fn);
+            return (remove as any)(t, fn, o);
+        }) as any);
+        const result = await service.searchAndDownloadAlbum(
+            "artist",
+            "album",
+            [1, 2].map((n) => ({ title: `song ${n}`, position: n })),
+            dir,
+            signal,
+        );
+        expect(result.successful).toBe(2);
+        expect(added.length).toBeGreaterThan(0);
+        for (const fn of added) expect(removed).toContain(fn);
     });
 });
