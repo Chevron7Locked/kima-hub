@@ -200,7 +200,6 @@ class PlaylistImportService {
         if (albumMbidsToDownload.length > 0) {
           // Written only while the stored import is open: a stop that landed since the check above stays.
           job.status = "downloading";
-          job.updatedAt = new Date();
           if (!(await updateImportJobFields(job.id, { status: "downloading" }, CLOSED_IMPORT_STATES))) {
             jobLogger?.info("[Spotify Import] Job was stopped before downloading started");
             return;
@@ -345,7 +344,6 @@ class PlaylistImportService {
                 job.progress = Math.round(
                   (job.albumsCompleted / job.albumsTotal) * 30,
                 );
-                job.updatedAt = new Date();
                 // A stop from another process stays: the loop below reads the stored status and ends.
                 await updateImportJobFields(
                   job.id,
