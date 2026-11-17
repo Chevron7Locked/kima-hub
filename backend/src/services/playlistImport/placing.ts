@@ -198,9 +198,13 @@ class PlaylistImportService {
         }
 
         if (albumMbidsToDownload.length > 0) {
+          // Written only while the stored import is open: a stop that landed since the check above stays.
           job.status = "downloading";
           job.updatedAt = new Date();
-          await saveImportJob(job);
+          if (!(await updateImportJobFields(job.id, { status: "downloading" }, CLOSED_IMPORT_STATES))) {
+            jobLogger?.info("[Spotify Import] Job was stopped before downloading started");
+            return;
+          }
 
           jobLogger?.logAlbumDownloadStart(albumMbidsToDownload.length);
 
@@ -342,7 +346,12 @@ class PlaylistImportService {
                   (job.albumsCompleted / job.albumsTotal) * 30,
                 );
                 job.updatedAt = new Date();
-                await saveImportJob(job);
+                // A stop from another process stays: the loop below reads the stored status and ends.
+                await updateImportJobFields(
+                  job.id,
+                  { albumsCompleted: job.albumsCompleted, progress: job.progress },
+                  CLOSED_IMPORT_STATES,
+                );
 
                 jobLogger?.debug(
                   `Album done: ${album.artistName} - ${
@@ -387,16 +396,22 @@ class PlaylistImportService {
               return;
             }
 
+            // The stored status decides, not a cached copy: a stop from another process holds here too.
+            if (!(await importStillOpen(job.id))) {
+              jobLogger?.info(`[Spotify Import] Job ${job.id}: stopped during completion poll`);
+              return;
+            }
+
             await this.checkImportCompletion(job.id);
 
-            const currentJob = await getImportJob(job.id);
-            if (!currentJob) {
+            const stored = await prisma.spotifyImportJob.findUnique({ where: { id: job.id }, select: { status: true } });
+            if (!stored) {
               jobLogger?.error(`[Spotify Import] Job ${job.id}: not found during completion poll`);
               return;
             }
 
-            if (HANDED_OFF_STATES.includes(currentJob.status)) {
-              jobLogger?.info(`Import job ${job.id} handed off to next phase: ${currentJob.status}`);
+            if (HANDED_OFF_STATES.includes(stored.status as ImportJob["status"])) {
+              jobLogger?.info(`Import job ${job.id} handed off to next phase: ${stored.status}`);
               return;
             }
 
@@ -406,7 +421,7 @@ class PlaylistImportService {
               return;
             }
 
-            jobLogger?.debug(`[Spotify Import] Job ${job.id}: still ${currentJob.status}, polling again in 15s...`);
+            jobLogger?.debug(`[Spotify Import] Job ${job.id}: still ${stored.status}, polling again in 15s...`);
             await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
           }
         }

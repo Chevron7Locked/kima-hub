@@ -236,6 +236,53 @@ describe("an import that was stopped before its worker started", () => {
         expect(warn.mock.calls.some(([message]) => String(message).includes(running.id))).toBe(false);
     });
 
+    // A stop from another process (the worker and the API run apart in the split image) changes the stored row; this
+    // process's cached copy of the import still says it is open.
+    const cacheCopyOpen = async (id: string) => {
+        const { toImportJob } = await import("../playlistImport/jobState");
+        const row = await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id } });
+        await redisClient.set(`import:job:${id}`, JSON.stringify({ ...toImportJob(row), status: "downloading" }));
+    };
+
+    it("does not write an album's progress over a stop that came from another process", async () => {
+        const running = await importRow("downloading");
+        acquire.mockImplementation((async () => {
+            await prisma.spotifyImportJob.update({ where: { id: running.id }, data: { status: "cancelled" } });
+            return { success: false, error: "stubbed" };
+        }) as never);
+
+        await run(running.id);
+
+        expect((await prisma.spotifyImportJob.findUnique({ where: { id: running.id } }))?.status).toBe("cancelled");
+    }, 5000);
+
+    it("stops waiting for its downloads when the stored import is stopped, whatever its cached copy says", async () => {
+        const running = await importRow("downloading");
+        const check = jest.spyOn(playlistImportService as any, "checkImportCompletion").mockImplementation((async () => {
+            await prisma.spotifyImportJob.update({ where: { id: running.id }, data: { status: "cancelled" } });
+            await cacheCopyOpen(running.id);
+        }) as never);
+
+        await run(running.id);
+
+        expect(check).toHaveBeenCalledTimes(1);
+        expect(build).not.toHaveBeenCalled();
+    }, 5000);
+
+    it("does not wait for downloads of an import already stopped when the wait begins", async () => {
+        const running = await importRow("downloading");
+        acquire.mockImplementation((async () => {
+            await prisma.spotifyImportJob.update({ where: { id: running.id }, data: { status: "cancelled" } });
+            await cacheCopyOpen(running.id);
+            return { success: false, error: "stubbed" };
+        }) as never);
+        const check = jest.spyOn(playlistImportService as any, "checkImportCompletion").mockResolvedValue(undefined as never);
+
+        await run(running.id);
+
+        expect(check).not.toHaveBeenCalled();
+    }, 5000);
+
     it("lets a download start only while the stored import is open, and stops this process's searches when it is not", async () => {
         const running = await importRow("downloading");
         const seen: { open: boolean[]; aborted: boolean[] } = { open: [], aborted: [] };
