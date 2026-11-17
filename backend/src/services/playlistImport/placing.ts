@@ -396,7 +396,15 @@ class PlaylistImportService {
               return;
             }
 
-            await this.checkImportCompletion(job.id);
+            try {
+              await this.checkImportCompletion(job.id);
+            } catch (error: any) {
+              // A stop is handled by the outer catch. Any other failure (the scan request, say) left the import waiting
+              // for its downloads, so the next turn asks again; the 30-minute cap below still bounds it.
+              if (error?.name === 'AbortError' || signal.aborted) throw error;
+              jobLogger?.warn(`[Spotify Import] Job ${job.id}: completion check failed, trying again next turn: ${error?.message ?? error}`);
+              logger.warn(`[Spotify Import] Job ${job.id}: completion check failed, trying again next turn:`, error);
+            }
 
             const stored = await prisma.spotifyImportJob.findUnique({ where: { id: job.id }, select: { status: true } });
             if (!stored) {
@@ -409,6 +417,7 @@ class PlaylistImportService {
               return;
             }
 
+            // The last check at the cap is not retried: a failure there ends the import as failed.
             if (Date.now() - pollStart > MAX_WAIT_MS) {
               jobLogger?.warn(`[Spotify Import] Job ${job.id}: timed out after 30 minutes, running final completion check`);
               await this.checkImportCompletion(job.id);

@@ -310,6 +310,39 @@ describe("an import that was stopped before its worker started", () => {
         expect(build).not.toHaveBeenCalled();
     }, 5000);
 
+    it("asks for the scan again on the next turn when the scan request fails, and the import goes on instead of failing", async () => {
+        const running = await importRow("downloading");
+        await downloadJob(running.id, "completed");
+        const realSetTimeout = global.setTimeout;
+        // The 15 second wait between two turns is not waited out.
+        jest.spyOn(global, "setTimeout").mockImplementation(((fn: () => void, ms?: number) =>
+            realSetTimeout(fn, ms === 15_000 ? 0 : ms)) as never);
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const ask = jest.spyOn(await import("../../workers/scanRequest"), "requestScan")
+            .mockRejectedValueOnce(new Error("queue down"))
+            .mockResolvedValueOnce({ queued: true, jobId: "scan-1" } as never);
+
+        await expect(run(running.id)).resolves.toBeUndefined();
+
+        expect(ask).toHaveBeenCalledTimes(2);
+        expect(warn.mock.calls.some(([message]) => String(message).includes(running.id))).toBe(true);
+        expect(await prisma.spotifyImportJob.findUnique({ where: { id: running.id } })).toMatchObject({ status: "scanning", error: null });
+    }, 5000);
+
+    it("does not try the check again when the import is stopped as the check fails", async () => {
+        const running = await importRow("downloading");
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        const check = jest.spyOn(playlistImportService as any, "checkImportCompletion").mockImplementation((async () => {
+            await failImportJob(running.id, "stopped elsewhere");
+            throw new Error("socket hang up");
+        }) as never);
+
+        await expect(run(running.id)).resolves.toBeUndefined();
+
+        expect(check).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls.some(([message]) => String(message).includes("trying again"))).toBe(false);
+    }, 5000);
+
     it("never lowers the counts a later write left, whatever order an album's progress lands in", async () => {
         const running = await importRow("downloading");
         acquire.mockImplementation((async () => {
