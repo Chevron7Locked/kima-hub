@@ -76,8 +76,8 @@ const LOCAL_FAULT_CODES = new Set(["EMFILE", "ENFILE", "EACCES", "EPERM", "ENAME
 /** A partial file this old cannot belong to a download still going: a download that stalls ends within minutes. */
 const STALE_PART_AGE_MS = 60 * 60 * 1000;
 
-/** The name a try's partial file ends in: `.<uuid>.part`. A file someone else named `.part` is not ours to sweep. */
-const OWN_PART_NAME = /\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.part$/i;
+/** A try's partial file is named whole `.<uuid>.part`. A file someone else named `.part` is not ours to sweep. */
+const OWN_PART_NAME = /^\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.part$/i;
 
 /** `{ diskFault: true }` for an error whose code says the disk is full or read-only, else nothing. */
 const diskFaultOf = (err: { code?: string } | undefined) =>
@@ -253,8 +253,8 @@ class SoulseekService {
     private maxConcurrentDownloads = 0;
 
     private userConnectionCooldowns = new Map<string, number>();
-    /** The partial-file sweep running for each downloads folder, so searches starting together share it. */
-    private partSweeps = new Map<string, Promise<void>>();
+    /** When each downloads folder was last swept for partial files, and that sweep: a folder is walked once an hour. */
+    private partSweeps = new Map<string, { at: number; sweep: Promise<void> }>();
     private readonly USER_CONNECTION_COOLDOWN = 5000; // 5 s before retrying the same user
     private cooldownCleanupInterval: NodeJS.Timeout | null = null;
 
@@ -1310,7 +1310,8 @@ class SoulseekService {
             // The file is written beside its destination and moved in once whole, so a failed try never
             // touches a good file already at the destination.
             // Its name is its own, so two tries at one destination never share (or delete) each other's file.
-            const partPath = `${destPath}.${randomUUID()}.part`;
+            // It is hidden and short, so a long destination name never makes it too long for the file system.
+            const partPath = path.join(path.dirname(destPath), `.${randomUUID()}.part`);
             const writeStream = fs.createWriteStream(partPath);
 
             const result = await new Promise<DownloadResult>(
@@ -1333,8 +1334,9 @@ class SoulseekService {
                         await writeStreamClosed();
                         try {
                             await fs.promises.rm(partPath, { force: true });
-                        } catch {
-                            // ignore cleanup errors
+                        } catch (err) {
+                            // The download's own outcome stands; the sweep removes what is left once it is old.
+                            logger.debug(`[Soulseek] Could not remove ${partPath}: ${(err as Error).message}`);
                         }
                     };
 
@@ -1427,7 +1429,11 @@ class SoulseekService {
                                 // own has not, and the stuck-download sweep would find it later.
                                 this.client?.removeDownload(download);
 
-                                if (!fs.existsSync(partPath)) {
+                                let stats: fs.Stats;
+                                try {
+                                    stats = await fs.promises.stat(partPath);
+                                } catch (err: any) {
+                                    if (err?.code !== "ENOENT") throw err;
                                     sessionLog(
                                         "SOULSEEK",
                                         "File not found after download",
@@ -1435,7 +1441,6 @@ class SoulseekService {
                                     );
                                     return { success: false, error: "File not written" };
                                 }
-                                const stats = fs.statSync(partPath);
                                 // A file shorter or longer than what arrived was not written whole.
                                 if (BigInt(stats.size) !== download.receivedBytes) {
                                     sessionLog(
@@ -1543,7 +1548,8 @@ class SoulseekService {
 
     /**
      * Removes the `.part` files a crash or kill left under `<music folder>/Singles`, where downloads are written.
-     * Best-effort: whatever cannot be read or removed stays for the next search. Searches starting together share one pass.
+     * Best-effort: whatever cannot be read or removed stays for the next sweep. A folder is walked at most once an hour,
+     * and searches starting inside that hour share the pass (or skip it).
      */
     async sweepStalePartFiles(musicPath: string): Promise<void> {
         let root: string;
@@ -1553,8 +1559,8 @@ class SoulseekService {
             logger.debug(`[Soulseek] Not sweeping partial files: ${(err as Error).message}`);
             return;
         }
-        const running = this.partSweeps.get(root);
-        if (running) return running;
+        const last = this.partSweeps.get(root);
+        if (last && Date.now() - last.at < STALE_PART_AGE_MS) return last.sweep;
         const sweep = (async () => {
             const cutoff = Date.now() - STALE_PART_AGE_MS;
             const pending = [root];
@@ -1580,8 +1586,8 @@ class SoulseekService {
                     logger.debug(`[Soulseek] Could not sweep ${dir}: ${(err as Error).message}`);
                 }
             }
-        })().finally(() => this.partSweeps.delete(root));
-        this.partSweeps.set(root, sweep);
+        })();
+        this.partSweeps.set(root, { at: Date.now(), sweep });
         return sweep;
     }
 
@@ -1909,7 +1915,21 @@ class SoulseekService {
         // Set by the first download that finds the disk full or read-only: no other track or peer can do better.
         let diskFault: string | undefined;
 
+        // Where each song of this run is written. Two songs of one title (an intro on each disc) get "(2)", "(3)"
+        // before the extension, so one never writes over the other; a name is let go when its download fails.
+        const claimedPaths = new Set<string>();
+        const claimPath = (title: string, ext: string): string => {
+            for (let n = 1; ; n++) {
+                const destPath = singlesPath(musicPath, artistName, albumName, n === 1 ? title + ext : `${title} (${n})${ext}`);
+                if (!claimedPaths.has(destPath)) {
+                    claimedPaths.add(destPath);
+                    return destPath;
+                }
+            }
+        };
+
         for (let gi = 0; gi < groupsToTry.length; gi++) {
+            if (signal?.aborted) break;
             const group = groupsToTry[gi];
             const username = group.key.split("|||")[0];
 
@@ -1937,40 +1957,48 @@ class SoulseekService {
             const onAbort = () => { downloadQueue.clear(); };
             signal?.addEventListener('abort', onAbort, { once: true });
 
-            const downloadPromises = Array.from(tracksToDownload.entries()).map(([trackIdx, file]) =>
-                downloadQueue.add(async () => {
-                    if (signal?.aborted || diskFault) return;
+            let downloadSettled: PromiseSettledResult<void>[];
+            try {
+                const downloadPromises = Array.from(tracksToDownload.entries()).map(([trackIdx, file]) =>
+                    downloadQueue.add(async () => {
+                        if (signal?.aborted || diskFault) return;
 
-                    const track = tracks[trackIdx];
-                    const ext = path.extname(file.file);
-                    const destPath = singlesPath(musicPath, artistName, albumName, track.title + ext);
+                        const track = tracks[trackIdx];
+                        const destPath = claimPath(track.title, path.extname(file.file));
+                        let landed = false;
+                        try {
+                            const match: TrackMatch = {
+                                username: file.user,
+                                filename: file.file.replace(/\\/g, "/").split("/").pop() || file.file,
+                                fullPath: file.file,
+                                size: file.size,
+                                bitRate: file.bitrate,
+                                quality: this.getQualityFromFilename(file.file, file.bitrate),
+                                score: 100,
+                            };
 
-                    const match: TrackMatch = {
-                        username: file.user,
-                        filename: file.file.replace(/\\/g, "/").split("/").pop() || file.file,
-                        fullPath: file.file,
-                        size: file.size,
-                        bitRate: file.bitrate,
-                        quality: this.getQualityFromFilename(file.file, file.bitrate),
-                        score: 100,
-                    };
+                            const downloadResult = await this.downloadTrack(match, destPath, 0, true);
+                            if (downloadResult.success) {
+                                landed = true;
+                                results.successful++;
+                                results.files.push(destPath);
+                                downloadedTrackIndices.add(trackIdx);
+                            } else {
+                                groupFailures++;
+                                if (downloadResult.diskFault) diskFault ??= downloadResult.error ?? "disk fault";
+                                results.errors.push(`${track.title}: ${downloadResult.error || "download failed"} (user: ${username})`);
+                                sessionLog("SOULSEEK", `[Album Search] Download failed for "${track.title}" from ${username}: ${downloadResult.error}`, "WARN");
+                            }
+                        } finally {
+                            if (!landed) claimedPaths.delete(destPath);
+                        }
+                    }, signal ? { signal } : {})
+                );
 
-                    const downloadResult = await this.downloadTrack(match, destPath, 0, true);
-                    if (downloadResult.success) {
-                        results.successful++;
-                        results.files.push(destPath);
-                        downloadedTrackIndices.add(trackIdx);
-                    } else {
-                        groupFailures++;
-                        if (downloadResult.diskFault) diskFault ??= downloadResult.error ?? "disk fault";
-                        results.errors.push(`${track.title}: ${downloadResult.error || "download failed"} (user: ${username})`);
-                        sessionLog("SOULSEEK", `[Album Search] Download failed for "${track.title}" from ${username}: ${downloadResult.error}`, "WARN");
-                    }
-                }, signal ? { signal } : {})
-            );
-
-            const downloadSettled = await Promise.allSettled(downloadPromises);
-            signal?.removeEventListener('abort', onAbort);
+                downloadSettled = await Promise.allSettled(downloadPromises);
+            } finally {
+                signal?.removeEventListener('abort', onAbort);
+            }
             for (const result of downloadSettled) {
                 if (result.status === "rejected") {
                     groupFailures++;
@@ -2057,92 +2085,96 @@ class SoulseekService {
 
         const downloadQueue = new PQueue({ concurrency: concurrency ?? 2 });
         const searchQueue = new PQueue({ concurrency: concurrency ?? 2 });
-
-        signal?.addEventListener('abort', () => {
+        const onAbort = () => {
             searchQueue.clear();
             downloadQueue.clear();
-        }, { once: true });
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
 
-        sessionLog(
-            "SOULSEEK",
-            `Searching for ${tracks.length} tracks with concurrency ${concurrency ?? 2}...`
-        );
-        const searchPromises = tracks.map((track) =>
-            searchQueue.add(() =>
-                this.searchTrack(track.artist, track.title, track.album, false, 15000, undefined, signal).then((result) => ({
-                    track,
-                    result,
-                })),
-                signal ? { signal } : {}
-            )
-        );
-        const searchSettled = await Promise.allSettled(searchPromises);
-        const searchResults: Array<{ track: typeof tracks[0]; result: SearchTrackResult }> = [];
-        for (const settled of searchSettled) {
-            if (settled.status === "fulfilled" && settled.value) {
-                searchResults.push(settled.value);
-            } else if (settled.status === "rejected") {
-                results.failed++;
-                results.errors.push(`Search rejected: ${settled.reason}`);
-                sessionLog("SOULSEEK", `Batch search promise rejected: ${settled.reason}`, "ERROR");
-            }
-        }
-
-        const tracksWithMatches = searchResults.filter(
-            (r) => r.result.found && r.result.allMatches.length > 0
-        );
-        sessionLog(
-            "SOULSEEK",
-            `Found matches for ${tracksWithMatches.length}/${tracks.length} tracks, downloading with concurrency ${concurrency ?? 2}...`
-        );
-
-        const noMatchTracks = searchResults.filter(
-            (r) => !r.result.found || r.result.allMatches.length === 0
-        );
-        for (const { track } of noMatchTracks) {
-            results.failed++;
-            results.errors.push(
-                `${track.artist} - ${track.title}: No match found on Soulseek`
+        try {
+            sessionLog(
+                "SOULSEEK",
+                `Searching for ${tracks.length} tracks with concurrency ${concurrency ?? 2}...`
             );
-        }
-
-        const downloadPromises = tracksWithMatches.map(({ track, result }) =>
-            downloadQueue.add(async () => {
-                const downloadResult = await this.downloadWithRetry(
-                    track.artist,
-                    track.title,
-                    track.album,
-                    result.allMatches,
-                    musicPath,
-                    signal
-                );
-                if (downloadResult.success && downloadResult.filePath) {
-                    results.successful++;
-                    results.files.push(downloadResult.filePath);
-                } else {
+            const searchPromises = tracks.map((track) =>
+                searchQueue.add(() =>
+                    this.searchTrack(track.artist, track.title, track.album, false, 15000, undefined, signal).then((result) => ({
+                        track,
+                        result,
+                    })),
+                    signal ? { signal } : {}
+                )
+            );
+            const searchSettled = await Promise.allSettled(searchPromises);
+            const searchResults: Array<{ track: typeof tracks[0]; result: SearchTrackResult }> = [];
+            for (const settled of searchSettled) {
+                if (settled.status === "fulfilled" && settled.value) {
+                    searchResults.push(settled.value);
+                } else if (settled.status === "rejected") {
                     results.failed++;
-                    results.errors.push(
-                        `${track.artist} - ${track.title}: ${downloadResult.error || "Unknown error"}`
-                    );
+                    results.errors.push(`Search rejected: ${settled.reason}`);
+                    sessionLog("SOULSEEK", `Batch search promise rejected: ${settled.reason}`, "ERROR");
                 }
-            }, signal ? { signal } : {})
-        );
-
-        const downloadSettled = await Promise.allSettled(downloadPromises);
-        for (const settled of downloadSettled) {
-            if (settled.status === "rejected") {
-                results.failed++;
-                results.errors.push(`Download rejected: ${settled.reason}`);
-                sessionLog("SOULSEEK", `Batch download promise rejected: ${settled.reason}`, "ERROR");
             }
+
+            const tracksWithMatches = searchResults.filter(
+                (r) => r.result.found && r.result.allMatches.length > 0
+            );
+            sessionLog(
+                "SOULSEEK",
+                `Found matches for ${tracksWithMatches.length}/${tracks.length} tracks, downloading with concurrency ${concurrency ?? 2}...`
+            );
+
+            const noMatchTracks = searchResults.filter(
+                (r) => !r.result.found || r.result.allMatches.length === 0
+            );
+            for (const { track } of noMatchTracks) {
+                results.failed++;
+                results.errors.push(
+                    `${track.artist} - ${track.title}: No match found on Soulseek`
+                );
+            }
+
+            const downloadPromises = tracksWithMatches.map(({ track, result }) =>
+                downloadQueue.add(async () => {
+                    const downloadResult = await this.downloadWithRetry(
+                        track.artist,
+                        track.title,
+                        track.album,
+                        result.allMatches,
+                        musicPath,
+                        signal
+                    );
+                    if (downloadResult.success && downloadResult.filePath) {
+                        results.successful++;
+                        results.files.push(downloadResult.filePath);
+                    } else {
+                        results.failed++;
+                        results.errors.push(
+                            `${track.artist} - ${track.title}: ${downloadResult.error || "Unknown error"}`
+                        );
+                    }
+                }, signal ? { signal } : {})
+            );
+
+            const downloadSettled = await Promise.allSettled(downloadPromises);
+            for (const settled of downloadSettled) {
+                if (settled.status === "rejected") {
+                    results.failed++;
+                    results.errors.push(`Download rejected: ${settled.reason}`);
+                    sessionLog("SOULSEEK", `Batch download promise rejected: ${settled.reason}`, "ERROR");
+                }
+            }
+
+            sessionLog(
+                "SOULSEEK",
+                `Batch complete: ${results.successful} succeeded, ${results.failed} failed`
+            );
+
+            return results;
+        } finally {
+            signal?.removeEventListener('abort', onAbort);
         }
-
-        sessionLog(
-            "SOULSEEK",
-            `Batch complete: ${results.successful} succeeded, ${results.failed} failed`
-        );
-
-        return results;
     }
 
     private async downloadWithRetry(
