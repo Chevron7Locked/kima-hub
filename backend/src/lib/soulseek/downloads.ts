@@ -29,6 +29,8 @@ export type RequestedDownload = {
   stream: stream.PassThrough
   events: SlskDownloadEventEmitter
   requestQueuePosition: () => void
+  /** The first error the stream raised, kept for a consumer that attaches its listener later. */
+  streamError?: Error
 }
 
 type QueuedDownload = Omit<RequestedDownload, 'status'> & {

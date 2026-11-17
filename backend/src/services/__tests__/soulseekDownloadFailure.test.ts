@@ -22,6 +22,10 @@ import type {
 import { FileTransferReader } from "../../lib/soulseek/fileTransfer";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 
+// The Soulseek client under test is built with no sockets: the server and listen connections are stubbed.
+jest.mock("../../lib/soulseek/server");
+jest.mock("../../lib/soulseek/listen");
+
 let before: Record<string, unknown> | null;
 let soulseekService: typeof import("../soulseek").soulseekService;
 let dir: string;
@@ -105,4 +109,41 @@ it("sorts a reset connection as a connection failure and cools the peer down", a
     expect(t.categorize).toHaveBeenCalledTimes(1);
     expect(t.categorize.mock.results[0].value).toEqual({ type: "connection", skipUser: true });
     expect(t.markUserFailed).toHaveBeenCalledWith("peer");
+});
+
+it("keeps a denial that lands before the service listens, and fails the download with its reason", async () => {
+    expectLog("error");
+    const { SlskClient } = await import("../../lib/soulseek/p2p-client");
+    const real = new SlskClient();
+    const peer = { username: "denier", send: jest.fn(), destroy: jest.fn() };
+    real.peers.set("denier", peer as any);
+    const service = soulseekService as any;
+    service.client = {
+        download: async (username: string, filename: string) => {
+            const download = await real.download(username, filename);
+            // the peer refuses, and the stream's error fires before downloadTrack has attached its listener
+            real.peerMessages.emit("message", { kind: "uploadDenied", filename, reason: "Banned" }, peer as any);
+            await tick();
+            return download;
+        },
+        removeDownload: (d: any) => real.removeDownload(d),
+    };
+    jest.spyOn(service, "ensureConnected").mockResolvedValue(undefined);
+    const markUserFailed = jest.spyOn(service, "markUserFailed").mockResolvedValue(undefined);
+    const categorize = jest.spyOn(service, "categorizeError");
+
+    try {
+        const result = await service.downloadTrack(
+            { username: "denier", filename: "a.flac", fullPath: "a.flac", size: 10, quality: "flac", score: 10 },
+            path.join(dir, "denied.flac"),
+        );
+        expect(result).toEqual({ success: false, error: "Upload denied: Banned" });
+        expect(categorize).toHaveBeenCalledTimes(1);
+        expect((categorize.mock.calls[0][0] as Error).message).toBe("Upload denied: Banned");
+        expect(real.downloads).toHaveLength(0);
+        // sorted like a live error: the peer is cooled down exactly when categorizeError says to skip it
+        expect(markUserFailed.mock.calls.length).toBe(categorize.mock.results[0].value.skipUser ? 1 : 0);
+    } finally {
+        real.destroy();
+    }
 });

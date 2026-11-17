@@ -264,7 +264,8 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
             const download = findPendingDownload(this.downloads, peer.username, msg.filename) as any
 
             if (!download) {
-              logger.error(`[Soulseek] No download found for ${JSON.stringify(msg)}`)
+              // A queue place after the download settled is routine.
+              logger.debug(`[Soulseek] No download found for ${JSON.stringify(msg)}`)
               return
             }
 
@@ -295,6 +296,8 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
               }
               download.events.emit('status', 'denied', makeDownloadStatusData(denied))
               this.downloads = this.downloads.filter((d) => d !== download)
+            } else {
+              logger.debug(`[Soulseek] Ignored a denial with no download that can take it: ${JSON.stringify(msg)}`)
             }
             break
           }
@@ -431,6 +434,12 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
       requestQueuePosition: () => peer.send('placeInQueueRequest', { filename }),
       startedAt: Date.now(),
     }
+
+    // Holds the stream's first error from creation: a destroy with an error and no listener is an
+    // uncaught exception, and a denial can land before the consumer attaches its own listener.
+    download.stream.on('error', (error) => {
+      download.streamError ??= error
+    })
 
     this.downloads.push(download)
     download.events.emit('status', 'requested', makeDownloadStatusData(download))

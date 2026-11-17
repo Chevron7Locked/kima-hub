@@ -1354,7 +1354,7 @@ class SoulseekService {
                         });
                     });
 
-                    download.stream.on("error", async (err: Error) => {
+                    const onStreamError = async (err: Error) => {
                         if (resolved) return;
                         clearTimeout(timeoutId);
                         cleanup();
@@ -1377,7 +1377,10 @@ class SoulseekService {
                             }
                         }
                         resolve({ success: false, error: err.message });
-                    });
+                    };
+                    download.stream.on("error", onStreamError);
+                    // An error the stream raised before this listener (a denial) is handled like a live one.
+                    if (download.streamError) void onStreamError(download.streamError);
 
                     writeStream.on("error", async (err: Error) => {
                         if (resolved) return;
