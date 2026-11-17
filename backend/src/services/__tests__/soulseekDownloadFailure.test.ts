@@ -695,15 +695,19 @@ describe("stale partial files under the downloads folder", () => {
         const fresh = path.join(album, "b.flac.22222222-2222-2222-2222-222222222222.part");
         const song = path.join(album, "c.flac");
         const oldSong = path.join(album, "d.flac");
-        for (const f of [old, fresh, song, oldSong]) fs.writeFileSync(f, "x");
+        // a file of someone else's that merely ends in .part
+        const foreign = path.join(album, "notes.part");
+        for (const f of [old, fresh, song, oldSong, foreign]) fs.writeFileSync(f, "x");
         hoursAgo(old, 2);
         hoursAgo(oldSong, 2);
-        return { old, fresh, song, oldSong };
+        hoursAgo(foreign, 2);
+        return { old, fresh, song, oldSong, foreign };
     }
 
-    it("removes .part files older than an hour, and nothing else", async () => {
-        const { old, fresh, song, oldSong } = seed();
+    it("removes the partial files it wrote that are older than an hour, and nothing else", async () => {
+        const { old, fresh, song, oldSong, foreign } = seed();
         await service().sweepStalePartFiles(dir);
+        expect(fs.existsSync(foreign)).toBe(true);
         expect(fs.existsSync(old)).toBe(false);
         expect(fs.existsSync(fresh)).toBe(true);
         expect(fs.existsSync(song)).toBe(true);

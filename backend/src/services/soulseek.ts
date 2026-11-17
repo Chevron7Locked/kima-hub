@@ -76,6 +76,9 @@ const LOCAL_FAULT_CODES = new Set(["EMFILE", "ENFILE", "EACCES", "EPERM", "ENAME
 /** A partial file this old cannot belong to a download still going: a download that stalls ends within minutes. */
 const STALE_PART_AGE_MS = 60 * 60 * 1000;
 
+/** The name a try's partial file ends in: `.<uuid>.part`. A file someone else named `.part` is not ours to sweep. */
+const OWN_PART_NAME = /\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.part$/i;
+
 /** `{ diskFault: true }` for an error whose code says the disk is full or read-only, else nothing. */
 const diskFaultOf = (err: { code?: string } | undefined) =>
     DISK_FAULT_CODES.has(err?.code ?? "") ? { diskFault: true } : {};
@@ -1554,14 +1557,14 @@ class SoulseekService {
         if (running) return running;
         const sweep = (async () => {
             const cutoff = Date.now() - STALE_PART_AGE_MS;
-            const folders = [root];
-            for (let dir = folders.pop(); dir !== undefined; dir = folders.pop()) {
+            const pending = [root];
+            for (let dir = pending.pop(); dir !== undefined; dir = pending.pop()) {
                 try {
                     for (const entry of await fs.promises.readdir(dir, { withFileTypes: true })) {
                         const file = path.join(dir, entry.name);
                         if (entry.isDirectory()) {
-                            folders.push(file);
-                        } else if (entry.isFile() && entry.name.endsWith(".part")) {
+                            pending.push(file);
+                        } else if (entry.isFile() && OWN_PART_NAME.test(entry.name)) {
                             try {
                                 if ((await fs.promises.stat(file)).mtimeMs < cutoff) {
                                     await fs.promises.rm(file, { force: true });
