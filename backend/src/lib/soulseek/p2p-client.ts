@@ -9,7 +9,12 @@ import type TypedEventEmitter from 'typed-emitter'
 import type { Address } from './common'
 import type { Download, RequestedDownload, SlskDownloadEventEmitter } from './downloads'
 import { makeDownloadStatusData } from './downloads'
-import { acceptTransferRequest, FileTransferReader, findAwaitingDownload } from './fileTransfer'
+import {
+  acceptTransferRequest,
+  FileTransferReader,
+  findAwaitingDownload,
+  findDownloadForOffer,
+} from './fileTransfer'
 import type { SlskListenEvents } from './listen'
 import { SlskListen } from './listen'
 import { ConnectionType, TransferDirection, UserStatus } from './messages/common'
@@ -234,18 +239,16 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
         switch (msg.kind) {
           case 'transferRequest': {
             if (msg.direction === TransferDirection.Upload) {
-              const existingDownloadIndex = this.downloads.findIndex(
-                (d) => d.username === peer.username && d.filename === msg.filename
-              )
+              // A live request is preferred over a stale entry for the same file.
+              const download = findDownloadForOffer(this.downloads, peer.username, msg.filename)
 
-              if (existingDownloadIndex === -1) {
+              if (!download) {
                 logger.error(`[Soulseek] No download found for ${JSON.stringify(msg)}`)
                 return
               }
 
               // A repeat offer for a transfer already under way is not answered.
-              const offer = { token: msg.token, size: msg.size }
-              if (!acceptTransferRequest(this.downloads[existingDownloadIndex], offer)) return
+              if (!acceptTransferRequest(download, { token: msg.token, size: msg.size })) return
 
               peer.send('transferResponse', {
                 token: msg.token,

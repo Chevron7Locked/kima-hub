@@ -10,6 +10,7 @@ import {
   acceptTransferRequest,
   FileTransferReader,
   findAwaitingDownload,
+  findDownloadForOffer,
 } from "../fileTransfer";
 
 const TOKEN = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
@@ -288,6 +289,48 @@ describe("FileTransferReader", () => {
       expect(errors.map((e) => e.message)).toEqual(["reset"]);
     });
 
+    it("a connection that failed keeps its real cause: close after fail adds no generic error", async () => {
+      // stream with a listener: the stream carries the cause, the download's events are not told twice
+      const d = makeDownload(10n);
+      const t = setup(d);
+      const streamErrors: Error[] = [];
+      const eventErrors: Error[] = [];
+      d.stream.on("error", (e) => streamErrors.push(e));
+      d.events.on("error", (e) => eventErrors.push(e));
+      t.reader.push(Buffer.concat([TOKEN, Buffer.from("abc")]));
+      t.reader.fail(new Error("read ECONNRESET"));
+      t.reader.close();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(streamErrors.map((e) => e.message)).toEqual(["read ECONNRESET"]);
+      expect(eventErrors).toEqual([]);
+      expect(t.settled).toEqual([d]);
+    });
+
+    it("a connection that failed tells the download's listeners the real cause when the stream has none", async () => {
+      const d = makeDownload(10n);
+      const t = setup(d);
+      const eventErrors: Error[] = [];
+      d.events.on("error", (e) => eventErrors.push(e));
+      t.reader.push(Buffer.concat([TOKEN, Buffer.from("abc")]));
+      t.reader.fail(new Error("read ECONNRESET"));
+      t.reader.close();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(eventErrors.map((e) => e.message)).toEqual(["read ECONNRESET"]);
+      expect(d.stream.destroyed).toBe(true);
+    });
+
+    it("an error after the transfer is whole changes nothing", async () => {
+      const d = makeDownload(3n);
+      const t = setup(d);
+      const eventErrors: Error[] = [];
+      d.events.on("error", (e) => eventErrors.push(e));
+      d.stream.on("error", (e) => eventErrors.push(e));
+      t.reader.push(Buffer.concat([TOKEN, Buffer.from("abc")]));
+      t.reader.fail(new Error("read ECONNRESET"));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(eventErrors).toEqual([]);
+    });
+
     it("leaves a completed download alone", () => {
       const d = makeDownload(3n);
       const t = setup(d);
@@ -364,8 +407,8 @@ describe("acceptTransferRequest", () => {
     }
   });
 
-  it("leaves a download alone once it is connected, downloading or complete", () => {
-    for (const status of ["connected", "downloading", "complete"] as const) {
+  it("leaves a download alone once it is downloading or complete", () => {
+    for (const status of ["downloading", "complete"] as const) {
       const d = { ...makeDownload(5n), status } as unknown as Download;
       const statuses: string[] = [];
       d.events.on("status", (s) => statuses.push(s));
@@ -377,5 +420,72 @@ describe("acceptTransferRequest", () => {
       expect((d as DownloadWithToken).totalBytes).toBe(5n);
       expect(statuses).toEqual([]);
     }
+  });
+
+  it("takes a newer offer on a connected download that has received nothing", () => {
+    const d = makeDownload(5n);
+    const statuses: string[] = [];
+    d.events.on("status", (s) => statuses.push(s));
+    expect(acceptTransferRequest(d, { token: "00000001", size: 9n })).toBe(
+      true,
+    );
+    expect(d.status).toBe("connected");
+    expect(d.token).toBe("00000001");
+    expect(d.totalBytes).toBe(9n);
+    expect(statuses).toEqual(["connected"]);
+  });
+
+  it("leaves a connected download alone once it has received bytes", () => {
+    const d = makeDownload(5n);
+    d.receivedBytes = 2n;
+    expect(acceptTransferRequest(d, { token: "00000001", size: 9n })).toBe(
+      false,
+    );
+    expect(d.token).toBe(TOKEN_HEX);
+    expect(d.totalBytes).toBe(5n);
+  });
+});
+
+describe("findDownloadForOffer", () => {
+  const make = (over: Record<string, unknown>): Download =>
+    ({ ...makeDownload(5n), ...over }) as unknown as Download;
+
+  it("finds the download for the peer and file, or nothing", () => {
+    const d = make({});
+    expect(findDownloadForOffer([d], "peer", "a.flac")).toBe(d);
+    expect(findDownloadForOffer([d], "other", "a.flac")).toBeUndefined();
+    expect(findDownloadForOffer([d], "peer", "b.flac")).toBeUndefined();
+  });
+
+  it("prefers a download that can take the offer over a stale one for the same file", () => {
+    const stale = make({ status: "downloading" });
+    const live = make({ status: "queued" });
+    expect(findDownloadForOffer([stale, live], "peer", "a.flac")).toBe(live);
+    const requested = make({ status: "requested" });
+    expect(
+      findDownloadForOffer(
+        [make({ status: "complete" }), requested],
+        "peer",
+        "a.flac",
+      ),
+    ).toBe(requested);
+  });
+
+  it("counts a connected download with no bytes as able to take an offer", () => {
+    const stale = make({ status: "complete" });
+    const waiting = make({});
+    expect(findDownloadForOffer([stale, waiting], "peer", "a.flac")).toBe(
+      waiting,
+    );
+    const partial = make({ receivedBytes: 2n });
+    expect(findDownloadForOffer([partial, waiting], "peer", "a.flac")).toBe(
+      waiting,
+    );
+  });
+
+  it("falls back to the first match when none can take it", () => {
+    const first = make({ status: "complete" });
+    const second = make({ status: "downloading" });
+    expect(findDownloadForOffer([first, second], "peer", "a.flac")).toBe(first);
   });
 });

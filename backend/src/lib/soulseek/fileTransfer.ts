@@ -22,13 +22,24 @@ export type FileTransferPort = {
   resume: () => void;
 };
 
+/**
+ * Whether a download still waits for the peer's offer. A connected download that has received
+ * nothing counts: the peer offering again means its earlier file connection failed.
+ */
+function awaitsOffer(download: Download): boolean {
+  return (
+    download.status === "requested" ||
+    download.status === "queued" ||
+    (download.status === "connected" && download.receivedBytes === 0n)
+  );
+}
+
 /** The peer's transfer offer for a download. Only a download still waiting for one takes it; a repeat mid-transfer must not reset it. */
 export function acceptTransferRequest(
   download: Download,
   offer: { token: string; size: bigint },
 ): boolean {
-  if (download.status !== "requested" && download.status !== "queued")
-    return false;
+  if (!awaitsOffer(download)) return false;
   const dl = download as unknown as ConnectedDownload;
   dl.status = "connected";
   dl.queuePosition = 0;
@@ -36,6 +47,18 @@ export function acceptTransferRequest(
   dl.totalBytes = offer.size;
   dl.events.emit("status", "connected", makeDownloadStatusData(dl));
   return true;
+}
+
+/** The download a peer's offer is for: one that can take it before a stale one for the same file. */
+export function findDownloadForOffer(
+  downloads: Download[],
+  username: string,
+  filename: string,
+): Download | undefined {
+  const named = downloads.filter(
+    (d) => d.username === username && d.filename === filename,
+  );
+  return named.find(awaitsOffer) ?? named[0];
 }
 
 /** The download a peer's transfer token belongs to: only one still waiting for its transfer. */
@@ -63,6 +86,7 @@ export class FileTransferReader {
   private refused = false;
   private done = false;
   private paused = false;
+  private failed = false;
 
   constructor(private readonly port: FileTransferPort) {}
 
@@ -107,30 +131,45 @@ export class FileTransferReader {
   }
 
   /**
-   * The connection failed: the download's stream is destroyed with the error. A stream with no
-   * 'error' listener would throw it as an uncaught exception, so then it is destroyed bare.
+   * The connection failed with `error`, the real cause. The stream carries it when something
+   * listens there; otherwise the download's own listeners are told. Either way the close that
+   * follows adds no generic error over it. A whole transfer is not failed by a late error.
    */
   fail(error: Error): void {
-    const stream = this.download?.stream;
-    if (!stream) return;
-    stream.destroy(stream.listenerCount("error") > 0 ? error : undefined);
+    const download = this.download;
+    if (!download || this.failed || this.done) return;
+    this.failed = true;
+    this.port.settle(download);
+    if (download.stream.listenerCount("error") === 0)
+      this.tell(download, error);
+    this.destroyStream(download, error);
   }
 
   /** The connection closed: a transfer cut short fails, and a whole one's stream ends. */
   close(): void {
     const download = this.download;
-    if (!download) return;
+    if (!download || this.failed) return;
     if (download.status === "complete") {
       if (!download.stream.destroyed) download.stream.end();
       return;
     }
     const error = new Error("Connection closed before transfer completed");
-    // An EventEmitter throws on 'error' with no listener; a closing connection must not.
-    if (download.events.listenerCount("error") > 0)
-      download.events.emit("error", error);
+    this.tell(download, error);
     this.port.settle(download);
     // A destroyed stream, not an ended one: a consumer must not take the cut-short file as whole.
-    this.fail(error);
+    this.destroyStream(download, error);
+  }
+
+  /** An EventEmitter throws on 'error' with no listener; a failing connection must not. */
+  private tell(download: DownloadWithToken, error: Error): void {
+    if (download.events.listenerCount("error") > 0)
+      download.events.emit("error", error);
+  }
+
+  /** A stream with no 'error' listener would throw the error as an uncaught exception, so then it is destroyed bare. */
+  private destroyStream(download: DownloadWithToken, error: Error): void {
+    const stream = download.stream;
+    stream.destroy(stream.listenerCount("error") > 0 ? error : undefined);
   }
 
   /** File bytes from a peer go to its download; at the full size the transfer ends. */
