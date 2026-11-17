@@ -34,7 +34,11 @@ function awaitsOffer(download: Download): boolean {
   );
 }
 
-/** The peer's transfer offer for a download. Only a download still waiting for one takes it; a repeat mid-transfer must not reset it. */
+/**
+ * The peer's transfer offer for a download. Only a download still waiting for one takes it: requested,
+ * queued, or connected with nothing received (a re-offer replaces the token). A repeat once bytes
+ * are arriving must not reset it.
+ */
 export function acceptTransferRequest(
   download: Download,
   offer: { token: string; size: bigint },
@@ -132,7 +136,9 @@ export class FileTransferReader {
 
   /**
    * The connection failed with `error`, the real cause. The stream carries it when something
-   * listens there; otherwise the download's own listeners are told. Either way the close that
+   * listens there (`services/soulseek.ts` sorts failures on the stream's error, and a download's own
+   * 'error' handler would reach it first and skip the sorting); otherwise the download's own
+   * listeners are told. Either way the close that
    * follows adds no generic error over it. A whole transfer is not failed by a late error.
    */
   fail(error: Error): void {
@@ -154,8 +160,8 @@ export class FileTransferReader {
       return;
     }
     const error = new Error("Connection closed before transfer completed");
-    this.tell(download, error);
     this.port.settle(download);
+    this.tell(download, error);
     // A destroyed stream, not an ended one: a consumer must not take the cut-short file as whole.
     this.destroyStream(download, error);
   }
