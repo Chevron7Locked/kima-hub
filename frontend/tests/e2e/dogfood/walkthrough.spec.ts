@@ -7,7 +7,7 @@ import { test, expect, devices, Browser, Page, BrowserContext, Locator } from "@
 import { DogfoodSession, navigateByClick, openAlbumById, playableRows } from "./session";
 import { outsideFailure, pickUnfollowedShow } from "./podcastReplies";
 import { readLibraryFacts, assertReady, coverageGaps, LibraryFacts } from "./preflight";
-import { PLAYER, escapeRegExp, readPlayer, settle, softwareWebGL } from "../fixtures/shared";
+import { PLAYER, escapeRegExp, pausesSeen, readPlayer, settle, softwareWebGL, watchPauses } from "../fixtures/shared";
 import { requireBaseUrl } from "../fixtures/target";
 import { withApiKey } from "./apiKey";
 import { STORAGE_KEYS } from "../../../lib/storage-keys";
@@ -111,6 +111,7 @@ test.describe("Dogfood walkthrough", () => {
         ).toBeTruthy();
 
         context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+        await watchPauses(context);
         page = await context.newPage();
         session = new DogfoodSession(page, baseUrl);
 
@@ -260,7 +261,7 @@ test.describe("Dogfood walkthrough", () => {
             await page.waitForTimeout(2500);
             const second = await read();
 
-            expect(second.paused, "the audio element is paused while the UI shows Pause").toBe(false);
+            expect(second.paused, `the audio element is paused after it started playing${await pausesSeen(page)}`).toBe(false);
             expect(
                 second.t,
                 `audio did not advance (${first.t}s -> ${second.t}s)`,
@@ -498,7 +499,7 @@ test.describe("Dogfood walkthrough", () => {
             const a = await read();
             await page.waitForTimeout(2500);
             const b = await read();
-            expect(b.paused, "resume clicked but the audio is still paused").toBe(false);
+            expect(b.paused, `resume clicked but the audio is still paused${await pausesSeen(page)}`).toBe(false);
             expect(b.t, `after resuming from a 15s idle pause, position did not advance (${a.t}s -> ${b.t}s)`).toBeGreaterThan(a.t);
             return { idleSeconds: 15, resumedAt: b.t.toFixed(2) };
         });
@@ -531,30 +532,31 @@ test.describe("Dogfood walkthrough", () => {
             // After a gapless swap the old element (data-kima-player="main") has its
             // src removed, so we must find the element that actually has the new
             // track's URL -- that's the active element regardless of swap.
-            // Also track WHICH element was found so we check the right one later.
             const activeInfo = await page.evaluate(({ sel, before }) => {
                 const main = document.querySelector(sel) as HTMLAudioElement | null;
-                if (main?.src && main.src !== before) return { src: main.src, paused: main.paused, which: "main" };
+                if (main?.src && main.src !== before) return { src: main.src };
                 const next = document.querySelector('[data-kima-player="next"]') as HTMLAudioElement | null;
-                if (next?.src && next.src !== before) return { src: next.src, paused: next.paused, which: "next" };
-                return { src: "", paused: true, which: "none" };
+                if (next?.src && next.src !== before) return { src: next.src };
+                return { src: "" };
             }, { sel: PLAYER, before: srcBefore });
             expect(activeInfo.src, 'the active element should have a non-empty src after auto-advance').not.toBe('');
 
-            // Use the correct selector based on which element was found
-            const playSel = activeInfo.which === 'next' ? '[data-kima-player="next"]' : PLAYER;
-
-            // Wait for playback to actually start on the correct element
+            // Follow the new track by its address, not by role: the swap can flip main and next while we wait.
+            const readNewTrack = () =>
+                page.evaluate((src) => {
+                    const el = [...document.querySelectorAll<HTMLAudioElement>("[data-kima-player]")].find((a) => a.src === src);
+                    return { t: el?.currentTime ?? -1, paused: el?.paused ?? true };
+                }, activeInfo.src);
             const playDeadline = Date.now() + 10_000;
             let t0 = -1;
             let startedPlaying = false;
             while (Date.now() < playDeadline) {
-                const { t, paused: p } = await readPlayer(page, playSel);
+                const { t, paused: p } = await readNewTrack();
                 if (t0 === -1) { t0 = t; }
                 else if (!p && t > t0) { startedPlaying = true; break; }
                 await page.waitForTimeout(500);
             }
-            expect(startedPlaying, "the next track did not start playing after auto-advance").toBe(true);
+            expect(startedPlaying, `the next track did not start playing after auto-advance${await pausesSeen(page)}`).toBe(true);
             return { advanced: true };
         });
 
