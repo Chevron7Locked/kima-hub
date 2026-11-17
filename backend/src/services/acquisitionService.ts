@@ -219,6 +219,7 @@ class AcquisitionService {
     private async importStopped(context: AcquisitionContext): Promise<boolean> {
         if (context.signal?.aborted) return true;
         if (context.stillOpen && !(await context.stillOpen())) return true;
+        // A stop that landed during the check above also aborts the signal, so it is read again.
         return !!context.signal?.aborted;
     }
 

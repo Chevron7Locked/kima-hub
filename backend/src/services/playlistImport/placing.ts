@@ -1098,8 +1098,9 @@ class PlaylistImportService {
     try {
       await redisClient.del(IMPORT_JOB_KEY(jobId));
       await redisClient.del(previewKey(jobId));
-    } catch {
-      // Non-critical
+    } catch (error) {
+      // Non-critical: the keys expire on their own.
+      logger.warn(`Could not remove import ${jobId} from Redis:`, error);
     }
 
     // Clean up job logger
