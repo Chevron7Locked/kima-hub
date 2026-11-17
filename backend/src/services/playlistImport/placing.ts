@@ -25,7 +25,7 @@ import { nameKey } from "../nameFold";
 import type { ImportJob, ImportPreview, AlbumToDownload } from "./types";
 import { readMusicLink, musicLinkName, M3UEntry, M3UNothingMatched } from "./reading";
 import { previewOfTracklist, pendingTracksOf, matchEntries, matchM3UEntries } from "./matching";
-import { jobLoggers, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
+import { jobLoggers, trackImportSearches, untrackImportSearches, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
 
 /** Where an import's preview waits for the worker that runs the import. */
 const previewKey = (importJobId: string) => `import:preview:${importJobId}`;
@@ -77,7 +77,6 @@ const PLAYLIST_HINTS: Record<MusicPlatform, string> = {
 const NOT_OVERWRITTEN_BY_FAILURE: ImportJob["status"][] = ["completed", "cancelled"];
 
 class PlaylistImportService {
-  private activeImportControllers = new Map<string, AbortController>();
 
   async startImport(
     userId: string,
@@ -163,7 +162,7 @@ class PlaylistImportService {
 
       abortController = new AbortController();
       const { signal } = abortController;
-      this.activeImportControllers.set(job.id, abortController);
+      trackImportSearches(job.id, abortController);
 
       try {
         if (albumMbidsToDownload.length > 0) {
@@ -379,7 +378,7 @@ class PlaylistImportService {
         // No downloads needed - all tracks already in library
         await this.buildPlaylist(job);
       } finally {
-        this.activeImportControllers.delete(job.id);
+        untrackImportSearches(job.id);
       }
     } catch (error: any) {
       if (error?.name === 'AbortError' || abortController?.signal.aborted) {
@@ -1056,15 +1055,9 @@ class PlaylistImportService {
    */
   private async cleanupImportArtifacts(jobId: string): Promise<void> {
     await stopImportDownloadsAtSource(jobId);
-    await prisma.downloadJob.deleteMany({
-      where: {
-        metadata: {
-          path: ["spotifyImportJobId"],
-          equals: jobId,
-        },
-      },
-    });
 
+    // The import goes first: the downloads' removal (below) settles the running ones, and a completion check that
+    // finds the import gone leaves it alone, so it cannot fail it and tell the person of an import they removed.
     try {
       await prisma.spotifyImportJob.delete({ where: { id: jobId } });
     } catch (err: any) {
@@ -1078,6 +1071,14 @@ class PlaylistImportService {
     } catch {
       // Non-critical
     }
+
+    // The download module's own removal: the rows go in this import's lane, after the completion checks already queued
+    // for it have read them, so a check cannot find the import's downloads half gone. It does not wait for them.
+    const downloads = await prisma.downloadJob.findMany({
+      where: { metadata: { path: ["spotifyImportJobId"], equals: jobId } },
+      select: { id: true },
+    });
+    await jobMoves.remove(downloads);
 
     // Clean up job logger
     jobLoggers.delete(jobId);
@@ -1115,10 +1116,6 @@ class PlaylistImportService {
       await this.cleanupImportArtifacts(jobId);
       return { playlistCreated: false, playlistId: null, tracksMatched: 0 };
     }
-
-    // Abort in-flight searches and downloads
-    const controller = this.activeImportControllers.get(jobId);
-    if (controller) controller.abort();
 
     // Emit cancelled SSE event before cleanup so frontend gets notified
     eventBus.emit({

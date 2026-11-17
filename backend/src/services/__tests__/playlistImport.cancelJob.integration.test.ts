@@ -7,6 +7,7 @@ import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { playlistImportService } from "../playlistImport";
 import { simpleDownloadManager } from "../simpleDownloadManager";
+import * as downloadJobs from "../downloads/jobs";
 import { logger } from "../../utils/logger";
 import { useLidarrCancelScenario } from "../../__tests__/helpers/lidarrCancelScenario";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -36,8 +37,11 @@ const downloadJob = (importJobId: string, status: string, extra: Record<string, 
         },
     });
 
-const downloadRows = (importJobId: string) =>
-    prisma.downloadJob.count({ where: { metadata: { path: ["spotifyImportJobId"], equals: importJobId } } });
+// The rows go in the import's lane, after the checks queued there: count them once that has run.
+const downloadRows = async (importJobId: string) => {
+    await downloadJobs.whenIdle();
+    return prisma.downloadJob.count({ where: { metadata: { path: ["spotifyImportJobId"], equals: importJobId } } });
+};
 
 beforeAll(async () => {
     await waitForRedisReady();

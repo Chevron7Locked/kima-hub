@@ -8,6 +8,27 @@ import * as jobMoves from "../downloads/jobs";
 import type { ImportJob } from "./types";
 export const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
 
+/** The controller each import running in this process hands its searches: aborting it stops them starting downloads. */
+const importSearches = new Map<string, AbortController>();
+
+export function trackImportSearches(importJobId: string, controller: AbortController): void {
+  importSearches.set(importJobId, controller);
+}
+
+export function untrackImportSearches(importJobId: string): void {
+  importSearches.delete(importJobId);
+}
+
+/**
+ * The one place an import's running searches are stopped. Every way an import ends reaches it: a write that closes the
+ * import (`updateImportJobFields` with a failed or cancelled status) and stopping its downloads at the source
+ * (`stopImportDownloadsAtSource`, which a cancel, a clean-up and a failure that removes the import all pass through).
+ * Safe to reach twice, and for an import not running in this process.
+ */
+function abortImportSearches(importJobId: string): void {
+  importSearches.get(importJobId)?.abort();
+}
+
 export const IMPORT_JOB_KEY = (id: string) => `import:job:${id}`;
 export const IMPORT_JOB_TTL = 24 * 60 * 60; // 24 hours
 /**
@@ -81,6 +102,7 @@ export async function updateImportJobFields(
     data: { ...data, updatedAt: new Date() },
   });
   if (count === 0) return false;
+  if (data.status === "failed" || data.status === "cancelled") abortImportSearches(importJobId);
   try {
     await publishImportJob(importJobId);
   } catch (error) {
@@ -93,7 +115,7 @@ export async function updateImportJobFields(
 export const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed", "cancelled"];
 
 /**
- * An import is over (failed or cancelled by its person): its downloads still pending or processing are stopped at the
+ * An import is over (failed or cancelled by its person): its running searches are aborted, and its downloads still pending or processing are stopped at the
  * source, through the download manager's own cancel step, as a single download's cancel does. Lidarr's queue entry goes
  * and the album is no longer watched, except what another live job (another import's, a person's own download) still
  * shares. Nobody is told: the import's one notice is its own. A Lidarr that cannot be reached is logged, not raised:
@@ -101,6 +123,7 @@ export const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed
  * ones are left alone. The manager is loaded when called, as it and the import load each other.
  */
 export async function stopImportDownloadsAtSource(importJobId: string): Promise<{ id: string }[]> {
+  abortImportSearches(importJobId);
   const unfinished = await prisma.downloadJob.findMany({
     where: { metadata: { path: ["spotifyImportJobId"], equals: importJobId }, status: { in: jobMoves.ACTIVE_STATUSES } },
     select: { id: true, status: true, lidarrRef: true, lidarrAlbumId: true },
