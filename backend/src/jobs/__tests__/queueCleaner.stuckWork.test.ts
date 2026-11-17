@@ -9,6 +9,7 @@ import { invalidateSystemSettingsCache } from "../../utils/systemSettings";
 import { eventBus, type SSEEvent } from "../../services/eventBus";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { queueCleaner } from "../queueCleaner";
+import * as downloadJobs from "../../services/downloads/jobs";
 
 jest.setTimeout(30_000);
 
@@ -83,5 +84,48 @@ it("closes a Discover batch left downloading past its two-hour limit, with no Li
     expect(await prisma.discoveryBatch.findUniqueOrThrow({ where: { id: batch.id } })).toMatchObject({
         status: "failed",
         errorMessage: "Batch timed out after 2 hours",
+    });
+});
+
+describe("a cancelled import whose clean-up stopped part-way", () => {
+    const cancelledImport = async (minutesAgo: number) => {
+        const job = await prisma.spotifyImportJob.create({
+            data: {
+                userId: USER, spotifyPlaylistId: "37i9dQZF1DXcBWIGoYBM5M", playlistName: "Today's Top Hits",
+                status: "cancelled", albumsTotal: 1, tracksTotal: 1, pendingTracks: [],
+            },
+        });
+        await prisma.$executeRaw`UPDATE "SpotifyImportJob" SET "updatedAt" = now() - make_interval(mins => ${minutesAgo}::int) WHERE id = ${job.id}`;
+        await prisma.downloadJob.create({
+            data: {
+                id: `${job.id}-dl`, userId: USER, subject: "Album", type: "album", status: "failed",
+                metadata: { downloadType: "spotify_import", spotifyImportJobId: job.id },
+            },
+        });
+        return job;
+    };
+
+    afterEach(async () => {
+        await prisma.downloadJob.deleteMany({ where: { userId: USER } });
+        await prisma.spotifyImportJob.deleteMany({ where: { userId: USER } });
+    });
+
+    it("finishes the clean-up once it has sat for a while", async () => {
+        const job = await cancelledImport(30);
+
+        await queueCleaner.recoverStuckWork();
+        await downloadJobs.whenIdle();
+
+        expect(await prisma.spotifyImportJob.findUnique({ where: { id: job.id } })).toBeNull();
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
+    });
+
+    it("leaves a cancel that is still being carried out", async () => {
+        const job = await cancelledImport(0);
+
+        await queueCleaner.recoverStuckWork();
+        await downloadJobs.whenIdle();
+
+        expect(await prisma.spotifyImportJob.findUnique({ where: { id: job.id } })).not.toBeNull();
     });
 });

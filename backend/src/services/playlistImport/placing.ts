@@ -49,6 +49,15 @@ const PREVIEW_NOT_KEPT = "The import could not be started because its preview co
 
 /** Thrown inside the playlist transaction when the job no longer takes a playlist, so the transaction rolls back. */
 class PlaylistNotWanted extends Error {}
+
+/**
+ * A stopped import ends its work quietly, but an error that is not the stop itself (an AbortError) may be a real
+ * fault met on the way out, so it is logged with the import's id.
+ */
+function warnOfErrorAfterStop(importJobId: string, error: unknown): void {
+  if ((error as { name?: string } | null)?.name === "AbortError") return;
+  logger.warn(`[Spotify Import] Job ${importJobId}: stopped, and its work ended with an error:`, error);
+}
 /** One build of an import at a time, whichever process runs it. */
 const IMPORT_BUILD_LOCK_KEY = (id: string) => `import-build:${id}`;
 const IMPORT_BUILD_LOCK_TTL_MS = 2 * 60 * 1000;
@@ -339,7 +348,10 @@ class PlaylistImportService {
                   } (success=${result.success ? "yes" : "no"})`,
                 );
               } catch (error: any) {
-                if (error?.name === 'AbortError' || signal.aborted) return;
+                if (error?.name === 'AbortError' || signal.aborted) {
+                  warnOfErrorAfterStop(job.id, error);
+                  return;
+                }
                 jobLogger?.error(
                   `[Spotify Import] Failed: ${album.artistName} - ${album.albumName}: ${error.message}`,
                 );
@@ -404,6 +416,7 @@ class PlaylistImportService {
       }
     } catch (error: any) {
       if (error?.name === 'AbortError' || abortController?.signal.aborted) {
+        warnOfErrorAfterStop(job.id, error);
         jobLogger?.info(`[Spotify Import] Job ${job.id}: import cancelled, returning cleanly`);
         return;
       }
@@ -1116,8 +1129,10 @@ class PlaylistImportService {
     playlistId: string | null;
     tracksMatched: number;
   }> {
-    const job = await getImportJob(jobId);
-    if (!job) {
+    // The stored status decides, not the cached copy `getImportJob` may hand back: a cancel that went by a stale copy
+    // could clean away an import that has completed. An import only the cache knows (not yet stored) is still cancelled.
+    const stored = await prisma.spotifyImportJob.findUnique({ where: { id: jobId } });
+    if (!stored && !(await getImportJob(jobId))) {
       throw new Error("Import job not found");
     }
 
@@ -1126,16 +1141,16 @@ class PlaylistImportService {
     jobLogger?.info(`Job cancelled by user`);
 
     // If already completed, nothing to undo
-    if (job.status === "completed") {
+    if (stored?.status === "completed") {
       return {
-        playlistCreated: !!job.createdPlaylistId,
-        playlistId: job.createdPlaylistId || null,
-        tracksMatched: job.tracksMatched,
+        playlistCreated: !!stored.createdPlaylistId,
+        playlistId: stored.createdPlaylistId || null,
+        tracksMatched: stored.tracksMatched,
       };
     }
 
     // If already cancelled or failed, just ensure cleanup
-    if (job.status === "cancelled" || job.status === "failed") {
+    if (stored?.status === "cancelled" || stored?.status === "failed") {
       await this.cleanupImportArtifacts(jobId);
       return { playlistCreated: false, playlistId: null, tracksMatched: 0 };
     }
@@ -1143,7 +1158,6 @@ class PlaylistImportService {
     // Closed first, by a move that only a still-open import accepts: an import that completed since it was read keeps
     // its result and its downloads. The move aborts this process's searches and announces "cancelled" to the page.
     if (!(await updateImportJobFields(jobId, { status: "cancelled", error: null }, CLOSED_IMPORT_STATES))) {
-      // Read from the database, not the cache: the cache is what this cancel read the import from.
       const now = await prisma.spotifyImportJob.findUnique({ where: { id: jobId } });
       if (now?.status === "completed") {
         return {

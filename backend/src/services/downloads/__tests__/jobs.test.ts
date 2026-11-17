@@ -201,6 +201,18 @@ describe("complete", () => {
 });
 
 describe("fail", () => {
+    it("counts a job whose row is already gone as done, and still moves the others", async () => {
+        const gone = await job("dl_fail_gone");
+        const here = await job("dl_fail_here");
+        await prisma.downloadJob.delete({ where: { id: gone.id } });
+
+        const settled = await downloadJobs.fail([gone, here], "Import failed");
+
+        expect(settled.map((s) => s.id)).toEqual([here.id]);
+        expect((await row(here.id)).error).toBe("Import failed");
+        expect(await downloadJobs.fail([gone], "Import failed")).toEqual([]);
+    });
+
     it("fails a job once however many paths reach it, and tells the user once", async () => {
         const j = await job("dl_fail");
 
@@ -289,6 +301,18 @@ describe("cancel", () => {
         expect(await downloadJobs.cancel([done, failed])).toHaveLength(0);
         expect((await row(done.id)).status).toBe("completed");
         expect((await row(failed.id)).error).toBe("boom");
+    });
+
+    it("counts a job whose row is already gone as done, and still moves the others", async () => {
+        const gone = await job("dl_cancel_gone");
+        const here = await job("dl_cancel_here");
+        await prisma.downloadJob.delete({ where: { id: gone.id } });
+
+        const settled = await downloadJobs.cancel([gone, here]);
+
+        expect(settled.map((s) => s.id)).toEqual([here.id]);
+        expect((await row(here.id)).status).toBe("failed");
+        expect(await downloadJobs.cancel([gone])).toEqual([]);
     });
 
     it("tells the batch and the import", async () => {

@@ -11,6 +11,7 @@ import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { playlistImportService, failImportJob } from "../playlistImport";
 import { acquisitionService } from "../acquisitionService";
 import { notificationService } from "../notificationService";
+import { logger } from "../../utils/logger";
 import * as downloadJobs from "../downloads/jobs";
 import { useLidarrCancelScenario } from "../../__tests__/helpers/lidarrCancelScenario";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
@@ -85,6 +86,34 @@ describe("cancelling an import", () => {
 
         expect((await rowOf(running.id))?.status).toBe("completed");
         expect(await downloadRows(running.id)).toBe(1);
+    });
+
+    /** A cached copy of the import that says `status` while the row says otherwise. */
+    const cacheSays = async (id: string, status: string) => {
+        const { toImportJob } = await import("../playlistImport/jobState");
+        await redisClient.set(`import:job:${id}`, JSON.stringify({ ...toImportJob((await rowOf(id))!), status }));
+    };
+
+    it("keeps an import the database holds as completed, whatever a cached copy says", async () => {
+        const done = await importRow("completed");
+        await downloadJob(done.id, "completed");
+        await cacheSays(done.id, "failed");
+
+        await playlistImportService.cancelJob(done.id);
+
+        expect((await rowOf(done.id))?.status).toBe("completed");
+        expect(await downloadRows(done.id)).toBe(1);
+    });
+
+    it("cancels an import the database holds as open, whatever a cached copy says", async () => {
+        const running = await importRow("downloading");
+        await downloadJob(running.id, "pending");
+        await cacheSays(running.id, "completed");
+
+        await playlistImportService.cancelJob(running.id);
+
+        expect(await rowOf(running.id)).toBeNull();
+        expect(await downloadRows(running.id)).toBe(0);
     });
 
     it("leaves the closed import for the next cancel when removing its downloads fails", async () => {
@@ -167,6 +196,34 @@ describe("an import that was stopped before its worker started", () => {
         await run(running.id);
 
         expect(acquire).not.toHaveBeenCalled();
+    });
+
+    it("logs the real error of an import that was stopped, and still returns quietly", async () => {
+        const running = await importRow("downloading");
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        acquire.mockImplementation((async () => {
+            await failImportJob(running.id, "stopped elsewhere");
+            throw new Error("socket hang up");
+        }) as never);
+
+        await expect(run(running.id)).resolves.toBeUndefined();
+
+        expect(warn.mock.calls.some(([message, error]) =>
+            String(message).includes(running.id) && (error as Error)?.message === "socket hang up")).toBe(true);
+        expect(build).not.toHaveBeenCalled();
+    });
+
+    it("does not log an abort that is only the stop", async () => {
+        const running = await importRow("downloading");
+        const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined);
+        acquire.mockImplementation((async () => {
+            await failImportJob(running.id, "stopped elsewhere");
+            throw Object.assign(new Error("aborted"), { name: "AbortError" });
+        }) as never);
+
+        await run(running.id);
+
+        expect(warn.mock.calls.some(([message]) => String(message).includes(running.id))).toBe(false);
     });
 
     it("lets a download start only while the stored import is open, and stops this process's searches when it is not", async () => {

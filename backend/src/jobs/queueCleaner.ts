@@ -34,7 +34,7 @@ class QueueCleanerService {
     async recoverStuckWork(): Promise<void> {
         const [batches, imports] = await Promise.all([
             prisma.discoveryBatch.count({ where: { status: { in: ["downloading", "scanning"] } } }),
-            prisma.spotifyImportJob.count({ where: { status: { in: ["scanning", "downloading"] } } }),
+            prisma.spotifyImportJob.count({ where: { status: { in: ["scanning", "downloading", "cancelled"] } } }),
         ]);
         if (batches > 0) {
             const forced = await (await this.getDiscoverWeeklyService()).checkStuckBatches();
@@ -49,16 +49,18 @@ class QueueCleanerService {
     /**
      * Check for Spotify import jobs stuck in "scanning" or "downloading" status.
      * Re-triggers scan for jobs stuck scanning, or forces completion check
-     * for jobs stuck downloading.
+     * for jobs stuck downloading. A cancelled import is deleted by its own cancel, so one still there after a while
+     * had its clean-up stop part-way: the clean-up is finished.
      */
     async checkStuckSpotifyImports(): Promise<number> {
         const SCANNING_RETRY_TIMEOUT = 10 * 60 * 1000; // 10 minutes - retry scan
         const SCANNING_FAIL_TIMEOUT = 30 * 60 * 1000; // 30 minutes - force fail
         const DOWNLOADING_TIMEOUT = 30 * 60 * 1000; // 30 minutes - force completion check
+        const CANCEL_CLEANUP_GRACE = 10 * 60 * 1000; // 10 minutes - a cancel still being carried out is left alone
 
         const stuckJobs = await prisma.spotifyImportJob.findMany({
             where: {
-                status: { in: ["scanning", "downloading"] },
+                status: { in: ["scanning", "downloading", "cancelled"] },
             },
         });
 
@@ -69,7 +71,17 @@ class QueueCleanerService {
         for (const job of stuckJobs) {
             const jobAge = Date.now() - job.updatedAt.getTime();
 
-            if (job.status === "scanning") {
+            if (job.status === "cancelled") {
+                if (jobAge <= CANCEL_CLEANUP_GRACE) continue;
+                logger.debug(`[IMPORT STUCK] Job ${job.id} cancelled ${Math.round(jobAge / 60000)}min ago and still there - finishing its clean-up`);
+                try {
+                    const playlistImportService = await this.getPlaylistImportService();
+                    await playlistImportService.cancelJob(job.id);
+                    recoveredCount++;
+                } catch (err: any) {
+                    logger.warn(`[IMPORT STUCK] Could not finish the clean-up of cancelled import ${job.id}: ${err.message}`);
+                }
+            } else if (job.status === "scanning") {
                 if (jobAge > SCANNING_FAIL_TIMEOUT) {
                     logger.debug(
                         `[IMPORT STUCK] Job ${job.id} stuck in scanning for ${Math.round(jobAge / 60000)}min - force failing`
