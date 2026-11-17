@@ -261,14 +261,13 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
             break
           }
           case 'placeInQueueResponse': {
-            const found = findPendingDownload(this.downloads, peer.username, msg.filename)
+            const download = findPendingDownload(this.downloads, peer.username, msg.filename) as any
 
-            if (!found) {
+            if (!download) {
               logger.error(`[Soulseek] No download found for ${JSON.stringify(msg)}`)
               return
             }
 
-            const download = found as any
             if (download.status === 'requested') {
               download.status = 'queued'
               download.queuePosition = msg.place

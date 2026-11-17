@@ -36,6 +36,10 @@ function makeDownload(
   } as DownloadWithToken;
 }
 
+function makeWith(over: Record<string, unknown>): Download {
+  return { ...makeDownload(5n), ...over } as unknown as Download;
+}
+
 function setup(download: DownloadWithToken, { consume = true } = {}) {
   const replies: Buffer[] = [];
   const settled: DownloadWithToken[] = [];
@@ -355,16 +359,13 @@ describe("FileTransferReader", () => {
 });
 
 describe("findAwaitingDownload", () => {
-  const make = (over: Partial<DownloadWithToken>): DownloadWithToken =>
-    ({ ...makeDownload(5n), ...over }) as DownloadWithToken;
-
   it("matches a connected download by peer and token", () => {
-    const d = make({});
+    const d = makeWith({});
     expect(findAwaitingDownload([d], "peer", TOKEN_HEX)).toBe(d);
   });
 
   it("does not match another peer or another token", () => {
-    const d = make({});
+    const d = makeWith({});
     expect(findAwaitingDownload([d], "other", TOKEN_HEX)).toBeUndefined();
     expect(findAwaitingDownload([d], "peer", "00000000")).toBeUndefined();
   });
@@ -372,13 +373,13 @@ describe("findAwaitingDownload", () => {
   it("does not match a download that is already downloading or complete", () => {
     expect(
       findAwaitingDownload(
-        [make({ status: "downloading" })],
+        [makeWith({ status: "downloading" })],
         "peer",
         TOKEN_HEX,
       ),
     ).toBeUndefined();
     expect(
-      findAwaitingDownload([make({ status: "complete" })], "peer", TOKEN_HEX),
+      findAwaitingDownload([makeWith({ status: "complete" })], "peer", TOKEN_HEX),
     ).toBeUndefined();
   });
 });
@@ -449,24 +450,22 @@ describe("acceptTransferRequest", () => {
 });
 
 describe("findDownloadForOffer", () => {
-  const make = (over: Record<string, unknown>): Download =>
-    ({ ...makeDownload(5n), ...over }) as unknown as Download;
 
   it("finds the download for the peer and file, or nothing", () => {
-    const d = make({});
+    const d = makeWith({});
     expect(findDownloadForOffer([d], "peer", "a.flac")).toBe(d);
     expect(findDownloadForOffer([d], "other", "a.flac")).toBeUndefined();
     expect(findDownloadForOffer([d], "peer", "b.flac")).toBeUndefined();
   });
 
   it("prefers a download that can take the offer over a stale one for the same file", () => {
-    const stale = make({ status: "downloading" });
-    const live = make({ status: "queued" });
+    const stale = makeWith({ status: "downloading" });
+    const live = makeWith({ status: "queued" });
     expect(findDownloadForOffer([stale, live], "peer", "a.flac")).toBe(live);
-    const requested = make({ status: "requested" });
+    const requested = makeWith({ status: "requested" });
     expect(
       findDownloadForOffer(
-        [make({ status: "complete" }), requested],
+        [makeWith({ status: "complete" }), requested],
         "peer",
         "a.flac",
       ),
@@ -474,70 +473,74 @@ describe("findDownloadForOffer", () => {
   });
 
   it("counts a connected download with no bytes as able to take an offer", () => {
-    const stale = make({ status: "complete" });
-    const waiting = make({});
+    const stale = makeWith({ status: "complete" });
+    const waiting = makeWith({});
     expect(findDownloadForOffer([stale, waiting], "peer", "a.flac")).toBe(
       waiting,
     );
-    const partial = make({ receivedBytes: 2n });
+    const partial = makeWith({ receivedBytes: 2n });
     expect(findDownloadForOffer([partial, waiting], "peer", "a.flac")).toBe(
       waiting,
     );
   });
 
   it("falls back to the first match when none can take it", () => {
-    const first = make({ status: "complete" });
-    const second = make({ status: "downloading" });
+    const first = makeWith({ status: "complete" });
+    const second = makeWith({ status: "downloading" });
     expect(findDownloadForOffer([first, second], "peer", "a.flac")).toBe(first);
   });
 });
 
 describe("findPendingDownload", () => {
-  const make = (over: Record<string, unknown>): Download =>
-    ({ ...makeDownload(5n), ...over }) as unknown as Download;
 
   it("finds the download for the peer and file, or nothing", () => {
-    const d = make({ status: "queued" });
+    const d = makeWith({ status: "queued" });
     expect(findPendingDownload([d], "peer", "a.flac")).toBe(d);
     expect(findPendingDownload([d], "other", "a.flac")).toBeUndefined();
     expect(findPendingDownload([d], "peer", "b.flac")).toBeUndefined();
   });
 
   it("prefers a requested or queued entry over a stale one for the same file", () => {
-    const stale = make({ status: "complete" });
-    const connected = make({});
-    const requested = make({ status: "requested" });
-    const queued = make({ status: "queued" });
+    const stale = makeWith({ status: "complete" });
+    const connected = makeWith({});
+    const requested = makeWith({ status: "requested" });
+    const queued = makeWith({ status: "queued" });
     expect(
       findPendingDownload([stale, connected, requested], "peer", "a.flac"),
     ).toBe(requested);
     expect(findPendingDownload([stale, queued], "peer", "a.flac")).toBe(queued);
   });
 
-  it("falls back to the first match when none is requested or queued", () => {
-    const first = make({ status: "downloading" });
-    const second = make({});
+  it("prefers a connected entry with nothing received over a later one when none is requested or queued", () => {
+    const downloading = makeWith({ status: "downloading", receivedBytes: 2n });
+    const connected = makeWith({});
+    expect(
+      findPendingDownload([downloading, connected], "peer", "a.flac"),
+    ).toBe(connected);
+  });
+
+  it("falls back to the first match when none can take an offer", () => {
+    const first = makeWith({ status: "downloading" });
+    const second = makeWith({ status: "complete" });
     expect(findPendingDownload([first, second], "peer", "a.flac")).toBe(first);
   });
 });
 
 describe("canBeDenied", () => {
-  const make = (over: Record<string, unknown>): Download =>
-    ({ ...makeDownload(5n), ...over }) as unknown as Download;
 
   it("applies to a requested or queued download", () => {
-    expect(canBeDenied(make({ status: "requested" }))).toBe(true);
-    expect(canBeDenied(make({ status: "queued" }))).toBe(true);
+    expect(canBeDenied(makeWith({ status: "requested" }))).toBe(true);
+    expect(canBeDenied(makeWith({ status: "queued" }))).toBe(true);
   });
 
   it("applies to a connected download only while it has received nothing", () => {
-    expect(canBeDenied(make({}))).toBe(true);
-    expect(canBeDenied(make({ receivedBytes: 2n }))).toBe(false);
+    expect(canBeDenied(makeWith({}))).toBe(true);
+    expect(canBeDenied(makeWith({ receivedBytes: 2n }))).toBe(false);
   });
 
   it("does not apply to a download that is downloading, complete or already denied", () => {
-    expect(canBeDenied(make({ status: "downloading" }))).toBe(false);
-    expect(canBeDenied(make({ status: "complete" }))).toBe(false);
-    expect(canBeDenied(make({ status: "denied" }))).toBe(false);
+    expect(canBeDenied(makeWith({ status: "downloading" }))).toBe(false);
+    expect(canBeDenied(makeWith({ status: "complete" }))).toBe(false);
+    expect(canBeDenied(makeWith({ status: "denied" }))).toBe(false);
   });
 });

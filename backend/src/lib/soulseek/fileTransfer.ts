@@ -65,7 +65,11 @@ export function findDownloadForOffer(
   return named.find(awaitsOffer) ?? named[0];
 }
 
-/** The download a peer's queue place or denial is for: a requested or queued one before a stale one for the same file. */
+/**
+ * The download a peer's queue place or denial is for, for the same user and file: a requested or
+ * queued one first, then one still waiting for an offer, then the first match. The last is returned
+ * unchecked, so a caller must test the status before acting on it.
+ */
 export function findPendingDownload(
   downloads: Download[],
   username: string,
@@ -76,6 +80,7 @@ export function findPendingDownload(
   );
   return (
     named.find((d) => d.status === "requested" || d.status === "queued") ??
+    named.find(awaitsOffer) ??
     named[0]
   );
 }
@@ -166,8 +171,8 @@ export class FileTransferReader {
    */
   fail(error: Error): void {
     const download = this.download;
-    // Before the token is read there is no download to tie the error to. Left as is: the consumer's
-    // timeout ends the wait, and the peer's re-offer takes a connected download that has nothing.
+    // No download is tied to the error before the token is read: the consumer's timeout ends the
+    // wait, and the peer's re-offer takes a connected download that has nothing.
     if (!download || this.failed || this.done) return;
     this.failed = true;
     this.port.settle(download);
@@ -184,8 +189,8 @@ export class FileTransferReader {
       if (!download.stream.destroyed) download.stream.end();
       return;
     }
-    // A plain close mid-transfer (no error from the socket) is left as is: the download's listeners get
-    // this generic message, and the peer is not put on cooldown.
+    // A plain close mid-transfer carries no socket error: the download's listeners get this generic
+    // message, and the peer is not put on cooldown.
     const error = new Error("Connection closed before transfer completed");
     this.port.settle(download);
     this.tell(download, error);
