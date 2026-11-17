@@ -629,9 +629,10 @@ class SimpleDownloadManager {
     }
 
     /**
-     * The user cancelled these jobs: a running download no other active job shares leaves Lidarr's
-     * queue without a blocklist or new search, and an album no other active job wants is unmonitored.
-     * The caller deletes the rows.
+     * The user cancelled these jobs: a running download leaves Lidarr's queue without a blocklist or new search
+     * unless another active job shares it or wants its album (even one with no download yet), and an album no other
+     * active job wants is unmonitored. Each download and album is handled on its own: a failure is logged and the
+     * rest still go. The caller deletes the rows.
      */
     async cancelJobs(jobs: { id: string; status: string; lidarrRef: string | null; lidarrAlbumId: number | null }[]): Promise<void> {
         const active = jobs.filter((j) => downloadJobs.isActive(j.status));
@@ -641,14 +642,23 @@ class SimpleDownloadManager {
                 where: { ...where, status: { in: downloadJobs.ACTIVE_STATUSES }, id: { notIn: cancelled } },
             });
 
-        // Another user's job can share the download or the album; theirs keeps it.
+        // Each ref and album is handled on its own: one that fails is logged and the rest still go.
+        // Another job (another user's, or one with no download yet) can share the download or its album; it keeps them.
         for (const ref of new Set(active.map((j) => j.lidarrRef).filter((r): r is string => !!r))) {
-            if ((await stillWanted({ lidarrRef: ref })) === 0) {
-                await removeFailedDownload(ref, "Cancelled", { searchAgain: false, blocklist: false });
+            try {
+                const albumIds = [...new Set(active.filter((j) => j.lidarrRef === ref).map((j) => j.lidarrAlbumId).filter((id): id is number => !!id))];
+                const wanted = await stillWanted({ OR: [{ lidarrRef: ref }, ...(albumIds.length > 0 ? [{ lidarrAlbumId: { in: albumIds } }] : [])] });
+                if (wanted === 0) await removeFailedDownload(ref, "Cancelled", { searchAgain: false, blocklist: false });
+            } catch (error) {
+                logger.error(`[CANCEL] Could not remove download ${ref} from Lidarr's queue:`, error);
             }
         }
         for (const albumId of new Set(active.map((j) => j.lidarrAlbumId).filter((id): id is number => !!id))) {
-            if ((await stillWanted({ lidarrAlbumId: albumId })) === 0) await lidarrService.unmonitorAlbum(albumId);
+            try {
+                if ((await stillWanted({ lidarrAlbumId: albumId })) === 0) await lidarrService.unmonitorAlbum(albumId);
+            } catch (error) {
+                logger.error(`[CANCEL] Could not stop watching album ${albumId} in Lidarr:`, error);
+            }
         }
     }
 
