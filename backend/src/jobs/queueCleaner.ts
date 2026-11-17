@@ -109,9 +109,8 @@ class QueueCleanerService {
 
                     // Touch updatedAt so the next check does not queue it again. The counts only go up, and an import that
                     // closed while the scan was asked for is left as it is.
-                    const { recordAlbumProgress } = await import("../services/playlistImport/jobState");
-                    await recordAlbumProgress(job.id, job.albumsCompleted, job.progress);
-                    recoveredCount++;
+                    const { recordAlbumProgress } = await import("../services/playlistImport");
+                    if (await recordAlbumProgress(job.id, job.albumsCompleted, job.progress)) recoveredCount++;
                 }
             } else if (job.status === "downloading" && jobAge > DOWNLOADING_TIMEOUT) {
                 logger.debug(

@@ -581,7 +581,8 @@ class PlaylistImportService {
           : `Library scan not re-queued: ${scanResult.reason}`,
       );
     } catch (error) {
-      // No scan is coming, so none will move the import on: back to waiting, and the next check asks again.
+      // No scan is coming, so none will move the import on: back to downloading, the only state the claim above
+      // comes from (NOT_WAITING_FOR_DOWNLOADS leaves out every other), and the next check asks again.
       await updateImportJobFields(importJobId, { status: "downloading", progress: waitingProgress }, NOT_SCANNING);
       throw error;
     }
