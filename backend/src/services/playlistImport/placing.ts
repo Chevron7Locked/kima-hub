@@ -27,6 +27,18 @@ import { readMusicLink, musicLinkName, M3UEntry, M3UNothingMatched } from "./rea
 import { previewOfTracklist, pendingTracksOf, matchEntries, matchM3UEntries } from "./matching";
 import { jobLoggers, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
 
+/** Where an import's preview waits for the worker that runs the import. */
+const previewKey = (importJobId: string) => `import:preview:${importJobId}`;
+
+/** Keeps an import's preview for the worker that runs it. A failed write is logged, and the worker then finds no preview. */
+async function keepPreview(importJobId: string, preview: ImportPreview): Promise<void> {
+  try {
+    await redisClient.setex(previewKey(importJobId), IMPORT_JOB_TTL, JSON.stringify(preview));
+  } catch (e: any) {
+    logger.warn(`[Spotify Import] Failed to cache preview for job ${importJobId}: ${e.message}`);
+  }
+}
+
 /** Thrown inside the playlist transaction when the job no longer takes a playlist, so the transaction rolls back. */
 class PlaylistNotWanted extends Error {}
 /** One build of an import at a time, whichever process runs it. */
@@ -114,16 +126,7 @@ class PlaylistImportService {
 
     await saveImportJob(job);
 
-    // Cache preview for the BullMQ worker to retrieve
-    try {
-      await redisClient.setex(
-        `import:preview:${job.id}`,
-        IMPORT_JOB_TTL,
-        JSON.stringify(preview),
-      );
-    } catch (e: any) {
-      logger.warn(`[Spotify Import] Failed to cache preview for job ${job.id}: ${e.message}`);
-    }
+    await keepPreview(job.id, preview);
 
     // Enqueue import job to BullMQ for crash-recoverable processing
     const { importQueue } = await import("../../workers/queues");
@@ -1071,7 +1074,7 @@ class PlaylistImportService {
 
     try {
       await redisClient.del(IMPORT_JOB_KEY(jobId));
-      await redisClient.del(`import:preview:${jobId}`);
+      await redisClient.del(previewKey(jobId));
     } catch {
       // Non-critical
     }
@@ -1379,7 +1382,7 @@ class PlaylistImportService {
     // Retrieve cached preview from Redis
     let preview: ImportPreview | null = null;
     try {
-      const cached = await redisClient.get(`import:preview:${importJobId}`);
+      const cached = await redisClient.get(previewKey(importJobId));
       if (cached) preview = JSON.parse(cached);
     } catch (e: any) {
       logger.warn(`[Spotify Import] Failed to read preview cache for job ${importJobId}: ${e.message}`);
@@ -1550,16 +1553,7 @@ class PlaylistImportService {
       job.pendingTracks = pendingTracks;
       await saveImportJob(job);
 
-      // Cache preview for processImport
-      try {
-        await redisClient.setex(
-          `import:preview:${job.id}`,
-          IMPORT_JOB_TTL,
-          JSON.stringify(preview),
-        );
-      } catch (e: any) {
-        logger.warn(`[Quick Import] Failed to cache preview: ${e.message}`);
-      }
+      await keepPreview(job.id, preview);
 
       await this.processImport(job, albumMbidsToDownload, preview);
     } finally {
