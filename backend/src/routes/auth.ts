@@ -479,57 +479,74 @@ router.post("/2fa/enable", authLimiter, async (req, res) => {
     }
 });
 
+/**
+ * What turning 2FA off and replacing the recovery list both ask first: the password, 2FA on, a secret that reads, and a
+ * current authenticator code or a recovery code. A missing or unreadable secret cannot check a code and is not a reason
+ * to skip the check: 2FA stays on, stored as it is, until the key that reads it is restored or an admin resets it. The
+ * code is spent like a sign-in's (one just used to sign in cannot be used again; a recovery code is taken the way a
+ * sign-in takes it, so a person who lost their phone can still get in), in one transaction with the change, which holds
+ * the row: a code is used up only if the change was kept, and where another request changed 2FA since the read, nothing
+ * is written. Answers the request itself on any refusal and returns null; otherwise the person's id and the change's value.
+ */
+async function proveSecondFactorAndChange<T>(
+    req: Request,
+    res: Response,
+    unreadableSecret: string,
+    change: (userId: string) => Parameters<typeof spendAndChange<T>>[3],
+): Promise<{ userId: string; value: T } | null> {
+    const { password, token } = proveBody.parse(req.body);
+
+    const user = await prisma.user.findUnique({
+        where: { id: req.user!.id },
+        select: { id: true, passwordHash: true, twoFactorEnabled: true, twoFactorSecret: true, twoFactorRecoveryCodes: true },
+    });
+    if (!user) {
+        res.status(404).json({ error: "User not found" });
+        return null;
+    }
+    if (!(await bcrypt.compare(password, user.passwordHash))) {
+        res.status(400).json({ error: "Invalid password" });
+        return null;
+    }
+    if (!user.twoFactorEnabled) {
+        res.status(400).json({ error: "2FA is not enabled" });
+        return null;
+    }
+
+    const secret = readTwoFactorSecret(user.id, user.twoFactorSecret);
+    if (secret === null) {
+        res.status(409).json({ error: unreadableSecret });
+        return null;
+    }
+    const made = await spendAndChange(
+        { id: user.id, recoveryCodes: user.twoFactorRecoveryCodes },
+        secret,
+        token,
+        change(user.id),
+    );
+    if (made.outcome === "busy") {
+        res.status(503).json({ error: BUSY });
+        return null;
+    }
+    if (made.outcome === "wrong-code") {
+        res.status(400).json({ error: "Invalid 2FA token" });
+        return null;
+    }
+    if (made.outcome === "not-changed") {
+        res.status(400).json({ error: "2FA is not enabled" });
+        return null;
+    }
+    return { userId: user.id, value: made.value };
+}
+
 // POST /auth/2fa/disable - Disable 2FA with the password and a current authenticator code or a recovery code
 router.post("/2fa/disable", authLimiter, async (req, res) => {
     try {
-        const { password, token } = proveBody.parse(req.body);
+        const off = await proveSecondFactorAndChange(req, res, UNREADABLE_SECRET,
+            (userId) => async (tx) => ((await turnOffTwoFactor(userId, tx)) ? true : null));
+        if (!off) return;
 
-        const user = await prisma.user.findUnique({
-            where: { id: req.user!.id },
-            select: { id: true, passwordHash: true, twoFactorEnabled: true, twoFactorSecret: true, twoFactorRecoveryCodes: true },
-        });
-
-        if (!user) {
-            return res.status(404).json({ error: "User not found" });
-        }
-
-        // Verify password
-        const validPassword = await bcrypt.compare(password, user.passwordHash);
-        if (!validPassword) {
-            return res.status(400).json({ error: "Invalid password" });
-        }
-
-        if (!user.twoFactorEnabled) {
-            return res.status(400).json({ error: "2FA is not enabled" });
-        }
-
-        // A secret that is missing or unreadable cannot check a code, and is not a reason to skip the check:
-        // it stays on, stored as it is, until the key that reads it is restored or an admin resets it.
-        const secret = readTwoFactorSecret(user.id, user.twoFactorSecret);
-        if (secret === null) {
-            return res.status(409).json({ error: UNREADABLE_SECRET });
-        }
-        // Spent like a sign-in's code: one just used to sign in cannot also turn it off, and a recovery code is
-        // taken the way a sign-in takes it, so a person who lost their phone can still turn it off. The spend and
-        // the change are one transaction, so a code is used up only if 2FA really went off: where another request
-        // turned it off since the read above, nothing is written and the code stays good.
-        const off = await spendAndChange(
-            { id: user.id, recoveryCodes: user.twoFactorRecoveryCodes },
-            secret,
-            token,
-            async (tx) => ((await turnOffTwoFactor(user.id, tx)) ? true : null),
-        );
-        if (off.outcome === "busy") {
-            return res.status(503).json({ error: BUSY });
-        }
-        if (off.outcome === "wrong-code") {
-            return res.status(400).json({ error: "Invalid 2FA token" });
-        }
-        if (off.outcome === "not-changed") {
-            return res.status(400).json({ error: "2FA is not enabled" });
-        }
-
-        logger.info(`[2FA] ${user.id} turned off 2FA`);
+        logger.info(`[2FA] ${off.userId} turned off 2FA`);
 
         res.json({ message: "2FA disabled successfully" });
     } catch (error) {
@@ -540,52 +557,17 @@ router.post("/2fa/disable", authLimiter, async (req, res) => {
 });
 
 // POST /auth/2fa/recovery-codes - Replace the whole recovery list with ten new codes, shown once. 2FA stays on.
+// The old list goes, readable or not: a person who proved a current code gets a list they can use, and two requests
+// cannot both be told their list is the one in force.
 router.post("/2fa/recovery-codes", authLimiter, async (req, res) => {
     try {
-        const { password, token } = proveBody.parse(req.body);
+        const made = await proveSecondFactorAndChange(req, res, UNREADABLE_SECRET_CODES,
+            (userId) => (tx) => replaceRecoveryCodes(userId, tx));
+        if (!made) return;
 
-        const user = await prisma.user.findUnique({
-            where: { id: req.user!.id },
-            select: { id: true, passwordHash: true, twoFactorEnabled: true, twoFactorSecret: true, twoFactorRecoveryCodes: true },
-        });
-        if (!user) {
-            return res.status(404).json({ error: "User not found" });
-        }
+        logger.info(`[2FA] ${made.userId} made new recovery codes`);
 
-        if (!(await bcrypt.compare(password, user.passwordHash))) {
-            return res.status(400).json({ error: "Invalid password" });
-        }
-        if (!user.twoFactorEnabled) {
-            return res.status(400).json({ error: "2FA is not enabled" });
-        }
-
-        const secret = readTwoFactorSecret(user.id, user.twoFactorSecret);
-        if (secret === null) {
-            return res.status(409).json({ error: UNREADABLE_SECRET_CODES });
-        }
-        // The old list goes, readable or not: a person who proved a current code gets a list they can use. The code
-        // is spent and the list replaced in one transaction, which holds the row, so two requests cannot both be
-        // told their list is the one in force, and a code is used up only if the new list was kept.
-        const made = await spendAndChange(
-            { id: user.id, recoveryCodes: user.twoFactorRecoveryCodes },
-            secret,
-            token,
-            (tx) => replaceRecoveryCodes(user.id, tx),
-        );
-        if (made.outcome === "busy") {
-            return res.status(503).json({ error: BUSY });
-        }
-        if (made.outcome === "wrong-code") {
-            return res.status(400).json({ error: "Invalid 2FA token" });
-        }
-        if (made.outcome === "not-changed") {
-            return res.status(400).json({ error: "2FA is not enabled" });
-        }
-        const codes = made.value;
-
-        logger.info(`[2FA] ${user.id} made new recovery codes`);
-
-        res.json({ recoveryCodes: codes });
+        res.json({ recoveryCodes: made.value });
     } catch (error) {
         if (invalidBody(error, req, res)) return;
         logger.error("2FA recovery codes error:", error);
