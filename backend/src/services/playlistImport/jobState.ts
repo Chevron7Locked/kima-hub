@@ -353,8 +353,8 @@ export function notifyImportFailed(job: ImportJob): void {
 /** An import past its downloads: finished, given up, or scanning and building its playlist. */
 export const HANDED_OFF_STATES: ImportJob["status"][] = ["completed", "failed", "cancelled", "scanning", "creating_playlist"];
 
-/** The states the downloads check does not act in: a quick import still fetching, and one already past its downloads. */
-export const NOT_WAITING_FOR_DOWNLOADS: ImportJob["status"][] = ["fetching", ...HANDED_OFF_STATES];
+/** The states the downloads check does not act in: an import not yet downloading (queued or fetching), and one already past its downloads. */
+export const NOT_WAITING_FOR_DOWNLOADS: ImportJob["status"][] = ["pending", "fetching", ...HANDED_OFF_STATES];
 
 /**
  * Records what the downloads check found: only its own fields, and only on an import still waiting for its downloads.

@@ -107,11 +107,10 @@ class QueueCleanerService {
                         logger.debug(`    Scan skipped: ${result.reason}`);
                     }
 
-                    // Touch updatedAt so the next check does not queue it again.
-                    await prisma.spotifyImportJob.update({
-                        where: { id: job.id },
-                        data: { progress: job.progress },
-                    });
+                    // Touch updatedAt so the next check does not queue it again. The counts only go up, and an import that
+                    // closed while the scan was asked for is left as it is.
+                    const { recordAlbumProgress } = await import("../services/playlistImport/jobState");
+                    await recordAlbumProgress(job.id, job.albumsCompleted, job.progress);
                     recoveredCount++;
                 }
             } else if (job.status === "downloading" && jobAge > DOWNLOADING_TIMEOUT) {

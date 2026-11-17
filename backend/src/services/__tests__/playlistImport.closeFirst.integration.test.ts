@@ -311,6 +311,19 @@ describe("an import that was stopped before its worker started", () => {
         expect([stored?.status, stored?.progress, stored?.albumsCompleted]).toEqual(["scanning", 75, 5]);
     }, 5000);
 
+    it("counts an album done as progress 0 when the import says it has no albums, not as a number that is not one", async () => {
+        const running = await importRow("downloading");
+        const record = jest.spyOn(await import("../playlistImport/jobState"), "recordAlbumProgress");
+        acquire.mockImplementation((async () => {
+            await prisma.spotifyImportJob.update({ where: { id: running.id }, data: { status: "scanning" } });
+            return { success: true, source: "soulseek" };
+        }) as never);
+
+        await (playlistImportService as any).processImport({ ...snapshot(running.id), albumsTotal: 0 }, ["mbid-1"], preview);
+
+        expect(record).toHaveBeenCalledWith(running.id, 1, 0);
+    }, 5000);
+
     it("lets a download start only while the stored import is open, and stops this process's searches when it is not", async () => {
         const running = await importRow("downloading");
         const seen: { open: boolean[]; aborted: boolean[] } = { open: [], aborted: [] };
@@ -372,6 +385,17 @@ describe("a quick import stopped in another process", () => {
 });
 
 describe("checking an import's downloads", () => {
+    it("does not move an import that has not started downloading to scanning", async () => {
+        const queued = await importRow("pending");
+        await downloadJob(queued.id, "completed");
+        const ask = jest.spyOn(await import("../../workers/scanRequest"), "requestScan").mockResolvedValue({ queued: false, reason: "stub" } as never);
+
+        await playlistImportService.checkImportCompletion(queued.id);
+
+        expect((await rowOf(queued.id))?.status).toBe("pending");
+        expect(ask).not.toHaveBeenCalled();
+    });
+
     it("reads the stored import, so a cancel with a cached copy still open leaves its downloads alone", async () => {
         const stopped = await importRow("cancelled");
         const waiting = await downloadJob(stopped.id, "pending");

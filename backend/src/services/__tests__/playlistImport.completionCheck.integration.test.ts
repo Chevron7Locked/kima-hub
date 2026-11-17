@@ -144,15 +144,4 @@ describe("checking an import's downloads", () => {
         await playlistImportService.checkImportCompletion(id);
         expect(await row(id)).toMatchObject({ status: "scanning", progress: 75 });
     });
-
-    it("puts an import that had not yet reached downloading back to the state it was in, not to downloading", async () => {
-        const id = await downloading(["completed"]);
-        await prisma.spotifyImportJob.update({ where: { id }, data: { status: "pending" } });
-        const cached = JSON.parse((await redisClient.get(`import:job:${id}`)) as string);
-        await redisClient.setex(`import:job:${id}`, 600, JSON.stringify({ ...cached, status: "pending" }));
-        (requestScan as jest.Mock).mockRejectedValueOnce(new Error("queue down"));
-
-        await expect(playlistImportService.checkImportCompletion(id)).rejects.toThrow("queue down");
-        expect(await row(id)).toMatchObject({ status: "pending" });
-    });
 });

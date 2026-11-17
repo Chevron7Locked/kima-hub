@@ -42,6 +42,8 @@ afterAll(async () => {
 
 it("logs the counts after the timeout settle", async () => {
     const importJob = await playlistImportService.startImport(USER, "pl", "Road Trip", [], preview);
+    // The check acts on an import that is downloading, not one still queued.
+    await prisma.spotifyImportJob.update({ where: { id: importJob.id }, data: { status: "downloading" } });
     const job = (subject: string, status: string, ageMs: number) =>
         prisma.downloadJob.create({
             data: {

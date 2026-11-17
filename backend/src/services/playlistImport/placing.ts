@@ -341,9 +341,9 @@ class PlaylistImportService {
                 }
 
                 job.albumsCompleted++;
-                job.progress = Math.round(
-                  (job.albumsCompleted / job.albumsTotal) * 30,
-                );
+                job.progress = job.albumsTotal > 0
+                  ? Math.round((job.albumsCompleted / job.albumsTotal) * 30)
+                  : 0;
                 // A stop from another process stays, and the counts never go down: the loop below reads the stored status.
                 await recordAlbumProgress(job.id, job.albumsCompleted, job.progress);
 
@@ -559,7 +559,6 @@ class PlaylistImportService {
     // The counting above took time, and the cache read at the top can be older still, so the import is claimed first:
     // a scan is asked for only when this write finds it still waiting, not when it was cancelled, closed or handed on.
     const waitingProgress = job.progress;
-    const waitingStatus = job.status;
     job.status = "scanning";
     job.progress = 75;
     job.updatedAt = new Date();
@@ -583,7 +582,7 @@ class PlaylistImportService {
       );
     } catch (error) {
       // No scan is coming, so none will move the import on: back to waiting, and the next check asks again.
-      await updateImportJobFields(importJobId, { status: waitingStatus, progress: waitingProgress }, NOT_SCANNING);
+      await updateImportJobFields(importJobId, { status: "downloading", progress: waitingProgress }, NOT_SCANNING);
       throw error;
     }
   }
@@ -1649,7 +1648,6 @@ class PlaylistImportService {
           data: { status: "failed", error: errorMessage, updatedAt: new Date() },
         });
         if (count === 0) return;
-        // Before anything that can throw: the import is failed, so its searches stop now.
         // Before anything that can throw: the import is failed, so its searches stop now.
         abortImportSearches(importJobId);
         notifyImportFailed(job);

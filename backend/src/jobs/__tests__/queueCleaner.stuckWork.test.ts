@@ -10,6 +10,7 @@ import { eventBus, type SSEEvent } from "../../services/eventBus";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { queueCleaner } from "../queueCleaner";
 import * as downloadJobs from "../../services/downloads/jobs";
+import * as scanRequest from "../../workers/scanRequest";
 
 jest.setTimeout(30_000);
 
@@ -69,6 +70,27 @@ it("tells the person's import page when it fails a scan that timed out", async (
             payload: expect.objectContaining({ jobId: job.id, status: "failed", error: "Scan timed out after 30 minutes" }),
         }),
     ]));
+});
+
+it("does not lower an import's progress, nor write to one that closed, when it asks for a new scan", async () => {
+    const job = await prisma.spotifyImportJob.create({
+        data: {
+            userId: USER, spotifyPlaylistId: "37i9dQZF1DXcBWIGoYBM5M", playlistName: "Today's Top Hits",
+            status: "scanning", progress: 75, albumsTotal: 1, tracksTotal: 1, pendingTracks: [],
+        },
+    });
+    await prisma.$executeRaw`UPDATE "SpotifyImportJob" SET "updatedAt" = now() - interval '15 minutes' WHERE id = ${job.id}`;
+    // The scan is asked for, and the import completes while the request is made.
+    const ask = jest.spyOn(scanRequest, "requestScan").mockImplementation((async () => {
+        await prisma.spotifyImportJob.update({ where: { id: job.id }, data: { status: "completed", progress: 100 } });
+        return { queued: true, jobId: "stub" };
+    }) as never);
+
+    await queueCleaner.recoverStuckWork();
+    ask.mockRestore();
+
+    expect(await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject({ status: "completed", progress: 100 });
+    await prisma.spotifyImportJob.deleteMany({ where: { id: job.id } });
 });
 
 it("closes a Discover batch left downloading past its two-hour limit, with no Lidarr set up", async () => {
