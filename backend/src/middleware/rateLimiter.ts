@@ -97,12 +97,12 @@ export const createCoverLimiter = () =>
 export const imageLimiter = createCoverLimiter();
 
 /** Whether a Subsonic path (as the router sees it, under /rest) is the cover route, with or without `.view`. */
-export function isSubsonicCoverPath(path: string): boolean {
+function isSubsonicCoverPath(path: string): boolean {
     return /^\/getcoverart(\.view)?\/?$/i.test(path);
 }
 
 /** `res.locals` key set on a signed-in Subsonic cover request: the general Subsonic limit gives its count back. */
-export const SUBSONIC_COVER_COUNTED_APART = "subsonicCoverCountedApart";
+const SUBSONIC_COVER_COUNTED_APART = "subsonicCoverCountedApart";
 
 /**
  * The general Subsonic runaway limit (1,500 a minute per address). It sits in front of sign-in, which queries the

@@ -12,14 +12,14 @@ import { titleWordsForScoring } from "../../../utils/normalization";
 import { nameWords } from "../../nameFold";
 
 /** The most first-word sweeps (each loads every song of the artists holding the word) one import keeps. */
-export const WORD_SWEEPS_KEPT = 16;
+const WORD_SWEEPS_KEPT = 16;
 
 /**
  * What one M3U import has read from the library, so an entry that asks what an earlier entry asked does not read it
  * again: an artist's songs (tier 3), the songs of a file name (tier 2), the songs of the artists holding a word (tier 4)
  * and the song a path names (tier 1). It lives as long as the import and is never shared with another.
  */
-export class M3UReads {
+class M3UReads {
   private readonly fileName = new Remembered<
     {
       id: string;
@@ -140,31 +140,31 @@ export class M3UReads {
 }
 
 /** `text` with the case of letters and the Unicode form ignored: two paths that name the same file to a player fold alike. */
-export const foldedForm = (text: string): string => text.normalize("NFC").toLowerCase();
+const foldedForm = (text: string): string => text.normalize("NFC").toLowerCase();
 
 /** Whether `shownName`, an artist's edited name, is the artist `name` names: the rule `isArtistNamed` applies to the stored name. */
-export const isShownAs = (shownName: string, name: string): boolean =>
+const isShownAs = (shownName: string, name: string): boolean =>
   isArtistNamed({ name: shownName, identityKey: artistIdentityKey(shownName) }, name);
 
 /** Whether `artist` is the artist `name` names, by its stored name or its edited one. */
-export const isByArtistNamed = (artist: { name: string; identityKey: string; displayName: string | null }, name: string): boolean =>
+const isByArtistNamed = (artist: { name: string; identityKey: string; displayName: string | null }, name: string): boolean =>
   isArtistNamed(artist, name) || (!!artist.displayName && isShownAs(artist.displayName, name));
 
 /** Whether a song is titled `title`, by its stored title or its edited one. */
-export const isTitled = (song: { title: string; displayTitle: string | null }, title: string): boolean =>
+const isTitled = (song: { title: string; displayTitle: string | null }, title: string): boolean =>
   sameName(song.title, title) || (!!song.displayTitle && sameName(song.displayTitle, title));
 
 /** The lowest artist score tier 4 accepts, whatever the title scores: the artist must be the one the entry names. */
-export const ARTIST_SCORE_FLOOR = 80;
+const ARTIST_SCORE_FLOOR = 80;
 
 /**
  * What separates credited artists in a name beyond what `parseCredit` splits: "&", "and", ", ", and a slash or plus
  * sign with spaces or with at least three letters or digits on each side ("Hall/Oates"; "AC/DC" stays one name).
  */
-export const CREDIT_SEPARATORS = /\s*&\s*|\s+and\s+|\s*,\s+|\s+[/+]\s+|(?<=[\p{L}\p{N}]{3})[/+](?=[\p{L}\p{N}]{3})/iu;
+const CREDIT_SEPARATORS = /\s*&\s*|\s+and\s+|\s*,\s+|\s+[/+]\s+|(?<=[\p{L}\p{N}]{3})[/+](?=[\p{L}\p{N}]{3})/iu;
 
 /** An artist name as the words that tell it from another, for scoring: no case, accents, punctuation or leading "the". */
-export const artistWordsForScoring = (name: string): string => {
+const artistWordsForScoring = (name: string): string => {
   return nameWords(withoutLeadingThe(normalizeArtistName(name)));
 };
 
@@ -174,7 +174,7 @@ export const artistWordsForScoring = (name: string): string => {
  * "Kanye West"; "Simon & Garfunkel" is also "Simon" and "Garfunkel". A slash or plus sign between short words stays in
  * the name ("AC/DC"). Entry and library names are cut alike, so an entry naming one of the artists matches.
  */
-export const creditWords = (credit: string): string[] => {
+const creditWords = (credit: string): string[] => {
   const { primary, featured } = parseCredit(credit);
   const names = [credit, primary, ...featured].flatMap((name) => [name, ...name.split(CREDIT_SEPARATORS)]);
   return [...new Set(names.map(artistWordsForScoring).filter(Boolean))];
@@ -202,7 +202,7 @@ export const creditWords = (credit: string): string[] => {
  * The wrong pairs top out at 70 ("Genesis" / "Genesis Owusu"), but at 56 an exact title still reaches 80 combined
  * (0.6 * 100 + 0.4 * 56 = 82), so the artist also has its own floor (ARTIST_SCORE_FLOOR).
  */
-export const bestArtistScore = (entryWords: string[], names: (string | null)[], read: Map<string, string[]>): number =>
+const bestArtistScore = (entryWords: string[], names: (string | null)[], read: Map<string, string[]>): number =>
   Math.max(
     0,
     ...names.flatMap((name) => {
@@ -226,7 +226,7 @@ export const bestArtistScore = (entryWords: string[], names: (string | null)[], 
  * The two true misses were featured credits ("Stan" / "Stan (feat. Dido)" 44, "Get Lucky" / "Get Lucky (feat. Pharrell
  * ...)" 33), so the credit is taken off both sides first.
  */
-export const bestTitleScore = (text: string, titles: (string | null)[]): number => {
+const bestTitleScore = (text: string, titles: (string | null)[]): number => {
   const words = titleWordsForScoring(text);
   return Math.max(0, ...titles.flatMap((title) => (title ? [fuzz.token_sort_ratio(words, titleWordsForScoring(title))] : [])));
 };

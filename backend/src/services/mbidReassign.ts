@@ -43,12 +43,8 @@ const sourceStrength = (source: string | null | undefined) =>
 
 export type MoveClient = Pick<Prisma.TransactionClient, "album" | "ownedAlbum" | "discoveryAlbum" | "discoverExclusion" | "$executeRaw">;
 
-/** Which ownership source protects an artist best (dataIntegrity, discover's fix-tagging). */
+/** Which ownership source protects an artist best, most protective first; any other source ranks after these. */
 const OWNERSHIP_RANK = ["native_scan", "discovery_liked"];
-export const ownershipRank = (source: string) => {
-    const rank = OWNERSHIP_RANK.indexOf(source);
-    return rank === -1 ? OWNERSHIP_RANK.length : rank;
-};
 
 /**
  * Change an album's rgMbid in one transaction, and move every row keyed on the old id with it.
@@ -110,7 +106,7 @@ export async function moveAlbumRgMbid(
     return true;
 }
 
-/** `ownershipRank` as SQL over an `OwnedAlbum` source column, so a clash is settled inside the write that meets it. */
+/** A source's place in `OWNERSHIP_RANK`, as SQL over an `OwnedAlbum` source column, so a clash is settled inside the write that meets it. */
 const ownershipRankSql = (source: Prisma.Sql) =>
     Prisma.sql`(CASE ${source} ${Prisma.join(OWNERSHIP_RANK.map((name, rank) => Prisma.sql`WHEN ${name} THEN ${rank}::int`), " ")} ELSE ${OWNERSHIP_RANK.length}::int END)`;
 
@@ -118,7 +114,7 @@ const ownershipRankSql = (source: Prisma.Sql) =>
  * One write for an ownership move: the rows are deleted and put back under their new key in a single statement. The
  * delete says what this writer took, so a row a concurrent writer removed or already moved hands nothing on and a second
  * call finds nothing. A row at the new key (held before, or written by another transaction meanwhile) is not an error:
- * the more protective source (`ownershipRank`) stands. `taken` is the CTE that names the rows deleted.
+ * the more protective source (`ownershipRankSql`) stands. `taken` is the CTE that names the rows deleted.
  */
 function moveOwnedRows(tx: Pick<MoveClient, "$executeRaw">, taken: Prisma.Sql, artistId: Prisma.Sql, rgMbid: string) {
     const held = Prisma.raw('"OwnedAlbum".source');

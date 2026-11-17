@@ -70,7 +70,7 @@ function runYtDlp(args: string[], timeoutMs = 300_000): Promise<string> {
  * `--ies default,-generic` turns off yt-dlp's catch-all extractor, which would otherwise fetch any address it is given;
  * `--` makes the address a positional argument whatever it starts with.
  */
-export function playlistArgs(url: string): string[] {
+function playlistArgs(url: string): string[] {
   return [
     "--flat-playlist",
     "--dump-json",

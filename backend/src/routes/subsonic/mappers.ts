@@ -48,7 +48,7 @@ function genreFields(genres: string[] | undefined) {
 }
 
 /** The year a client sees for an album: what the web shows. Zero or none is no year. */
-export const shownAlbumYear = (album: { year: number | null; originalYear: number | null; displayYear: number | null }): number | undefined =>
+const shownAlbumYear = (album: { year: number | null; originalYear: number | null; displayYear: number | null }): number | undefined =>
     getEffectiveYear(album) || undefined;
 
 export type TrackRow = {

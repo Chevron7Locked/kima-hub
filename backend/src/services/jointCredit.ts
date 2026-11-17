@@ -47,7 +47,7 @@ export function leadingParts(name: string): string[] {
  * joining word ("a & b", "a and b", "a + b"). Built from the name's letters and digits alone, so every spelling and case
  * of a name is the same question and shares one cached reply.
  */
-export function exactNameQuery(name: string): string {
+function exactNameQuery(name: string): string {
     // MusicBrainz keeps an apostrophe inside a word ("o'connor", "destiny's"), straight or curly, and has no artist
     // "o connor": splitting there would be a false "none found". Accents it folds itself.
     const tokens = normalizeArtistName(name.replace(/\+/g, " & "))

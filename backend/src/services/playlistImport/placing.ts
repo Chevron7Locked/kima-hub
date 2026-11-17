@@ -64,7 +64,7 @@ const PLAYLIST_HINTS: Record<MusicPlatform, string> = {
 /** A failure may still overwrite a failed import (a later, truer reason), but not one that completed or was cancelled. */
 const NOT_OVERWRITTEN_BY_FAILURE: ImportJob["status"][] = ["completed", "cancelled"];
 
-export class PlaylistImportService {
+class PlaylistImportService {
   private activeImportControllers = new Map<string, AbortController>();
 
   async startImport(

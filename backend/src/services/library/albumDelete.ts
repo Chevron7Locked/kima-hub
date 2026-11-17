@@ -21,7 +21,7 @@
  *   nothing of it remains (no album left: `deleteEmptyArtists`) takes its keeps with it: the scanner
  *   writes a keep for every library album, so sparing artists that hold one would leave every emptied artist behind for
  *   enrichment and search to find. An artist merged into another hands its keeps to the successor (`deleteArtists` with
- *   `keepsTo`); the more protective source stands on a clash (`ownershipRank`). A person deleting an artist on purpose
+ *   `keepsTo`); the more protective source stands on a clash (`ownershipRankSql`). A person deleting an artist on purpose
  *   releases its keeps too.
  *
  * What becomes of a deleted song's history is `songHistory`'s, called here before the songs go: a copy of its recording

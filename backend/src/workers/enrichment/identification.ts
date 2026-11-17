@@ -11,7 +11,7 @@
  *    their untagged albums.
  *  - `IDENTIFICATION_LOOKAHEAD`: how many songs ahead of the dispatch the scheduler offers for that.
  *
- * Identification order (Kevin 2026-10-15, `.claude/rules/identification.md`): the file's recording id tag,
+ * Identification order (`.claude/rules/identification.md`): the file's recording id tag,
  * AcoustID by fingerprint, the album's tracklist by the album row's id, the ISRC, the name search. A pick that
  * matches AcoustID only by length goes last. The scheduler claims the record and queues the job; nothing here does.
  */

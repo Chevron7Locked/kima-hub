@@ -323,7 +323,7 @@ export function computeGenreTotals(albums: GenreCountedAlbum[], ownTagged: reado
  * counted from the songs themselves. Nothing cached is read: a count kept on the album can be stale (a file went missing
  * since the last scan) and can include songs that cannot play.
  */
-export async function libraryGenreAlbums(): Promise<GenreCountedAlbum[]> {
+async function libraryGenreAlbums(): Promise<GenreCountedAlbum[]> {
     const rows = await prisma.$queryRaw<
         {
             id: string; genres: unknown; userGenres: unknown; name: string; normalizedName: string | null;

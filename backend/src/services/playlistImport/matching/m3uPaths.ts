@@ -8,7 +8,7 @@ import { posix } from "path";
  * An encoded slash (%2F) stays as written: a file name cannot hold a "/", so it is never a folder either, and decoding
  * it would turn one name into two path segments.
  */
-export function decoded(value: string): string {
+function decoded(value: string): string {
     return value
         .split(/(%2f)/i)
         .map((part, at) => {
@@ -29,7 +29,7 @@ export function decoded(value: string): string {
  * lived), so leading `./` and `../` climb back toward the music folder and no further: playlists live at or under it,
  * and the library match settles whether the clamped path is real.
  */
-export function underMusicFolder(path: string, root: string): string | null {
+function underMusicFolder(path: string, root: string): string | null {
     const prefix = (root.endsWith("/") ? root : `${root}/`).toLowerCase();
     let rest: string;
     if (path.toLowerCase().startsWith(prefix)) rest = path.slice(prefix.length);
@@ -83,7 +83,7 @@ export function unicodeForms(text: string): string[] {
 }
 
 /** The most spellings `caseSpellings` gives for one text. */
-export const SPELLINGS_MAX = 8;
+const SPELLINGS_MAX = 8;
 
 /**
  * `text` with its ASCII letters lower-cased and each non-ASCII letter written as it is, in lower case and in upper case:
@@ -114,7 +114,7 @@ export function libraryFileNames(filePath: string, readings: string[]): string[]
 }
 
 /** A path's segments for comparing: no empty, `.` or `..` segment (a leading `/`, `./` or `../` is no folder), letter case and Unicode form ignored. */
-export function segmentsOf(path: string): string[] {
+function segmentsOf(path: string): string[] {
     return posix
         .normalize(path)
         .split("/")
@@ -123,7 +123,7 @@ export function segmentsOf(path: string): string[] {
 }
 
 /** How many segments, counted from the file name backwards, a library path and one reading of an entry's path share. */
-export function sharedTrailingSegments(libraryPath: string, reading: string): number {
+function sharedTrailingSegments(libraryPath: string, reading: string): number {
     const ours = segmentsOf(libraryPath);
     const theirs = segmentsOf(reading);
     let shared = 0;

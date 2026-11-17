@@ -4,7 +4,7 @@ import { prisma } from "../utils/db";
 import { namedFields, playlistFields } from "./playlistFields";
 
 /** How long a create's `Idempotency-Key` is remembered. */
-export const KEY_LIFETIME_MS = 24 * 60 * 60 * 1000;
+const KEY_LIFETIME_MS = 24 * 60 * 60 * 1000;
 export const MAX_KEY_LENGTH = 128;
 
 type NewPlaylist = { name: string; isPublic: boolean };

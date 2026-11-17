@@ -75,7 +75,7 @@ export function artistLookupWord(artistName: string): string {
 }
 
 /** Songs loaded per query when the artists a word finds have many: a query carries at most this many ids. */
-export const SONG_CHUNK_MAX = 10_000;
+const SONG_CHUNK_MAX = 10_000;
 
 /**
  * Every playable song, in id order, of the artists whose `normalizedName` holds `word` as a whole word, anywhere in the
@@ -188,7 +188,7 @@ export class Remembered<V> {
 
 
 /** The most title-only candidates one lookup reads. */
-export const TITLE_CANDIDATES_MAX = 500;
+const TITLE_CANDIDATES_MAX = 500;
 
 /**
  * Playable songs whose title, as in the file or as shown, holds one of `terms`, in any letter case. The database folds case for ASCII only, so a

@@ -50,7 +50,7 @@ export function readTwoFactorSecret(userId: string, stored: string | null): stri
  * Spends a step for a person: true when it is newer than any they have used, false when it or a later one is spent
  * already. One conditional write, so two sign-ins sending one code together cannot both succeed.
  */
-export async function spendTotpStep(userId: string, step: number, db: Db = prisma): Promise<boolean> {
+async function spendTotpStep(userId: string, step: number, db: Db = prisma): Promise<boolean> {
     const spent = await db.user.updateMany({
         where: { id: userId, twoFactorLastStep: { lt: step } },
         data: { twoFactorLastStep: step },
@@ -79,7 +79,7 @@ export function isRecoveryCodeShaped(token: string): boolean {
 }
 
 /** How long a secret from setup waits for a code that proves it. */
-export const PENDING_SECRET_LIFETIME_MS = 10 * 60_000;
+const PENDING_SECRET_LIFETIME_MS = 10 * 60_000;
 
 /**
  * The secret setup kept for a person, or null when none waits, it is older than ten minutes, or the key cannot read it.
@@ -224,7 +224,7 @@ const MAX_SPEND_TRIES = 10;
  * list is still the one the code was found in. When another sign-in changed the list first, it is read again and the
  * code looked for in it, so two honest sign-ins with different codes both succeed, while one code sent twice works once.
  */
-export async function spendRecoveryCode(userId: string, encryptedCodes: string | null, code: string, db: Db = prisma): Promise<boolean> {
+async function spendRecoveryCode(userId: string, encryptedCodes: string | null, code: string, db: Db = prisma): Promise<boolean> {
     const hash = crypto.createHash("sha256").update(code.toUpperCase()).digest("hex");
     let current = encryptedCodes;
     for (let attempt = 0; attempt < MAX_SPEND_TRIES; attempt++) {

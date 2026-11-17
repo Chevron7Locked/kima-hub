@@ -54,7 +54,7 @@ export async function saveImportJob(job: ImportJob): Promise<void> {
 }
 
 /** Cache a job for the worker and API processes to share, and tell the person's open import page. */
-export async function cacheAndAnnounceImportJob(job: ImportJob): Promise<void> {
+async function cacheAndAnnounceImportJob(job: ImportJob): Promise<void> {
   try {
     await redisClient.setex(IMPORT_JOB_KEY(job.id), IMPORT_JOB_TTL, JSON.stringify(job));
   } catch (error) {

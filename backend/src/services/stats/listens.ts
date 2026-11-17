@@ -527,7 +527,7 @@ export async function albumsListenedAtLeast(
 }
 
 /** How many Play rows `playHistoryPages` reads at a time. */
-export const PLAY_HISTORY_PAGE_SIZE = 5000;
+const PLAY_HISTORY_PAGE_SIZE = 5000;
 
 /** The song of a play: its title, length and artist. */
 interface PlayedSong {

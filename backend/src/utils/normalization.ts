@@ -70,7 +70,7 @@ export function normalizeTrackTitle(str: string): string {
  * "Stan feat. Dido" are "Stan". A title that is only a credit is kept whole. (The other callers' strippers also cut
  * "with", which is a word in real titles, so this one does not.)
  */
-export function stripFeaturedCredit(str: string): string {
+function stripFeaturedCredit(str: string): string {
   const stripped = str
     .replace(/\s*[([]\s*(?:feat|ft|featuring)\b\.?[^)\]]*[)\]]/gi, " ")
     .replace(/\s+[-–—]\s*(?:feat|ft|featuring)\b\.?\s.*$/i, "")

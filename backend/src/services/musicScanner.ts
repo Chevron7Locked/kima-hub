@@ -103,7 +103,7 @@ export function slimMetadata(metadata: IAudioMetadata): SlimMetadata {
  * The bitrate Track keeps from what a file's headers report (bits a second): kbps, rounded. None when the file reports
  * none, never a guess; under 500 bits a second it would round to 0 kbps, which is no bitrate either.
  */
-export function storedBitrate(reported: number | undefined): number | null {
+function storedBitrate(reported: number | undefined): number | null {
     return reported && Number.isFinite(reported) && reported >= 500 ? Math.round(reported / 1000) : null;
 }
 

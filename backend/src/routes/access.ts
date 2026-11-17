@@ -115,7 +115,7 @@ function routeTable(keys: string[]): (method: string, url: string) => Promise<st
  * What a request path under a mount is declared as: an entry of `routes` when one matches, else the mount's family;
  * and whether a query-string token counts there.
  */
-export function declaredResolver(access: Access): (method: string, url: string) => Promise<Declared> {
+function declaredResolver(access: Access): (method: string, url: string) => Promise<Declared> {
     const overrides = access.routes ?? {};
     const byFamily = Object.keys(overrides).length > 0 ? routeTable(Object.keys(overrides)) : null;
     const tokenRoutes = Array.isArray(access.urlToken) ? routeTable(access.urlToken) : null;

@@ -4,7 +4,7 @@ import { callSettingsListeners, type SystemSettingsChanges, type SystemSettingsF
 import { decryptOrNull, decryptSettings, ENCRYPTED_FIELDS, encryptSettings, noteUnreadableCredentials, type EncryptedField } from "./encryptedFields";
 import { lidarrSelfRepairingFields } from "../services/lidarrWebhookSecret";
 
-// Other processes see a save up to this late, by design: no pub/sub (ruled 2026-11-11).
+// Other processes see a save up to this late, by design: no pub/sub.
 const CACHE_TTL_MS = 60 * 1000;
 
 async function buildSettings() {
