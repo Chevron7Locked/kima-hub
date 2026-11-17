@@ -197,7 +197,7 @@ test.describe("Collection & Library", () => {
         // Track rows are divs; the tab pills above them are buttons with the same marker.
         const rows = page.locator("div[data-tv-card]");
         await expect(rows.first()).toBeVisible({ timeout: 10000 });
-        await expect(rows.first().getByRole("button", { name: /^(Play|Pause)$/ })).toBeAttached();
+        await expect(rows.first().getByRole("button", { name: /^(play|pause)$/i })).toBeAttached();
     });
 
     test("album detail page has play button and track list", async ({ page }) => {

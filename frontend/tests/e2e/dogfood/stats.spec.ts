@@ -30,6 +30,21 @@ async function scanPlayHistory(page: Page): Promise<void> {
     await expect(page.getByText(/total plays/i).first()).toBeVisible({ timeout: 30_000 });
 }
 
+/** A queue of `length` songs for a save: the library's own songs, repeated, since a save keeps only songs Kima holds. */
+async function libraryQueue(page: Page, token: string, length: number): Promise<Array<{ id: string; title: string; duration: number }>> {
+    const res = await page.request.get("/api/library/tracks?limit=50", { headers: { Authorization: `Bearer ${token}` } });
+    expect(res.ok(), `track list returned ${res.status()}`).toBeTruthy();
+    const songs: Array<{ id: string; title: string; duration: number }> = (await res.json()).tracks;
+    expect(songs.length, "the library needs songs to queue").toBeGreaterThan(0);
+    return Array.from({ length }, (_, i) => songs[i % songs.length]).map(({ id, title, duration }) => ({ id, title, duration }));
+}
+
+/** Clears the saved queue a probe wrote, so the next page does not restore thousands of songs. */
+async function clearSavedQueue(page: Page, token: string): Promise<void> {
+    const res = await page.request.delete("/api/playback-state", { headers: { Authorization: `Bearer ${token}` } });
+    expect(res.ok(), `clearing the saved queue returned ${res.status()}`).toBeTruthy();
+}
+
 test.describe("Dogfood: stats, filters, audit, queue", () => {
     let browser: Browser;
     let context: BrowserContext;
@@ -415,23 +430,23 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
             });
             const { maxQueueLength } = await limitRes.json();
 
-            const oversized = Array.from({ length: maxQueueLength + 25 }, (_, i) => ({
-                id: `probe-${i}`,
-                title: `Probe ${i}`,
-                duration: 180,
-            }));
-            const save = await page.request.post(`/api/playback-state`, {
-                headers: { Authorization: `Bearer ${token}` },
-                data: { playbackType: "track", queue: oversized, currentIndex: 0 },
-            });
-            expect(save.status(), "an over-long queue should be trimmed, not refused").toBe(200);
+            const oversized = await libraryQueue(page, token, maxQueueLength + 25);
+            try {
+                const save = await page.request.post(`/api/playback-state`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    data: { playbackType: "track", queue: oversized, currentIndex: 0 },
+                });
+                expect(save.status(), "an over-long queue should be trimmed, not refused").toBe(200);
 
-            const read = await page.request.get(`/api/playback-state`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            const state = await read.json();
-            expect(Array.isArray(state.queue)).toBe(true);
-            expect(state.queue.length).toBe(maxQueueLength);
+                const read = await page.request.get(`/api/playback-state`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const state = await read.json();
+                expect(Array.isArray(state.queue)).toBe(true);
+                expect(state.queue.length).toBe(maxQueueLength);
+            } finally {
+                await clearSavedQueue(page, token);
+            }
             await page.goto("/");
             await settle(page);
         });
@@ -768,59 +783,66 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
                     })
                 ).json()
             ).maxQueueLength as number;
+            // A number other than the one in effect, or the page has nothing to save.
+            const target = original === 2500 ? 2400 : 2500;
 
-            await page.goto("/settings");
-            await settle(page);
+            try {
+                await page.goto("/settings");
+                await settle(page);
 
-            const row = page.getByText(/queue limit/i).first();
-            await expect(row).toBeVisible({ timeout: 20_000 });
-            const input = page
-                .locator("input[type=number]")
-                .filter({ hasNot: page.locator("[disabled]") })
-                .last();
-            await input.fill("2500");
-            await input.blur(); // the blur lifts the number into the page's state
-            // The page-level "Save Changes" button is the only door to the
-            // server: it POSTs the whole settings state. A locator that
-            // matches any Save hits the API-keys "Save token" button first.
-            await page.getByRole("button", { name: /save changes/i }).click();
+                const row = page.getByText(/queue limit/i).first();
+                await expect(row).toBeVisible({ timeout: 20_000 });
+                const input = page
+                    .locator("input[type=number]")
+                    .filter({ hasNot: page.locator("[disabled]") })
+                    .last();
+                await input.fill(String(target));
+                await input.blur(); // the blur lifts the number into the page's state
+                // The page-level "Save Changes" button is the only door to the
+                // server: it POSTs the whole settings state. A locator that
+                // matches any Save hits the API-keys "Save token" button first.
+                await page.getByRole("button", { name: /save changes/i }).click();
 
-            await expect
-                .poll(
-                    async () =>
-                        (
-                            await (
-                                await page.request.get(`/api/playback-state/limit`, {
-                                    headers: { Authorization: `Bearer ${token}` },
-                                })
-                            ).json()
-                        ).maxQueueLength,
-                    { timeout: 90_000, message: "the server should honour the saved limit" },
-                )
-                .toBe(2500);
+                await expect
+                    .poll(
+                        async () =>
+                            (
+                                await (
+                                    await page.request.get(`/api/playback-state/limit`, {
+                                        headers: { Authorization: `Bearer ${token}` },
+                                    })
+                                ).json()
+                            ).maxQueueLength,
+                        { timeout: 90_000, message: "the server should honour the saved limit" },
+                    )
+                    .toBe(target);
 
-            // And the clamp must follow the new number, not the old one.
-            const oversized = Array.from({ length: 2600 }, (_, i) => ({
-                id: `probe-${i}`,
-                title: `Probe ${i}`,
-                duration: 180,
-            }));
-            await page.request.post(`/api/playback-state`, {
-                headers: { Authorization: `Bearer ${token}` },
-                data: { playbackType: "track", queue: oversized, currentIndex: 0 },
-            });
-            const state = await (
-                await page.request.get(`/api/playback-state`, {
+                // And the clamp must follow the new number, not the old one.
+                const oversized = await libraryQueue(page, token, target + 100);
+                const save = await page.request.post(`/api/playback-state`, {
                     headers: { Authorization: `Bearer ${token}` },
-                })
-            ).json();
-            expect(state.queue.length).toBe(2500);
-
-            // Put it back, so the suite leaves the instance as it found it.
-            await page.request.post(`/api/system-settings`, {
-                headers: { Authorization: `Bearer ${token}` },
-                data: { maxQueueLength: original },
-            });
+                    data: { playbackType: "track", queue: oversized, currentIndex: 0 },
+                });
+                expect(save.status(), "an over-long queue should be trimmed, not refused").toBe(200);
+                const state = await (
+                    await page.request.get(`/api/playback-state`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    })
+                ).json();
+                expect(Array.isArray(state.queue)).toBe(true);
+                expect(state.queue.length).toBe(target);
+            } finally {
+                // Put it back, pass or fail, so the suite leaves the instance as it found it.
+                try {
+                    const restore = await page.request.post(`/api/system-settings`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                        data: { maxQueueLength: original },
+                    });
+                    expect(restore.ok(), `putting the queue limit back returned ${restore.status()}`).toBeTruthy();
+                } finally {
+                    await clearSavedQueue(page, token);
+                }
+            }
         });
 
         session.assertClean("7c. Queue limit setting");
