@@ -776,7 +776,8 @@ export async function syncEnrichmentFailureAlert(): Promise<void> {
     });
 }
 
-async function runEnrichmentCycle(): Promise<{
+/** What one cycle did, or why it did not run: what a press of "run now" answers. */
+export interface EnrichmentCycleResult {
     artists: number;
     tracks: number;
     audioQueued: number;
@@ -789,7 +790,9 @@ async function runEnrichmentCycle(): Promise<{
      * An empty cycle backs off; a declined one should come back promptly.
      */
     declined?: "already-running" | "too-soon" | "scan-running" | "stopped" | "lock-unavailable";
-}> {
+}
+
+async function runEnrichmentCycle(): Promise<EnrichmentCycleResult> {
     const emptyResult = { artists: 0, tracks: 0, audioQueued: 0 };
 
     // A closed worker's queues and connections are gone, and its timer chain has ended: nothing past a stop runs,
@@ -850,15 +853,16 @@ async function runEnrichmentCycle(): Promise<{
         return emptyResult;
     }
 
-    // Never allow concurrent runs
-    if (run.cycleInFlight()) {
-        return { ...emptyResult, declined: "already-running" };
-    }
-
-    // The scan goes first: every step starts from the whole library, never the part scanned so far.
+    // The scan goes first: every step starts from the whole library, never the part scanned so far. It is checked
+    // before the cycle in flight, so a press during a scan always says the new songs come first.
     if (await libraryScanRunning()) {
         logger.debug("[Enrichment] Waiting: a library scan is still adding songs");
         return { ...emptyResult, declined: "scan-running" };
+    }
+
+    // Never allow concurrent runs
+    if (run.cycleInFlight()) {
+        return { ...emptyResult, declined: "already-running" };
     }
 
     // Enforce minimum interval (unless an immediate request)
@@ -874,7 +878,7 @@ async function runEnrichmentCycle(): Promise<{
         logger.warn("[Enrichment] Hang detected — enrichment has been running > 15 min with no activity");
     }
 
-    // The in-flight check above declines quickly; the lock is what keeps two cycles, in this process or
+    // The in-flight check above only sees this process; the lock is what keeps two cycles, in this process or
     // another, from offering the same records.
     const cycleLock = await distributedLock.acquire(CYCLE_LOCK_KEY, CYCLE_LOCK_TTL_MS);
     if (cycleLock.outcome === "held") {
@@ -1542,11 +1546,7 @@ async function computeEnrichmentProgress() {
  * An operator's start (Run Enrichment, wipe and re-run, start vibe analysis): lifts a
  * stop or a pause, wakes the workers and the analyzer, then runs a cycle now.
  */
-export async function startEnrichmentNow(): Promise<{
-    artists: number;
-    tracks: number;
-    audioQueued: number;
-}> {
+export async function startEnrichmentNow(): Promise<EnrichmentCycleResult> {
     const state = await enrichmentStateService.getState();
     if (state?.status === "paused" || state?.status === "stopping") {
         await enrichmentStateService.updateState({ status: "idle", currentPhase: null, pausedAt: undefined });
@@ -1557,18 +1557,14 @@ export async function startEnrichmentNow(): Promise<{
 }
 
 /** Run one enrichment cycle now, without waiting for the timer. Non-blocking. */
-export async function triggerEnrichmentNow(): Promise<{
-    artists: number;
-    tracks: number;
-    audioQueued: number;
-}> {
+export async function triggerEnrichmentNow(): Promise<EnrichmentCycleResult> {
     logger.debug("[Enrichment] Triggering immediate enrichment cycle...");
 
     // A trigger runs one cycle and never lifts an operator's stop or pause;
     // startEnrichmentNow does.
 
-    // Ask for a cycle past the minimum interval (does NOT bypass a cycle in flight —
-    // a concurrent cycle will still cause this call to return an empty result)
+    // Ask for a cycle past the minimum interval. A running scan or a cycle in flight still
+    // declines it ("scan-running", "already-running"); the request waits for the next cycle.
     run.requestWake();
     invalidateEnrichmentProgress();
     bumpScheduleToFastInterval();

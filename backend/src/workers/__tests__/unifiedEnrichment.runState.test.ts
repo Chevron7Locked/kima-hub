@@ -51,6 +51,7 @@ import {
     startUnifiedEnrichmentWorker,
     stopUnifiedEnrichmentWorker,
 } from "../unifiedEnrichment";
+import { libraryScanRunning } from "../scanActivity";
 
 const state = enrichmentStateMock.enrichmentStateService;
 const queueOwedArtists = artistJobMock.queueOwedArtists;
@@ -297,6 +298,25 @@ describe("stopping the worker", () => {
             expect(loggerMock.logger.warn).not.toHaveBeenCalled();
         } finally {
             release?.(0);
+        }
+    });
+});
+
+describe("a trigger while a cycle runs", () => {
+    it("says a scan is running when one is, so the person knows the new songs come first", async () => {
+        let release!: (queued: number) => void;
+        queueOwedArtists.mockImplementationOnce(() => new Promise<number>((resolve) => { release = resolve; }));
+        const cycle = triggerEnrichmentNow();
+        try {
+            await until(() => queueOwedArtists.mock.calls.length === 1);
+
+            expect(await triggerEnrichmentNow()).toEqual(expect.objectContaining({ declined: "already-running" }));
+
+            jest.mocked(libraryScanRunning).mockResolvedValueOnce(true);
+            expect(await triggerEnrichmentNow()).toEqual(expect.objectContaining({ declined: "scan-running" }));
+        } finally {
+            release?.(0);
+            await cycle;
         }
     });
 });
