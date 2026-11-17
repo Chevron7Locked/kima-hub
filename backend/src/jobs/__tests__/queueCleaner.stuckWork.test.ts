@@ -93,6 +93,70 @@ it("does not lower an import's progress, nor write to one that closed, when it a
     await prisma.spotifyImportJob.deleteMany({ where: { id: job.id } });
 });
 
+describe("an import left pending", () => {
+    const pendingImport = async (minutesOld: number) => {
+        const job = await prisma.spotifyImportJob.create({
+            data: {
+                userId: USER, spotifyPlaylistId: "37i9dQZF1DXcBWIGoYBM5M", playlistName: "Today's Top Hits",
+                status: "pending", albumsTotal: 1, tracksTotal: 1, pendingTracks: [],
+            },
+        });
+        await prisma.$executeRaw`UPDATE "SpotifyImportJob" SET "updatedAt" = ${new Date(Date.now() - minutesOld * 60_000)} WHERE id = ${job.id}`;
+        return job;
+    };
+
+    it("is failed once it has sat past the stale timeout, and counted as recovered", async () => {
+        const job = await pendingImport(45);
+
+        const recovered = await queueCleaner.checkStuckSpotifyImports();
+
+        expect(recovered).toBe(1);
+        expect(await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject({
+            status: "failed",
+            error: "Import never started",
+        });
+        await prisma.spotifyImportJob.deleteMany({ where: { id: job.id } });
+    });
+
+    it("is left alone while it is still young", async () => {
+        const job = await pendingImport(5);
+
+        const recovered = await queueCleaner.checkStuckSpotifyImports();
+
+        expect(recovered).toBe(0);
+        expect((await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("pending");
+        await prisma.spotifyImportJob.deleteMany({ where: { id: job.id } });
+    });
+});
+
+describe("a scanning import asked to scan again", () => {
+    const scanningImport = async () => {
+        const job = await prisma.spotifyImportJob.create({
+            data: {
+                userId: USER, spotifyPlaylistId: "37i9dQZF1DXcBWIGoYBM5M", playlistName: "Today's Top Hits",
+                status: "scanning", progress: 75, albumsTotal: 1, tracksTotal: 1, pendingTracks: [],
+            },
+        });
+        await prisma.$executeRaw`UPDATE "SpotifyImportJob" SET "updatedAt" = now() - interval '15 minutes' WHERE id = ${job.id}`;
+        return job;
+    };
+
+    it("counts as recovered only when a scan was queued", async () => {
+        const job = await scanningImport();
+        const ask = jest.spyOn(scanRequest, "requestScan")
+            .mockResolvedValueOnce({ queued: false, reason: "already running" } as never)
+            .mockResolvedValueOnce({ queued: true, jobId: "stub" } as never);
+
+        const skipped = await queueCleaner.checkStuckSpotifyImports();
+        await prisma.$executeRaw`UPDATE "SpotifyImportJob" SET "updatedAt" = now() - interval '15 minutes' WHERE id = ${job.id}`;
+        const queued = await queueCleaner.checkStuckSpotifyImports();
+        ask.mockRestore();
+
+        expect([skipped, queued]).toEqual([0, 1]);
+        await prisma.spotifyImportJob.deleteMany({ where: { id: job.id } });
+    });
+});
+
 it("closes a Discover batch left downloading past its two-hour limit, with no Lidarr set up", async () => {
     const batch = await prisma.discoveryBatch.create({
         data: {

@@ -5,8 +5,8 @@ import * as downloadJobs from "../services/downloads/jobs";
 import { artistIdentityKey } from "../services/artistIdentity";
 import { editionlessKey } from "../services/albumIdentity";
 
-/** Imports the stuck-work check looks at: two that can stall, and a cancelled one whose clean-up stopped part-way. */
-const WATCHED_IMPORT_STATES = ["scanning", "downloading", "cancelled"];
+/** Imports the stuck-work check looks at: three that can stall, and a cancelled one whose clean-up stopped part-way. */
+const WATCHED_IMPORT_STATES = ["pending", "scanning", "downloading", "cancelled"];
 
 class QueueCleanerService {
     // Imported on first use and cached
@@ -50,8 +50,8 @@ class QueueCleanerService {
     }
 
     /**
-     * Check for Spotify import jobs stuck in "scanning" or "downloading" status, or left "cancelled".
-     * Re-triggers scan for jobs stuck scanning, or forces completion check
+     * Check for Spotify import jobs stuck in "pending", "scanning" or "downloading" status, or left "cancelled".
+     * Fails an import that never started, re-triggers scan for jobs stuck scanning, or forces completion check
      * for jobs stuck downloading. A cancelled import is deleted by its own cancel, so one still there after a while
      * had its clean-up stop part-way: the clean-up is finished.
      */
@@ -59,6 +59,7 @@ class QueueCleanerService {
         const SCANNING_RETRY_TIMEOUT = 10 * 60 * 1000; // 10 minutes - retry scan
         const SCANNING_FAIL_TIMEOUT = 30 * 60 * 1000; // 30 minutes - force fail
         const DOWNLOADING_TIMEOUT = 30 * 60 * 1000; // 30 minutes - force completion check
+        const PENDING_TIMEOUT = 30 * 60 * 1000; // 30 minutes - a queued import whose worker never began
         const CANCEL_CLEANUP_GRACE = 10 * 60 * 1000; // 10 minutes - a cancel still being carried out is left alone
 
         const stuckJobs = await prisma.spotifyImportJob.findMany({
@@ -84,6 +85,15 @@ class QueueCleanerService {
                 } catch (err: any) {
                     logger.warn(`[IMPORT STUCK] Could not finish the clean-up of cancelled import ${job.id}: ${err.message}`);
                 }
+            } else if (job.status === "pending") {
+                if (jobAge <= PENDING_TIMEOUT) continue;
+                logger.debug(
+                    `[IMPORT STUCK] Job ${job.id} pending for ${Math.round(jobAge / 60000)}min - it never started, failing`
+                );
+
+                // An import that closed while this check ran keeps its outcome, and is not counted as recovered.
+                const { failImportJob } = await import("../services/playlistImport");
+                if (await failImportJob(job.id, "Import never started")) recoveredCount++;
             } else if (job.status === "scanning") {
                 if (jobAge > SCANNING_FAIL_TIMEOUT) {
                     logger.debug(
@@ -110,7 +120,9 @@ class QueueCleanerService {
                     // Touch updatedAt so the next check does not queue it again. The counts only go up, and an import that
                     // closed while the scan was asked for is left as it is.
                     const { recordAlbumProgress } = await import("../services/playlistImport");
-                    if (await recordAlbumProgress(job.id, job.albumsCompleted, job.progress)) recoveredCount++;
+                    await recordAlbumProgress(job.id, job.albumsCompleted, job.progress);
+                    // Only a scan that was queued is counted as a recovery, not one that was skipped.
+                    if (result.queued) recoveredCount++;
                 }
             } else if (job.status === "downloading" && jobAge > DOWNLOADING_TIMEOUT) {
                 logger.debug(
