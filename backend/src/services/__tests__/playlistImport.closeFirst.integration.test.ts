@@ -6,6 +6,14 @@
  * downloads) looks at the stored status, so a stop from another process holds it where the in-process abort cannot
  * reach. Real database and Redis; Lidarr answers as it did in a recorded run.
  */
+jest.mock("../playlistImport/reading", () => ({
+    ...jest.requireActual("../playlistImport/reading"),
+    readMusicLink: jest.fn(),
+}));
+jest.mock("../playlistImport/matching", () => ({
+    ...jest.requireActual("../playlistImport/matching"),
+    previewOfTracklist: jest.fn(),
+}));
 import { prisma } from "../../utils/db";
 import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { playlistImportService, failImportJob } from "../playlistImport";
@@ -14,6 +22,8 @@ import { notificationService } from "../notificationService";
 import { logger } from "../../utils/logger";
 import * as downloadJobs from "../downloads/jobs";
 import { useLidarrCancelScenario } from "../../__tests__/helpers/lidarrCancelScenario";
+import { readMusicLink } from "../playlistImport/reading";
+import { previewOfTracklist } from "../playlistImport/matching";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 useLidarrCancelScenario();
@@ -35,6 +45,18 @@ const downloadJob = (importJobId: string, status: string) =>
             metadata: { downloadType: "spotify_import", spotifyImportJobId: importJobId },
         },
     });
+
+// A stop from another process (the worker and the API run apart in the split image) changes the stored row; this
+// process's cached copy of the import still says it is open.
+const cacheCopyOpen = async (id: string) => {
+    const { toImportJob } = await import("../playlistImport/jobState");
+    const row = await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id } });
+    await redisClient.set(`import:job:${id}`, JSON.stringify({ ...toImportJob(row), status: "downloading" }));
+};
+const cancelElsewhere = async (id: string) => {
+    await prisma.spotifyImportJob.update({ where: { id }, data: { status: "cancelled" } });
+    await cacheCopyOpen(id);
+};
 
 const rowOf = (id: string) => prisma.spotifyImportJob.findUnique({ where: { id } });
 const downloadRows = async (importJobId: string) => {
@@ -236,14 +258,6 @@ describe("an import that was stopped before its worker started", () => {
         expect(warn.mock.calls.some(([message]) => String(message).includes(running.id))).toBe(false);
     });
 
-    // A stop from another process (the worker and the API run apart in the split image) changes the stored row; this
-    // process's cached copy of the import still says it is open.
-    const cacheCopyOpen = async (id: string) => {
-        const { toImportJob } = await import("../playlistImport/jobState");
-        const row = await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id } });
-        await redisClient.set(`import:job:${id}`, JSON.stringify({ ...toImportJob(row), status: "downloading" }));
-    };
-
     it("does not write an album's progress over a stop that came from another process", async () => {
         const running = await importRow("downloading");
         acquire.mockImplementation((async () => {
@@ -283,6 +297,20 @@ describe("an import that was stopped before its worker started", () => {
         expect(check).not.toHaveBeenCalled();
     }, 5000);
 
+    it("never lowers the counts a later write left, whatever order an album's progress lands in", async () => {
+        const running = await importRow("downloading");
+        acquire.mockImplementation((async () => {
+            // A webhook has moved the import on while this album was downloading.
+            await prisma.spotifyImportJob.update({ where: { id: running.id }, data: { status: "scanning", progress: 75, albumsCompleted: 5 } });
+            return { success: true, source: "soulseek" };
+        }) as never);
+
+        await run(running.id);
+
+        const stored = await prisma.spotifyImportJob.findUnique({ where: { id: running.id } });
+        expect([stored?.status, stored?.progress, stored?.albumsCompleted]).toEqual(["scanning", 75, 5]);
+    }, 5000);
+
     it("lets a download start only while the stored import is open, and stops this process's searches when it is not", async () => {
         const running = await importRow("downloading");
         const seen: { open: boolean[]; aborted: boolean[] } = { open: [], aborted: [] };
@@ -298,5 +326,62 @@ describe("an import that was stopped before its worker started", () => {
 
         expect(seen.open).toEqual([true, false]);
         expect(seen.aborted).toEqual([true]);
+    });
+});
+
+describe("a quick import stopped in another process", () => {
+    const URL = "https://www.deezer.com/playlist/90210";
+    const quickPreview = {
+        playlist: { id: "pl", name: "x", description: null, owner: "x", imageUrl: null, trackCount: 1 },
+        matchedTracks: [],
+        albumsToDownload: [{ albumMbid: "mbid-1", spotifyAlbumId: "sp-1", albumName: "A", artistName: "B", trackCount: 1, tracksNeeded: [{ title: "t", artist: "B" }] }],
+        summary: { total: 1, inLibrary: 0, downloadable: 1, notFound: 0 },
+    } as never;
+    let processImport: jest.SpyInstance;
+    beforeEach(() => {
+        (readMusicLink as jest.Mock).mockResolvedValue({});
+        (previewOfTracklist as jest.Mock).mockResolvedValue(quickPreview);
+        processImport = jest.spyOn(playlistImportService as any, "processImport").mockResolvedValue(undefined as never);
+    });
+
+    it("stops after the fetch when the stored import is cancelled, whatever its cached copy says", async () => {
+        const quick = await importRow("pending");
+        (previewOfTracklist as jest.Mock).mockImplementation(async () => {
+            await cancelElsewhere(quick.id);
+            return quickPreview;
+        });
+
+        await playlistImportService.processQuickImportFromQueue(quick.id, URL);
+
+        expect(processImport).not.toHaveBeenCalled();
+        expect((await rowOf(quick.id))?.status).toBe("cancelled");
+    });
+
+    it("does not write over a stop that lands after the fetch check", async () => {
+        const quick = await importRow("pending");
+        jest.spyOn(playlistImportService as any, "importerMayAcquire").mockImplementation((async () => {
+            await cancelElsewhere(quick.id);
+            return true;
+        }) as never);
+
+        await playlistImportService.processQuickImportFromQueue(quick.id, URL);
+
+        expect(processImport).not.toHaveBeenCalled();
+        expect((await rowOf(quick.id))?.status).toBe("cancelled");
+    });
+});
+
+describe("checking an import's downloads", () => {
+    it("reads the stored import, so a cancel with a cached copy still open leaves its downloads alone", async () => {
+        const stopped = await importRow("cancelled");
+        const waiting = await downloadJob(stopped.id, "pending");
+        await prisma.downloadJob.update({ where: { id: waiting.id }, data: { createdAt: new Date(Date.now() - 11 * 60_000) } });
+        await cacheCopyOpen(stopped.id);
+
+        await playlistImportService.checkImportCompletion(stopped.id);
+        await downloadJobs.whenIdle();
+
+        expect((await prisma.downloadJob.findUnique({ where: { id: waiting.id } }))?.status).toBe("pending");
+        expect((await rowOf(stopped.id))?.status).toBe("cancelled");
     });
 });

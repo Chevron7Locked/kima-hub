@@ -112,6 +112,33 @@ export async function updateImportJobFields(
   return true;
 }
 
+/**
+ * An album finished downloading: the counts only go up. Albums finish at the same time and a webhook may have moved the
+ * import on, so a write that carries a lower count than the row holds leaves it. Not written to a closed import.
+ * Announced when a row was written.
+ */
+export async function recordAlbumProgress(importJobId: string, albumsCompleted: number, progress: number): Promise<boolean> {
+  const written = await prisma.$executeRaw`
+    UPDATE "SpotifyImportJob"
+    SET "albumsCompleted" = GREATEST("albumsCompleted", ${albumsCompleted}::int),
+        "progress" = GREATEST("progress", ${progress}::int),
+        "updatedAt" = now()
+    WHERE "id" = ${importJobId} AND "status" NOT IN ('completed', 'failed', 'cancelled')`;
+  if (written === 0) return false;
+  try {
+    await publishImportJob(importJobId);
+  } catch (error) {
+    logger.warn(`Could not announce import ${importJobId} after its write:`, error);
+  }
+  return true;
+}
+
+/** The import as the database holds it, whatever a cached copy says; null when its row is gone. */
+export async function getStoredImportJob(importJobId: string): Promise<ImportJob | null> {
+  const row = await prisma.spotifyImportJob.findUnique({ where: { id: importJobId } });
+  return row ? toImportJob(row) : null;
+}
+
 export const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed", "cancelled"];
 
 /**

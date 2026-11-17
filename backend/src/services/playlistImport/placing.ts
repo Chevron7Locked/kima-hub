@@ -25,7 +25,7 @@ import { nameKey } from "../nameFold";
 import type { ImportJob, ImportPreview, AlbumToDownload } from "./types";
 import { readMusicLink, musicLinkName, M3UEntry, M3UNothingMatched } from "./reading";
 import { previewOfTracklist, pendingTracksOf, matchEntries, matchM3UEntries } from "./matching";
-import { failImportJob, jobLoggers, abortImportSearches, importStillOpen, trackImportSearches, untrackImportSearches, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
+import { failImportJob, jobLoggers, abortImportSearches, importStillOpen, trackImportSearches, untrackImportSearches, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, recordAlbumProgress, getStoredImportJob, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
 
 /** Where an import's preview waits for the worker that runs the import. */
 const previewKey = (importJobId: string) => `import:preview:${importJobId}`;
@@ -344,12 +344,8 @@ class PlaylistImportService {
                 job.progress = Math.round(
                   (job.albumsCompleted / job.albumsTotal) * 30,
                 );
-                // A stop from another process stays: the loop below reads the stored status and ends.
-                await updateImportJobFields(
-                  job.id,
-                  { albumsCompleted: job.albumsCompleted, progress: job.progress },
-                  CLOSED_IMPORT_STATES,
-                );
+                // A stop from another process stays, and the counts never go down: the loop below reads the stored status.
+                await recordAlbumProgress(job.id, job.albumsCompleted, job.progress);
 
                 jobLogger?.debug(
                   `Album done: ${album.artistName} - ${
@@ -455,7 +451,8 @@ class PlaylistImportService {
   /** Whether all of an import's downloads are done (asked by the download manager, the queue cleaner and the poll). */
   async checkImportCompletion(importJobId: string): Promise<void> {
 
-    const job = await getImportJob(importJobId);
+    // The stored import, not a cached copy: one cancelled or handed on in another process is not checked again.
+    const job = await getStoredImportJob(importJobId);
     if (!job) {
       logger.debug(`   Job not found`);
       jobLoggers.delete(importJobId);
@@ -1553,8 +1550,13 @@ class PlaylistImportService {
     jobLoggers.set(importJobId, jobLogger);
 
     try {
+      // Every write here leaves an import that was stopped meanwhile (the worker and the API run apart in the split
+      // image), and the import ends where it finds that.
       job.status = "fetching";
-      await saveImportJob(job);
+      if (!(await updateImportJobFields(importJobId, { status: "fetching" }, CLOSED_IMPORT_STATES))) {
+        jobLogger.info("[Quick Import] Job was stopped before fetching started");
+        return;
+      }
 
       jobLogger.info(`[Quick Import] Fetching playlist from ${url}`);
 
@@ -1562,10 +1564,9 @@ class PlaylistImportService {
 
       const preview = await previewOfTracklist(await readMusicLink(link));
 
-      // Re-read from DB to detect cancellation during the fetch phase
-      const freshJob = await getImportJob(importJobId);
-      if (!freshJob || freshJob.status === "cancelled") {
-        jobLogger.info("[Quick Import] Job cancelled during fetch phase");
+      // The stored status shows a stop during the fetch phase
+      if (!(await importStillOpen(importJobId))) {
+        jobLogger.info("[Quick Import] Job stopped during fetch phase");
         return;
       }
 
@@ -1575,7 +1576,16 @@ class PlaylistImportService {
       job.tracksTotal = preview.summary.total;
       job.tracksMatched = preview.summary.inLibrary;
       job.status = "downloading";
-      await saveImportJob(job);
+      if (!(await updateImportJobFields(importJobId, {
+        playlistName: job.playlistName,
+        spotifyPlaylistId: job.spotifyPlaylistId,
+        tracksTotal: job.tracksTotal,
+        tracksMatched: job.tracksMatched,
+        status: "downloading",
+      }, CLOSED_IMPORT_STATES))) {
+        jobLogger.info("[Quick Import] Job was stopped after its playlist was read");
+        return;
+      }
 
       jobLogger.info(`[Quick Import] Playlist: "${resolvedName}" (${preview.summary.total} tracks)`);
       jobLogger.info(`[Quick Import] Already in library: ${preview.summary.inLibrary}, downloadable: ${preview.summary.downloadable}`);
@@ -1600,7 +1610,14 @@ class PlaylistImportService {
       job.albumsTotal = albumMbidsToDownload.length;
       job.tracksDownloadable = tracksFromDownloads;
       job.pendingTracks = pendingTracks;
-      await saveImportJob(job);
+      if (!(await updateImportJobFields(importJobId, {
+        albumsTotal: job.albumsTotal,
+        tracksDownloadable: job.tracksDownloadable,
+        pendingTracks: job.pendingTracks as unknown as Prisma.InputJsonValue,
+      }, CLOSED_IMPORT_STATES))) {
+        jobLogger.info("[Quick Import] Job was stopped before its downloads started");
+        return;
+      }
 
       // The preview goes to processImport directly: nothing reads a quick import's cached preview, so none is kept.
       await this.processImport(job, albumMbidsToDownload, preview);
