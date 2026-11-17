@@ -25,19 +25,26 @@ import { nameKey } from "../nameFold";
 import type { ImportJob, ImportPreview, AlbumToDownload } from "./types";
 import { readMusicLink, musicLinkName, M3UEntry, M3UNothingMatched } from "./reading";
 import { previewOfTracklist, pendingTracksOf, matchEntries, matchM3UEntries } from "./matching";
-import { jobLoggers, trackImportSearches, untrackImportSearches, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
+import { failImportJob, jobLoggers, trackImportSearches, untrackImportSearches, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
 
 /** Where an import's preview waits for the worker that runs the import. */
 const previewKey = (importJobId: string) => `import:preview:${importJobId}`;
 
-/** Keeps an import's preview for the worker that runs it. A failed write is logged, and the worker then finds no preview. */
-async function keepPreview(importJobId: string, preview: ImportPreview): Promise<void> {
+/**
+ * Keeps an import's preview for the worker that runs it. False, and logged, when it could not be kept: the worker would
+ * then find no preview, so the caller does not queue the import.
+ */
+async function keepPreview(importJobId: string, preview: ImportPreview): Promise<boolean> {
   try {
     await redisClient.setex(previewKey(importJobId), IMPORT_JOB_TTL, JSON.stringify(preview));
+    return true;
   } catch (e: any) {
     logger.warn(`[Spotify Import] Failed to cache preview for job ${importJobId}: ${e.message}`);
+    return false;
   }
 }
+
+const PREVIEW_NOT_KEPT = "The import could not be started because its preview could not be saved. Try again.";
 
 /** Thrown inside the playlist transaction when the job no longer takes a playlist, so the transaction rolls back. */
 class PlaylistNotWanted extends Error {}
@@ -125,7 +132,12 @@ class PlaylistImportService {
 
     await saveImportJob(job);
 
-    await keepPreview(job.id, preview);
+    // Without its preview the worker could only fail the import later: fail it now, through the normal failure move
+    // (the person is told once), and queue nothing.
+    if (!(await keepPreview(job.id, preview))) {
+      await failImportJob(job.id, PREVIEW_NOT_KEPT);
+      return { ...job, status: "failed", error: PREVIEW_NOT_KEPT };
+    }
 
     // Enqueue import job to BullMQ for crash-recoverable processing
     const { importQueue } = await import("../../workers/queues");
@@ -1550,8 +1562,7 @@ class PlaylistImportService {
       job.pendingTracks = pendingTracks;
       await saveImportJob(job);
 
-      await keepPreview(job.id, preview);
-
+      // The preview goes to processImport directly: nothing reads a quick import's cached preview, so none is kept.
       await this.processImport(job, albumMbidsToDownload, preview);
     } finally {
       jobLoggers.delete(importJobId);

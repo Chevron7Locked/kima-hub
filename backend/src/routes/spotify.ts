@@ -240,7 +240,7 @@ router.post("/import", async (req, res) => {
         res.json({
             jobId: job.id,
             status: job.status,
-            message: "Import started",
+            message: job.status === "failed" ? job.error : "Import started",
         });
     } catch (error) {
         answerFailure(req, res, "Spotify import", error);

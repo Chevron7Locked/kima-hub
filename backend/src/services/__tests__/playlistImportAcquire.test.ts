@@ -54,6 +54,8 @@ async function albumsQuickImportHandsOn(userId: string): Promise<string[]> {
     const { jobId } = await playlistImportService.quickImport(URL, userId);
     await playlistImportService.processQuickImportFromQueue(jobId, URL);
     expect(processImport).toHaveBeenCalledTimes(1);
+    // The preview goes to the import directly; nothing reads a cached copy, so none is kept.
+    expect(await redisClient.get(`import:preview:${jobId}`)).toBeNull();
     return (processImport.mock.calls[0] as unknown[])[1] as string[];
 }
 
