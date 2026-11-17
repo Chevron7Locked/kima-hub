@@ -6,7 +6,7 @@
 import { prisma } from "../../utils/db";
 import { artistIdentityKey } from "../../services/artistIdentity";
 
-export const BUILD_WEEK = new Date("2026-11-02T00:00:00.000Z");
+const BUILD_WEEK = new Date("2026-11-02T00:00:00.000Z");
 
 export interface JobSeed {
     artistName: string;

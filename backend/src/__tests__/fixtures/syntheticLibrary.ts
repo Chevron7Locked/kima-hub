@@ -56,7 +56,7 @@ const OTHER_GENRES = [
 ];
 /** Stored names; a few are capitalised on purpose, since every genre lookup is case-insensitive. */
 const CAPITALISED: Record<string, string> = { "hip hop": "Hip Hop", edm: "EDM", "drum and bass": "Drum and Bass" };
-export const GENRE_NAMES = [
+const GENRE_NAMES = [
     ...new Set([...PARTY_GENRES, ...WORKOUT_GENRES, ...FOCUS_GENRES, ...OTHER_GENRES]),
 ].map((g) => CAPITALISED[g] ?? g);
 

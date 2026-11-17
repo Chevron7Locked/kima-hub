@@ -17,7 +17,7 @@ export const noData = { kind: "absent", evidence: { mocked: true } } as const;
 export const mockQueueAdd = jest.fn().mockResolvedValue({ id: "job-1" });
 export const mockQueueClean = jest.fn().mockResolvedValue([]);
 export const mockQueueGetJob = jest.fn().mockResolvedValue(null);
-export const mockQueueResume = jest.fn().mockResolvedValue(undefined);
+const mockQueueResume = jest.fn().mockResolvedValue(undefined);
 
 function queueMock() {
     return {
@@ -123,7 +123,7 @@ export const trackIdentityMock = {
 };
 
 export const mockIdentifyRecording = jest.fn().mockResolvedValue(noData);
-export const mockLookupRecordingsByIsrc = jest.fn().mockResolvedValue(noData);
+const mockLookupRecordingsByIsrc = jest.fn().mockResolvedValue(noData);
 
 export const musicBrainzMock = {
     musicBrainzService: {
