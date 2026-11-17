@@ -8,9 +8,11 @@ import type {
 } from "../downloads";
 import {
   acceptTransferRequest,
+  canBeDenied,
   FileTransferReader,
   findAwaitingDownload,
   findDownloadForOffer,
+  findPendingDownload,
 } from "../fileTransfer";
 
 const TOKEN = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
@@ -487,5 +489,55 @@ describe("findDownloadForOffer", () => {
     const first = make({ status: "complete" });
     const second = make({ status: "downloading" });
     expect(findDownloadForOffer([first, second], "peer", "a.flac")).toBe(first);
+  });
+});
+
+describe("findPendingDownload", () => {
+  const make = (over: Record<string, unknown>): Download =>
+    ({ ...makeDownload(5n), ...over }) as unknown as Download;
+
+  it("finds the download for the peer and file, or nothing", () => {
+    const d = make({ status: "queued" });
+    expect(findPendingDownload([d], "peer", "a.flac")).toBe(d);
+    expect(findPendingDownload([d], "other", "a.flac")).toBeUndefined();
+    expect(findPendingDownload([d], "peer", "b.flac")).toBeUndefined();
+  });
+
+  it("prefers a requested or queued entry over a stale one for the same file", () => {
+    const stale = make({ status: "complete" });
+    const connected = make({});
+    const requested = make({ status: "requested" });
+    const queued = make({ status: "queued" });
+    expect(
+      findPendingDownload([stale, connected, requested], "peer", "a.flac"),
+    ).toBe(requested);
+    expect(findPendingDownload([stale, queued], "peer", "a.flac")).toBe(queued);
+  });
+
+  it("falls back to the first match when none is requested or queued", () => {
+    const first = make({ status: "downloading" });
+    const second = make({});
+    expect(findPendingDownload([first, second], "peer", "a.flac")).toBe(first);
+  });
+});
+
+describe("canBeDenied", () => {
+  const make = (over: Record<string, unknown>): Download =>
+    ({ ...makeDownload(5n), ...over }) as unknown as Download;
+
+  it("applies to a requested or queued download", () => {
+    expect(canBeDenied(make({ status: "requested" }))).toBe(true);
+    expect(canBeDenied(make({ status: "queued" }))).toBe(true);
+  });
+
+  it("applies to a connected download only while it has received nothing", () => {
+    expect(canBeDenied(make({}))).toBe(true);
+    expect(canBeDenied(make({ receivedBytes: 2n }))).toBe(false);
+  });
+
+  it("does not apply to a download that is downloading, complete or already denied", () => {
+    expect(canBeDenied(make({ status: "downloading" }))).toBe(false);
+    expect(canBeDenied(make({ status: "complete" }))).toBe(false);
+    expect(canBeDenied(make({ status: "denied" }))).toBe(false);
   });
 });

@@ -11,9 +11,11 @@ import type { Download, RequestedDownload, SlskDownloadEventEmitter } from './do
 import { makeDownloadStatusData } from './downloads'
 import {
   acceptTransferRequest,
+  canBeDenied,
   FileTransferReader,
   findAwaitingDownload,
   findDownloadForOffer,
+  findPendingDownload,
 } from './fileTransfer'
 import type { SlskListenEvents } from './listen'
 import { SlskListen } from './listen'
@@ -259,16 +261,14 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
             break
           }
           case 'placeInQueueResponse': {
-            const existingDownloadIndex = this.downloads.findIndex(
-              (d) => d.username === peer.username && d.filename === msg.filename
-            )
+            const found = findPendingDownload(this.downloads, peer.username, msg.filename)
 
-            if (existingDownloadIndex === -1) {
+            if (!found) {
               logger.error(`[Soulseek] No download found for ${JSON.stringify(msg)}`)
               return
             }
 
-            const download = this.downloads[existingDownloadIndex] as any
+            const download = found as any
             if (download.status === 'requested') {
               download.status = 'queued'
               download.queuePosition = msg.place
@@ -284,12 +284,10 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
             break
           }
           case 'uploadDenied': {
-            const existingDownloadIndex = this.downloads.findIndex(
-              (d) => d.username === peer.username && d.filename === msg.filename
-            )
+            // A denial for a transfer the peer already allowed is stale and is ignored.
+            const download = findPendingDownload(this.downloads, peer.username, msg.filename)
 
-            if (existingDownloadIndex !== -1) {
-              const download = this.downloads[existingDownloadIndex]
+            if (download && canBeDenied(download)) {
               download.stream.destroy(new Error(`Upload denied: ${msg.reason}`))
               const denied = {
                 ...download,
@@ -297,7 +295,7 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
                 reason: msg.reason,
               }
               download.events.emit('status', 'denied', makeDownloadStatusData(denied))
-              this.downloads = this.downloads.filter((_, i) => i !== existingDownloadIndex)
+              this.downloads = this.downloads.filter((d) => d !== download)
             }
             break
           }

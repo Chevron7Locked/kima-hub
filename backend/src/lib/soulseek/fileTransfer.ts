@@ -65,6 +65,29 @@ export function findDownloadForOffer(
   return named.find(awaitsOffer) ?? named[0];
 }
 
+/** The download a peer's queue place or denial is for: a requested or queued one before a stale one for the same file. */
+export function findPendingDownload(
+  downloads: Download[],
+  username: string,
+  filename: string,
+): Download | undefined {
+  const named = downloads.filter(
+    (d) => d.username === username && d.filename === filename,
+  );
+  return (
+    named.find((d) => d.status === "requested" || d.status === "queued") ??
+    named[0]
+  );
+}
+
+/**
+ * Whether a peer's denial applies to this download. Once the peer has allowed the transfer (connected
+ * and on) a denial is stale, unless nothing has arrived yet: then it is the peer changing its mind.
+ */
+export function canBeDenied(download: Download): boolean {
+  return awaitsOffer(download);
+}
+
 /** The download a peer's transfer token belongs to: only one still waiting for its transfer. */
 export function findAwaitingDownload(
   downloads: Download[],
@@ -143,6 +166,8 @@ export class FileTransferReader {
    */
   fail(error: Error): void {
     const download = this.download;
+    // Before the token is read there is no download to tie the error to. Left as is: the consumer's
+    // timeout ends the wait, and the peer's re-offer takes a connected download that has nothing.
     if (!download || this.failed || this.done) return;
     this.failed = true;
     this.port.settle(download);
@@ -159,6 +184,8 @@ export class FileTransferReader {
       if (!download.stream.destroyed) download.stream.end();
       return;
     }
+    // A plain close mid-transfer (no error from the socket) is left as is: the download's listeners get
+    // this generic message, and the peer is not put on cooldown.
     const error = new Error("Connection closed before transfer completed");
     this.port.settle(download);
     this.tell(download, error);
