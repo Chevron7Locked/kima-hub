@@ -122,8 +122,8 @@ export async function recordAlbumProgress(importJobId: string, albumsCompleted: 
     UPDATE "SpotifyImportJob"
     SET "albumsCompleted" = GREATEST("albumsCompleted", ${albumsCompleted}::int),
         "progress" = GREATEST("progress", ${progress}::int),
-        "updatedAt" = now()
-    WHERE "id" = ${importJobId} AND "status" NOT IN ('completed', 'failed', 'cancelled')`;
+        "updatedAt" = ${new Date()}
+    WHERE "id" = ${importJobId} AND "status" NOT IN (${Prisma.join(CLOSED_IMPORT_STATES)})`;
   if (written === 0) return false;
   try {
     await publishImportJob(importJobId);
