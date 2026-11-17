@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Two-factor recovery from settings.** You can turn two-factor sign-in off with a recovery code if you have lost your authenticator, and make a new set of recovery codes without turning it off; the old codes stop working.
 - **An admin can turn off two-factor sign-in for someone locked out**, from the users list. That person is signed out on every device.
-- **The what's new window asks you to star Kima on GitHub**, with a link, above every release.
+- **The what's new window asks you to star Kima on GitHub**, with a link in its header that stays in view whichever page of it you open. The window is wide again for every release.
 
 ### Changed
 

@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { refreshOpenCount } from "./useVersionChip";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { X, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Loader2, ChevronLeft, ChevronRight, Star } from "lucide-react";
 import { api } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { useDialog } from "@/hooks/useDialog";
@@ -257,14 +257,22 @@ export function WhatsNewWindow({
         </section>
     );
 
-    // Asked above the opening view of every release, whatever the release says.
+    // Asked in the header, so it stays in view on every page of every release, whatever the release says.
     const starRequest = (
-        <section aria-label="Star Kima on GitHub" data-testid="whatsnew-star" className="flex flex-col gap-3 max-w-prose pb-5 mb-5 border-b border-white/10">
-            <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
+        <div data-testid="whatsnew-star" className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <p className="hidden sm:block text-sm text-[var(--text-secondary)]">
                 If you haven&apos;t yet, please star Kima on GitHub. Stars help more people find Kima.
             </p>
-            <ReleaseLinks links={[{ label: "Star Kima on GitHub", href: KIMA_REPO }]} />
-        </section>
+            <a
+                href={KIMA_REPO}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-h-11 py-2.5 px-4 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-white text-sm font-medium flex items-center gap-2 transition-colors"
+            >
+                <Star className="w-4 h-4 text-[var(--color-brand)]" />
+                Star Kima on GitHub
+            </a>
+        </div>
     );
 
     const noteSection = (r: Release) => (
@@ -370,14 +378,10 @@ export function WhatsNewWindow({
         ) : view.pane === "needs" ? (
             needsPage
         ) : (
-            <>
-                {starRequest}
-                {release.note ? noteSection(release) : intro}
-            </>
+            release.note ? noteSection(release) : intro
         );
 
     const pageOpen = view.pane !== "list";
-    const hasNotes = releases.some((r) => r.note);
 
     return (
         <div
@@ -388,12 +392,15 @@ export function WhatsNewWindow({
         >
             <div
                 ref={dialogRef}
-                className={`w-full ${hasNotes ? "sm:max-w-5xl" : "sm:max-w-2xl"} max-h-[92vh] sm:max-h-[88vh] flex flex-col bg-[var(--bg-secondary)] border border-white/10 rounded-t-2xl sm:rounded-2xl overflow-hidden animate-rise`}
+                className="w-full sm:max-w-5xl max-h-[92vh] sm:max-h-[88vh] flex flex-col bg-[var(--bg-secondary)] border border-white/10 rounded-t-2xl sm:rounded-2xl overflow-hidden animate-rise"
             >
-                <header className="shrink-0 px-5 sm:px-6 pt-4 sm:pt-6 pb-4 sm:pb-5 border-b border-white/10 flex items-center justify-between gap-4">
-                    <h2 id="whats-new-title" className="text-xl sm:text-2xl font-bold tracking-tight text-white text-balance">
-                        {release.title}
-                    </h2>
+                <header className="shrink-0 px-5 sm:px-6 pt-4 sm:pt-6 pb-4 sm:pb-5 border-b border-white/10 flex items-start justify-between gap-4">
+                    <div className="flex flex-col gap-3 min-w-0">
+                        <h2 id="whats-new-title" className="text-xl sm:text-2xl font-bold tracking-tight text-white text-balance">
+                            {release.title}
+                        </h2>
+                        {starRequest}
+                    </div>
                     <Button variant="icon" onClick={close} disabled={closing} aria-label="Close" className="shrink-0 -mr-2">
                         {closing ? <Loader2 className="w-5 h-5 animate-spin" /> : <X className="w-5 h-5" />}
                     </Button>

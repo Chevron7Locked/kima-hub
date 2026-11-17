@@ -184,13 +184,21 @@ describe("WhatsNewWindow", () => {
     it.each([
         ["with a note", R11],
         ["without a note", R12],
-    ])("asks for a GitHub star above the opening view of a release %s, on any width", async (_, release) => {
+    ])("keeps the GitHub star request in the header of a release %s, on every page, in a wide window", async (_, release) => {
         await renderWindow([release]);
-        const star = container.querySelector<HTMLElement>('[data-testid="whatsnew-star"]');
-        expect(star?.textContent).toContain("star Kima on GitHub");
-        const link = star?.querySelector<HTMLAnchorElement>('a[href="https://github.com/Chevron7Locked/kima-hub"]');
-        expect(link?.target).toBe("_blank");
-        expect(star!.closest("div.overflow-y-auto")!.classList.contains("hidden")).toBe(false);
+        const star = () => container.querySelector<HTMLElement>('header [data-testid="whatsnew-star"]');
+        const check = () => {
+            expect(star()?.textContent).toContain("Stars help more people find Kima.");
+            const link = star()?.querySelector<HTMLAnchorElement>('a[href="https://github.com/Chevron7Locked/kima-hub"]');
+            expect(link?.target).toBe("_blank");
+        };
+        check();
+        expect(container.querySelector('[role="dialog"] > div')!.classList.contains("sm:max-w-5xl")).toBe(true);
+        await act(async () => {
+            container.querySelector<HTMLButtonElement>("[data-item]")!.click();
+        });
+        expect(container.querySelector("[data-back]")).not.toBeNull();
+        check();
     });
 
     it("gives Escape to a confirm opened inside it first, then leaves the page, then closes", async () => {
