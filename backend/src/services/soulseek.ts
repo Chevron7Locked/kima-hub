@@ -76,6 +76,9 @@ const LOCAL_FAULT_CODES = new Set(["EMFILE", "ENFILE", "EACCES", "EPERM", "ENAME
 /** A partial file this old cannot belong to a download still going: a download that stalls ends within minutes. */
 const STALE_PART_AGE_MS = 60 * 60 * 1000;
 
+/** A downloads folder is walked for stale partial files at most this often. */
+const PART_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+
 /** A try's partial file is named whole `.<uuid>.part`. A file someone else named `.part` is not ours to sweep. */
 const OWN_PART_NAME = /^\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.part$/i;
 
@@ -1560,7 +1563,7 @@ class SoulseekService {
             return;
         }
         const last = this.partSweeps.get(root);
-        if (last && Date.now() - last.at < STALE_PART_AGE_MS) return last.sweep;
+        if (last && Date.now() - last.at < PART_SWEEP_INTERVAL_MS) return last.sweep;
         const sweep = (async () => {
             const cutoff = Date.now() - STALE_PART_AGE_MS;
             const pending = [root];
