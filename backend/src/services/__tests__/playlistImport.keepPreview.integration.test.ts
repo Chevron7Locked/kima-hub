@@ -86,3 +86,15 @@ it("fails an import at once, with a reason, when its preview cannot be kept, and
     expect(statuses[statuses.length - 1]).toBe("failed");
     expect(statuses.filter((s) => s === "failed")).toHaveLength(1);
 });
+
+it("fails an import at once, and tells the person once, when it cannot be queued", async () => {
+    mockQueueAdd.mockRejectedValue(new Error("queue down"));
+
+    const job = await playlistImportService.startImport(USER, "90210", "Road trip", [], preview);
+    await downloadJobs.whenIdle();
+
+    expect(job.status).toBe("failed");
+    expect(job.error).toEqual(expect.stringContaining("queued"));
+    expect((await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("failed");
+    expect(notifyFailed).toHaveBeenCalledTimes(1);
+});

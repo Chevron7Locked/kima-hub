@@ -347,7 +347,7 @@ function ImportPlaylistPageContent() {
                     return album?.albumMbid || album?.spotifyAlbumId || idx;
                 })
             );
-            const response = await api.post<{ jobId: string; status: string }>(
+            const response = await api.post<{ jobId: string; status: string; message?: string }>(
                 "/spotify/import",
                 {
                     spotifyPlaylistId: preview.playlist.id,
@@ -358,6 +358,12 @@ function ImportPlaylistPageContent() {
                     previewJobId: previewJobId ?? undefined,
                 }
             );
+
+            // The server failed the import before queuing it: say why here, do not wait on a page that has nothing to follow.
+            if (response.status === "failed") {
+                notify.error("Failed to start import", { message: response.message });
+                return;
+            }
 
             setImportJob(pendingImportJob(response.jobId, {
                 albumsTotal: albumCount,

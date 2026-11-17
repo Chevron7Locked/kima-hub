@@ -25,7 +25,7 @@ export function untrackImportSearches(importJobId: string): void {
  * (`stopImportDownloadsAtSource`, which a cancel, a clean-up and a failure that removes the import all pass through).
  * Safe to reach twice, and for an import not running in this process.
  */
-function abortImportSearches(importJobId: string): void {
+export function abortImportSearches(importJobId: string): void {
   importSearches.get(importJobId)?.abort();
 }
 
@@ -115,9 +115,9 @@ export async function updateImportJobFields(
 export const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed", "cancelled"];
 
 /**
- * An import is over (failed or cancelled by its person): its running searches are aborted, and its downloads still pending or processing are stopped at the
- * source, through the download manager's own cancel step, as a single download's cancel does. Lidarr's queue entry goes
- * and the album is no longer watched, except what another live job (another import's, a person's own download) still
+ * An import is over (failed or cancelled by its person): its running searches are aborted, and its downloads still
+ * pending or processing are stopped at the source, through the download manager's own cancel step, as a single
+ * download's cancel does. Lidarr's queue entry goes and the album is no longer watched, except what another live job (another import's, a person's own download) still
  * shares. Nobody is told: the import's one notice is its own. A Lidarr that cannot be reached is logged, not raised:
  * the import is over either way. Returns the unfinished downloads it found, for the caller to close or delete; settled
  * ones are left alone. The manager is loaded when called, as it and the import load each other.

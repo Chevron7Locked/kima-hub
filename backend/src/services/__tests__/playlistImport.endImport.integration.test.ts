@@ -9,6 +9,7 @@ import { playlistImportService, failImportJob } from "../playlistImport";
 import { trackImportSearches } from "../playlistImport/jobState";
 import * as downloadJobs from "../downloads/jobs";
 import { notificationService } from "../notificationService";
+import { eventBus } from "../eventBus";
 import { useLidarrCancelScenario } from "../../__tests__/helpers/lidarrCancelScenario";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
@@ -87,6 +88,17 @@ describe("an import that ends aborts its searches", () => {
         const controller = searching(running.id);
 
         await playlistImportService.markJobFailed(running.id, "worker gave up");
+
+        expect(controller.signal.aborted).toBe(true);
+    });
+
+    it("even when announcing the nothing-matched failure throws", async () => {
+        const running = await importRow("downloading");
+        const controller = searching(running.id);
+        jest.spyOn(notificationService, "notifyImportFailed").mockRejectedValue(new Error("tray down"));
+        jest.spyOn(eventBus, "emit").mockImplementation(() => { throw new Error("bus down"); });
+
+        await expect(playlistImportService.markJobFailed(running.id, "worker gave up")).rejects.toThrow("bus down");
 
         expect(controller.signal.aborted).toBe(true);
     });

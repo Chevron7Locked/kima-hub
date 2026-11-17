@@ -25,7 +25,7 @@ import { nameKey } from "../nameFold";
 import type { ImportJob, ImportPreview, AlbumToDownload } from "./types";
 import { readMusicLink, musicLinkName, M3UEntry, M3UNothingMatched } from "./reading";
 import { previewOfTracklist, pendingTracksOf, matchEntries, matchM3UEntries } from "./matching";
-import { failImportJob, jobLoggers, trackImportSearches, untrackImportSearches, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
+import { failImportJob, jobLoggers, abortImportSearches, trackImportSearches, untrackImportSearches, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
 
 /** Where an import's preview waits for the worker that runs the import. */
 const previewKey = (importJobId: string) => `import:preview:${importJobId}`;
@@ -44,6 +44,7 @@ async function keepPreview(importJobId: string, preview: ImportPreview): Promise
   }
 }
 
+const IMPORT_NOT_QUEUED = "The import could not be started because it could not be queued. Try again.";
 const PREVIEW_NOT_KEPT = "The import could not be started because its preview could not be saved. Try again.";
 
 /** Thrown inside the playlist transaction when the job no longer takes a playlist, so the transaction rolls back. */
@@ -84,7 +85,6 @@ const PLAYLIST_HINTS: Record<MusicPlatform, string> = {
 const NOT_OVERWRITTEN_BY_FAILURE: ImportJob["status"][] = ["completed", "cancelled"];
 
 class PlaylistImportService {
-
   async startImport(
     userId: string,
     spotifyPlaylistId: string,
@@ -141,13 +141,20 @@ class PlaylistImportService {
 
     // Enqueue import job to BullMQ for crash-recoverable processing
     const { importQueue } = await import("../../workers/queues");
-    await importQueue.add("import", {
-      importJobId: job.id,
-      userId: job.userId,
-      albumMbidsToDownload,
-    }, {
-      jobId: job.id,
-    });
+    try {
+      await importQueue.add("import", {
+        importJobId: job.id,
+        userId: job.userId,
+        albumMbidsToDownload,
+      }, {
+        jobId: job.id,
+      });
+    } catch (error) {
+      // An import nobody will run is failed now, not left pending for good.
+      logger.error(`[Spotify Import] Could not queue job ${job.id}:`, error);
+      await failImportJob(job.id, IMPORT_NOT_QUEUED);
+      return { ...job, status: "failed", error: IMPORT_NOT_QUEUED };
+    }
 
     jobLogger.info(`[Spotify Import] Enqueued job ${job.id} to BullMQ`);
 
@@ -1592,6 +1599,9 @@ class PlaylistImportService {
           data: { status: "failed", error: errorMessage, updatedAt: new Date() },
         });
         if (count === 0) return;
+        // Before anything that can throw: the import is failed, so its searches stop now.
+        // Before anything that can throw: the import is failed, so its searches stop now.
+        abortImportSearches(importJobId);
         notifyImportFailed(job);
 
         logger.info(
