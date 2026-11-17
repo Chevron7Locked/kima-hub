@@ -12,9 +12,9 @@ function setup() {
   const client = new SlskClient();
   const peer = { username: "peer", send: jest.fn(), destroy: jest.fn() };
   client.peers.set("peer", peer as never);
-  const tell = (msg: Record<string, unknown>) =>
+  const peerSends = (msg: Record<string, unknown>) =>
     client.peerMessages.emit("message", msg as never, peer as never);
-  return { client, tell };
+  return { client, peerSends };
 }
 
 afterEach(() => {
@@ -23,10 +23,10 @@ afterEach(() => {
 
 describe("a queue place for a file with no download", () => {
   it("is logged at debug, not as an error", () => {
-    const { client, tell } = setup();
+    const { client, peerSends } = setup();
     const debug = jest.spyOn(logger, "debug").mockImplementation(() => {});
     const error = jest.spyOn(logger, "error").mockImplementation(() => {});
-    tell({ kind: "placeInQueueResponse", filename: "gone.flac", place: 3 });
+    peerSends({ kind: "placeInQueueResponse", filename: "gone.flac", place: 3 });
     expect(debug).toHaveBeenCalledTimes(1);
     expect(error).not.toHaveBeenCalled();
     client.destroy();
@@ -35,10 +35,10 @@ describe("a queue place for a file with no download", () => {
 
 describe("a denial", () => {
   it("is logged at debug and changes nothing when the peer already allowed the transfer", async () => {
-    const { client, tell } = setup();
+    const { client, peerSends } = setup();
     const debug = jest.spyOn(logger, "debug").mockImplementation(() => {});
     const download = await client.download("peer", "a.flac");
-    tell({
+    peerSends({
       kind: "transferRequest",
       direction: 1,
       filename: "a.flac",
@@ -49,7 +49,7 @@ describe("a denial", () => {
     (download as { receivedBytes: bigint }).receivedBytes = 2n;
     debug.mockClear();
 
-    tell({ kind: "uploadDenied", filename: "a.flac", reason: "Banned" });
+    peerSends({ kind: "uploadDenied", filename: "a.flac", reason: "Banned" });
 
     expect(client.downloads).toEqual([download]);
     expect(download.stream.destroyed).toBe(false);
@@ -58,10 +58,10 @@ describe("a denial", () => {
   });
 
   it("kept on the stream when it lands before anyone listens, and it does not throw", async () => {
-    const { client, tell } = setup();
+    const { client, peerSends } = setup();
     const download = await client.download("peer", "a.flac");
 
-    tell({ kind: "uploadDenied", filename: "a.flac", reason: "Banned" });
+    peerSends({ kind: "uploadDenied", filename: "a.flac", reason: "Banned" });
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(download.streamError?.message).toBe("Upload denied: Banned");

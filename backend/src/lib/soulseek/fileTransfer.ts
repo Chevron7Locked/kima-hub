@@ -165,9 +165,10 @@ export class FileTransferReader {
   /**
    * The connection failed with `error`, the real cause. The stream carries it when something
    * listens there (`services/soulseek.ts` sorts failures on the stream's error, and a download's own
-   * 'error' handler would reach it first and skip the sorting); otherwise the download's own
-   * listeners are told. Either way the close that
-   * follows adds no generic error over it. A whole transfer is not failed by a late error.
+   * 'error' handler would reach it first and skip the sorting); the client's download streams always
+   * have a holding listener, so there the service gets the error even if it attaches later. A stream
+   * with no listener at all leaves the download's own listeners to be told. Either way the close
+   * that follows adds no generic error over it. A whole transfer is not failed by a late error.
    */
   fail(error: Error): void {
     const download = this.download;

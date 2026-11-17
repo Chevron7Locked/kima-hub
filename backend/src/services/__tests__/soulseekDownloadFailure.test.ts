@@ -141,8 +141,12 @@ it("keeps a denial that lands before the service listens, and fails the download
         expect(categorize).toHaveBeenCalledTimes(1);
         expect((categorize.mock.calls[0][0] as Error).message).toBe("Upload denied: Banned");
         expect(real.downloads).toHaveLength(0);
-        // sorted like a live error: the peer is cooled down exactly when categorizeError says to skip it
-        expect(markUserFailed.mock.calls.length).toBe(categorize.mock.results[0].value.skipUser ? 1 : 0);
+        // the file the write stream was opening is gone too, however early the denial was replayed
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(fs.existsSync(path.join(dir, "denied.flac"))).toBe(false);
+        // sorted like a live error: a denial is an unknown failure, which cools the peer down
+        expect(categorize.mock.results[0].value).toEqual({ type: "unknown", skipUser: true });
+        expect(markUserFailed).toHaveBeenCalledWith("denier");
     } finally {
         real.destroy();
     }

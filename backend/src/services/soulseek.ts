@@ -1369,6 +1369,11 @@ class SoulseekService {
                         }
                         this.client?.removeDownload(download);
                         writeStream.destroy();
+                        // A write stream destroyed while still opening creates its file just before it
+                        // closes, so the file is removed only once the stream has closed.
+                        if (!writeStream.closed) {
+                            await new Promise<void>((done) => writeStream.once("close", () => done()));
+                        }
                         if (fs.existsSync(destPath)) {
                             try {
                                 fs.unlinkSync(destPath);
