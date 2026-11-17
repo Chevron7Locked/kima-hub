@@ -1,4 +1,4 @@
-import type { DownloadWithToken } from './downloads'
+import type { ConnectedDownload, Download, DownloadWithToken } from './downloads'
 import { makeDownloadStatusData } from './downloads'
 
 const TOKEN_BYTES = 4
@@ -13,6 +13,21 @@ export type FileTransferPort = {
   end: () => void
   /** The download is complete: drop it from the client's list. */
   settle: (download: DownloadWithToken) => void
+  /** Stop reading from the peer until `resume`. */
+  pause: () => void
+  resume: () => void
+}
+
+/** The download a peer's transfer token belongs to: only one still waiting for its transfer. */
+export function findAwaitingDownload(
+  downloads: Download[],
+  username: string,
+  tokenHex: string
+): ConnectedDownload | undefined {
+  return downloads.find(
+    (d): d is ConnectedDownload =>
+      d.username === username && d.status === 'connected' && d.token === tokenHex
+  )
 }
 
 /**
@@ -24,11 +39,13 @@ export class FileTransferReader {
   download: DownloadWithToken | undefined
   private heldToken: Buffer = Buffer.alloc(0)
   private refused = false
+  private done = false
+  private paused = false
 
   constructor(private readonly port: FileTransferPort) {}
 
   push(chunk: Buffer): void {
-    if (this.refused) return
+    if (this.refused || this.done) return
     if (this.download) {
       this.receiveFileData(this.download, chunk)
       return
@@ -61,10 +78,26 @@ export class FileTransferReader {
     else this.finishIfWhole(download)
   }
 
+  /** The connection closed: a transfer cut short fails, and the download's stream ends. */
+  close(): void {
+    const download = this.download
+    if (download && download.status !== 'complete') {
+      // An EventEmitter throws on 'error' with no listener; a closing connection must not.
+      if (download.events.listenerCount('error') > 0) {
+        download.events.emit('error', new Error('Connection closed before transfer completed'))
+      }
+      this.port.settle(download)
+    }
+    if (download && !download.stream.destroyed) download.stream.end()
+  }
+
   /** File bytes from a peer go to its download; at the full size the transfer ends. */
-  private receiveFileData(download: DownloadWithToken, data: Buffer): void {
+  private receiveFileData(download: DownloadWithToken, chunk: Buffer): void {
+    // A peer that sends more than the file's size gets cut at the size.
+    const room = download.totalBytes - download.receivedBytes
+    const data = BigInt(chunk.length) > room ? chunk.subarray(0, Number(room)) : chunk
     download.receivedBytes += BigInt(data.length)
-    download.stream.write(data)
+    const flowing = download.stream.write(data)
     download.events.emit('data', data)
     download.events.emit('progress', {
       receivedBytes: download.receivedBytes,
@@ -76,10 +109,27 @@ export class FileTransferReader {
     })
 
     this.finishIfWhole(download)
+    if (!flowing && !this.done) this.pauseUntilDrained(download)
+  }
+
+  /** The stream is full: stop reading from the peer until it drains (or goes away). */
+  private pauseUntilDrained(download: DownloadWithToken): void {
+    if (this.paused) return
+    this.paused = true
+    this.port.pause()
+    const resume = () => {
+      download.stream.off('drain', resume)
+      download.stream.off('close', resume)
+      this.paused = false
+      this.port.resume()
+    }
+    download.stream.once('drain', resume)
+    download.stream.once('close', resume)
   }
 
   private finishIfWhole(download: DownloadWithToken): void {
     if (download.receivedBytes < download.totalBytes) return
+    this.done = true
     this.port.end()
     download.stream.end()
     download.status = 'complete'

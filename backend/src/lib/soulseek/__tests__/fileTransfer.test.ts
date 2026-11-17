@@ -2,18 +2,21 @@ import { EventEmitter } from 'events'
 import stream from 'stream'
 
 import type { DownloadWithToken, SlskDownloadEventEmitter } from '../downloads'
-import { FileTransferReader } from '../fileTransfer'
+import { FileTransferReader, findAwaitingDownload } from '../fileTransfer'
 
 const TOKEN = Buffer.from([0xde, 0xad, 0xbe, 0xef])
 const TOKEN_HEX = 'deadbeef'
 
-function makeDownload(totalBytes: bigint): DownloadWithToken {
+function makeDownload(
+  totalBytes: bigint,
+  streamOptions?: stream.TransformOptions
+): DownloadWithToken {
   return {
     status: 'connected',
     username: 'peer',
     filename: 'a.flac',
     receivedBytes: 0n,
-    stream: new stream.PassThrough(),
+    stream: new stream.PassThrough(streamOptions),
     events: new EventEmitter() as SlskDownloadEventEmitter,
     requestQueuePosition: () => {},
     queuePosition: 0,
@@ -22,11 +25,12 @@ function makeDownload(totalBytes: bigint): DownloadWithToken {
   } as DownloadWithToken
 }
 
-function setup(download: DownloadWithToken) {
+function setup(download: DownloadWithToken, { consume = true } = {}) {
   const replies: Buffer[] = []
   const settled: DownloadWithToken[] = []
   const looked: string[] = []
   let ended = 0
+  const flow: string[] = []
   const reader = new FileTransferReader({
     findDownload: (token) => {
       looked.push(token)
@@ -37,12 +41,14 @@ function setup(download: DownloadWithToken) {
       ended++
     },
     settle: (d) => settled.push(d),
+    pause: () => flow.push('pause'),
+    resume: () => flow.push('resume'),
   })
   const received: Buffer[] = []
-  download.stream.on('data', (b: Buffer) => received.push(b))
+  if (consume) download.stream.on('data', (b: Buffer) => received.push(b))
   const completes: bigint[] = []
   download.events.on('complete', (n) => completes.push(n))
-  return { reader, replies, settled, looked, received, completes, ended: () => ended }
+  return { reader, replies, settled, looked, received, completes, flow, ended: () => ended }
 }
 
 describe('FileTransferReader', () => {
@@ -128,5 +134,122 @@ describe('FileTransferReader', () => {
     t.reader.push(Buffer.from('more'))
     expect(t.looked).toEqual(['01020304'])
     expect(t.ended()).toBe(1)
+  })
+
+  it('ignores bytes that arrive after the transfer is complete', () => {
+    const d = makeDownload(3n)
+    const t = setup(d)
+    t.reader.push(Buffer.concat([TOKEN, Buffer.from('abc')]))
+    expect(d.status).toBe('complete')
+    expect(() => t.reader.push(Buffer.from('zzz'))).not.toThrow()
+    expect(d.receivedBytes).toBe(3n)
+    expect(t.completes).toEqual([3n])
+    expect(t.ended()).toBe(1)
+    expect(Buffer.concat(t.received).toString()).toBe('abc')
+  })
+
+  it('cuts an overshooting chunk at the full size', () => {
+    const d = makeDownload(4n)
+    const t = setup(d)
+    t.reader.push(Buffer.concat([TOKEN, Buffer.from('ab')]))
+    t.reader.push(Buffer.from('cdefgh'))
+    expect(d.receivedBytes).toBe(4n)
+    expect(d.status).toBe('complete')
+    expect(Buffer.concat(t.received).toString()).toBe('abcd')
+    expect(t.completes).toEqual([4n])
+  })
+
+  it('pauses the connection when the stream is full and resumes on drain', () => {
+    const d = makeDownload(100n, { highWaterMark: 4 })
+    const t = setup(d, { consume: false })
+    t.reader.push(Buffer.concat([TOKEN, Buffer.from('abcdef')]))
+    expect(t.flow).toEqual(['pause'])
+    t.reader.push(Buffer.from('gh'))
+    expect(t.flow).toEqual(['pause'])
+    d.stream.resume()
+    return new Promise<void>((resolve) => setImmediate(resolve)).then(() => {
+      expect(t.flow).toEqual(['pause', 'resume'])
+    })
+  })
+
+  it('resumes when the stream closes while the connection is paused', () => {
+    const d = makeDownload(100n, { highWaterMark: 4 })
+    const t = setup(d, { consume: false })
+    t.reader.push(Buffer.concat([TOKEN, Buffer.from('abcdef')]))
+    expect(t.flow).toEqual(['pause'])
+    d.stream.destroy()
+    return new Promise<void>((resolve) => setImmediate(resolve)).then(() => {
+      expect(t.flow).toEqual(['pause', 'resume'])
+    })
+  })
+
+  it('does not pause on the write that completes the file', () => {
+    const d = makeDownload(6n, { highWaterMark: 4 })
+    const t = setup(d, { consume: false })
+    t.reader.push(Buffer.concat([TOKEN, Buffer.from('abcdef')]))
+    expect(d.status).toBe('complete')
+    expect(t.flow).toEqual([])
+  })
+
+  describe('close', () => {
+    it('fails a transfer cut short, with no listener on the download', () => {
+      const d = makeDownload(10n)
+      const t = setup(d)
+      t.reader.push(Buffer.concat([TOKEN, Buffer.from('abc')]))
+      expect(d.events.listenerCount('error')).toBe(0)
+      expect(() => t.reader.close()).not.toThrow()
+      expect(t.settled).toEqual([d])
+      expect(d.stream.writableEnded).toBe(true)
+    })
+
+    it('tells a listener that the transfer was cut short', () => {
+      const d = makeDownload(10n)
+      const t = setup(d)
+      const errors: Error[] = []
+      d.events.on('error', (e) => errors.push(e))
+      t.reader.push(Buffer.concat([TOKEN, Buffer.from('abc')]))
+      t.reader.close()
+      expect(errors.map((e) => e.message)).toEqual(['Connection closed before transfer completed'])
+    })
+
+    it('leaves a completed download alone', () => {
+      const d = makeDownload(3n)
+      const t = setup(d)
+      const errors: Error[] = []
+      d.events.on('error', (e) => errors.push(e))
+      t.reader.push(Buffer.concat([TOKEN, Buffer.from('abc')]))
+      t.reader.close()
+      expect(errors).toEqual([])
+      expect(t.settled).toEqual([d])
+    })
+
+    it('does nothing for a connection that never matched a download', () => {
+      const d = makeDownload(10n)
+      const t = setup(d)
+      t.reader.push(Buffer.from([1, 2, 3, 4]))
+      t.reader.close()
+      expect(t.settled).toEqual([])
+    })
+  })
+})
+
+describe('findAwaitingDownload', () => {
+  const make = (over: Partial<DownloadWithToken>): DownloadWithToken =>
+    ({ ...makeDownload(5n), ...over }) as DownloadWithToken
+
+  it('matches a connected download by peer and token', () => {
+    const d = make({})
+    expect(findAwaitingDownload([d], 'peer', TOKEN_HEX)).toBe(d)
+  })
+
+  it('does not match another peer or another token', () => {
+    const d = make({})
+    expect(findAwaitingDownload([d], 'other', TOKEN_HEX)).toBeUndefined()
+    expect(findAwaitingDownload([d], 'peer', '00000000')).toBeUndefined()
+  })
+
+  it('does not match a download that is already downloading or complete', () => {
+    expect(findAwaitingDownload([make({ status: 'downloading' })], 'peer', TOKEN_HEX)).toBeUndefined()
+    expect(findAwaitingDownload([make({ status: 'complete' })], 'peer', TOKEN_HEX)).toBeUndefined()
   })
 })

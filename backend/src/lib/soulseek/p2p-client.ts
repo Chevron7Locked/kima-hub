@@ -7,16 +7,9 @@ import { logger } from '../../utils/logger'
 import type TypedEventEmitter from 'typed-emitter'
 
 import type { Address } from './common'
-import type {
-  CompleteDownload,
-  ConnectedDownload,
-  Download,
-  DownloadingDownload,
-  RequestedDownload,
-  SlskDownloadEventEmitter,
-} from './downloads'
-import { downloadHasToken, makeDownloadStatusData } from './downloads'
-import { FileTransferReader } from './fileTransfer'
+import type { Download, RequestedDownload, SlskDownloadEventEmitter } from './downloads'
+import { makeDownloadStatusData } from './downloads'
+import { FileTransferReader, findAwaitingDownload } from './fileTransfer'
 import type { SlskListenEvents } from './listen'
 import { SlskListen } from './listen'
 import { ConnectionType, TransferDirection, UserStatus } from './messages/common'
@@ -186,10 +179,7 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
 
                 const reader = new FileTransferReader({
                   findDownload: (token) => {
-                    const found = this.downloads.find(
-                      (d): d is ConnectedDownload | DownloadingDownload | CompleteDownload =>
-                        d.username === msg.username && downloadHasToken(d) && d.token === token
-                    )
+                    const found = findAwaitingDownload(this.downloads, msg.username, token)
                     if (!found) {
                       logger.error(`[Soulseek] No download found for ${JSON.stringify(msg)}`)
                     }
@@ -200,23 +190,15 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
                   settle: (done) => {
                     this.downloads = this.downloads.filter((d) => d !== done)
                   },
+                  pause: () => conn.pause(),
+                  resume: () => conn.resume(),
                 })
 
                 conn.on('error', (error) => {
                   reader.download?.stream.destroy(error)
                 })
                 conn.on('close', () => {
-                  const download = reader.download
-                  if (download && download.status !== 'complete') {
-                    download.events.emit(
-                      'error',
-                      new Error('Connection closed before transfer completed')
-                    )
-                    this.downloads = this.downloads.filter((d) => d !== download)
-                  }
-                  if (download && !download.stream.destroyed) {
-                    download.stream.end()
-                  }
+                  reader.close()
                   this.fileTransferConnections = this.fileTransferConnections.filter(
                     (c) => c !== conn
                   )
