@@ -471,7 +471,10 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
       const age = now - downloadWithTime.startedAt
       if (age > this.DOWNLOAD_TTL) {
         try {
-          download.stream?.destroy()
+          // The error reaches a consumer still waiting on the stream (kept for one yet to listen).
+          download.stream?.destroy(
+            new Error(`Stuck download: unfinished after ${this.DOWNLOAD_TTL / 60000} minutes`)
+          )
         } catch {
           // Ignore cleanup errors
         }

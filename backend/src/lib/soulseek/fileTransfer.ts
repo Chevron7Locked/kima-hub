@@ -190,8 +190,9 @@ export class FileTransferReader {
       if (!download.stream.destroyed) download.stream.end();
       return;
     }
-    // A plain close mid-transfer carries no socket error: the download's listeners get this generic
-    // message, and the peer is not put on cooldown.
+    // A plain close mid-transfer carries no socket error: the download's own listeners and the stream
+    // both get this generic message, the download's listeners first, so the service takes it as the
+    // reason and the peer is not put on cooldown.
     const error = new Error("Connection closed before transfer completed");
     this.port.settle(download);
     this.tell(download, error);
@@ -205,7 +206,10 @@ export class FileTransferReader {
       download.events.emit("error", error);
   }
 
-  /** A stream with no 'error' listener would throw the error as an uncaught exception, so then it is destroyed bare. */
+  /**
+   * A stream with no 'error' listener would throw the error as an uncaught exception, so then it is
+   * destroyed bare. The client's download streams hold a listener from creation, so they get it.
+   */
   private destroyStream(download: DownloadWithToken, error: Error): void {
     const stream = download.stream;
     stream.destroy(stream.listenerCount("error") > 0 ? error : undefined);

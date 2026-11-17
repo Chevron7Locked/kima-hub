@@ -1273,6 +1273,23 @@ class SoulseekService {
                         }
                     };
 
+                    // Every failure path ends here: a write stream destroyed while it is still opening
+                    // creates its file just before it closes, so the partial file is removed only once
+                    // the stream has closed.
+                    const removePartialFile = async () => {
+                        writeStream.destroy();
+                        if (!writeStream.closed) {
+                            await new Promise<void>((done) =>
+                                writeStream.once("close", () => done())
+                            );
+                        }
+                        try {
+                            await fs.promises.rm(destPath, { force: true });
+                        } catch {
+                            // ignore cleanup errors
+                        }
+                    };
+
                     const timeoutId = setTimeout(async () => {
                         if (!resolved) {
                             cleanup();
@@ -1288,14 +1305,7 @@ class SoulseekService {
                             } catch {
                                 // ignore
                             }
-                            writeStream.destroy();
-                            if (fs.existsSync(destPath)) {
-                                try {
-                                    fs.unlinkSync(destPath);
-                                } catch {
-                                    // ignore cleanup errors
-                                }
-                            }
+                            await removePartialFile();
                             resolve({
                                 success: false,
                                 error: "Download timed out",
@@ -1330,7 +1340,7 @@ class SoulseekService {
                         }
                     });
 
-                    download.events.on("error", (err: any) => {
+                    download.events.on("error", async (err: any) => {
                         if (resolved) return;
                         clearTimeout(timeoutId);
                         cleanup();
@@ -1340,14 +1350,7 @@ class SoulseekService {
                             "ERROR"
                         );
                         this.client?.removeDownload(download);
-                        writeStream.destroy();
-                        if (fs.existsSync(destPath)) {
-                            try {
-                                fs.unlinkSync(destPath);
-                            } catch {
-                                // ignore cleanup errors
-                            }
-                        }
+                        await removePartialFile();
                         resolve({
                             success: false,
                             error: err?.message ?? String(err),
@@ -1368,19 +1371,7 @@ class SoulseekService {
                             await this.recordUserFailure(match.username);
                         }
                         this.client?.removeDownload(download);
-                        writeStream.destroy();
-                        // A write stream destroyed while still opening creates its file just before it
-                        // closes, so the file is removed only once the stream has closed.
-                        if (!writeStream.closed) {
-                            await new Promise<void>((done) => writeStream.once("close", () => done()));
-                        }
-                        if (fs.existsSync(destPath)) {
-                            try {
-                                fs.unlinkSync(destPath);
-                            } catch {
-                                // ignore cleanup errors
-                            }
-                        }
+                        await removePartialFile();
                         resolve({ success: false, error: err.message });
                     };
                     download.stream.on("error", onStreamError);
@@ -1403,6 +1394,7 @@ class SoulseekService {
                             // ignore
                         }
                         await this.recordUserFailure(match.username);
+                        await removePartialFile();
                         resolve({
                             success: false,
                             error: `Write error: ${err.message}`,

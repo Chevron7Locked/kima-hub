@@ -111,6 +111,104 @@ it("sorts a reset connection as a connection failure and cools the peer down", a
     expect(t.markUserFailed).toHaveBeenCalledWith("peer");
 });
 
+/** Runs downloadTrack for a fake download; `onPipe` fires once the service has attached everything. */
+async function failEarly(name: string, onPipe: (download: DownloadWithToken) => void, timeout?: number) {
+    expectLog("error");
+    const service = soulseekService as any;
+    const download = makeDownload();
+    (download as any).username = name;
+    // the write stream is still opening when the failure arrives: microtasks run before the file system answers
+    const pipe = download.stream.pipe.bind(download.stream);
+    (download.stream as any).pipe = (dest: any) => {
+        const piped = pipe(dest);
+        queueMicrotask(() => onPipe(download));
+        return piped;
+    };
+    service.client = { download: async () => download, removeDownload: jest.fn() };
+    jest.spyOn(service, "ensureConnected").mockResolvedValue(undefined);
+    jest.spyOn(service, "markUserFailed").mockResolvedValue(undefined);
+    const limit = service.DOWNLOAD_TIMEOUT_INITIAL;
+    if (timeout !== undefined) service.DOWNLOAD_TIMEOUT_INITIAL = timeout;
+    const dest = path.join(dir, `${name}.flac`);
+    let result;
+    try {
+        result = await service.downloadTrack(
+            { username: name, filename: "a.flac", fullPath: "a.flac", size: 10, quality: "flac", score: 10 },
+            dest,
+        );
+    } finally {
+        service.DOWNLOAD_TIMEOUT_INITIAL = limit;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    return { result, leftBehind: fs.existsSync(dest) };
+}
+
+describe("a failed download leaves no partial file", () => {
+    it("after an error on the download's events, even one that arrives while the file is opening", async () => {
+        const { result, leftBehind } = await failEarly("events-err", (d) =>
+            d.events.emit("error", new Error("peer went away")),
+        );
+        expect(result).toEqual({ success: false, error: "peer went away" });
+        expect(leftBehind).toBe(false);
+    });
+
+    it("after an error on the stream, even one that arrives while the file is opening", async () => {
+        const { result, leftBehind } = await failEarly("stream-err", (d) => d.stream.destroy(new Error("read ECONNRESET")));
+        expect(result).toEqual({ success: false, error: "read ECONNRESET" });
+        expect(leftBehind).toBe(false);
+    });
+
+    it("after a timeout", async () => {
+        const { result, leftBehind } = await failEarly("timed-out", () => {}, 1);
+        expect(result).toEqual({ success: false, error: "Download timed out" });
+        expect(leftBehind).toBe(false);
+    });
+});
+
+it("fails a download whose file cannot be written, with the write error, and cools the peer down", async () => {
+    expectLog("error");
+    const service = soulseekService as any;
+    const download = makeDownload();
+    (download as any).username = "unwritable";
+    service.client = { download: async () => download, removeDownload: jest.fn() };
+    jest.spyOn(service, "ensureConnected").mockResolvedValue(undefined);
+    const markUserFailed = jest.spyOn(service, "markUserFailed").mockResolvedValue(undefined);
+    // a folder where the file should go: the file system refuses to open it for writing
+    const dest = path.join(dir, "unwritable.flac");
+    fs.mkdirSync(dest);
+
+    const result = await service.downloadTrack(
+        { username: "unwritable", filename: "a.flac", fullPath: "a.flac", size: 10, quality: "flac", score: 10 },
+        dest,
+    );
+
+    expect(result).toEqual({ success: false, error: expect.stringMatching(/^Write error: EISDIR/) });
+    expect(markUserFailed).toHaveBeenCalledWith("unwritable");
+});
+
+it("fails a download that sat unfinished past its limit at once, with a stuck-download reason", async () => {
+    expectLog("error");
+    const { SlskClient } = await import("../../lib/soulseek/p2p-client");
+    const real = new SlskClient();
+    real.peers.set("stuck", { username: "stuck", send: jest.fn(), destroy: jest.fn() } as any);
+    const service = soulseekService as any;
+    service.client = real;
+    jest.spyOn(service, "ensureConnected").mockResolvedValue(undefined);
+    jest.spyOn(service, "markUserFailed").mockResolvedValue(undefined);
+    const waiting = service.downloadTrack(
+        { username: "stuck", filename: "a.flac", fullPath: "a.flac", size: 10, quality: "flac", score: 10 },
+        path.join(dir, "stuck.flac"),
+    ) as Promise<{ success: boolean; error?: string }>;
+    while (real.downloads.length === 0 || real.downloads[0].stream.listenerCount("error") < 2) await tick();
+    (real.downloads[0] as any).startedAt = Date.now() - 6 * 60 * 1000;
+
+    (real as any).cleanupStuckDownloads();
+
+    await expect(waiting).resolves.toEqual({ success: false, error: expect.stringMatching(/stuck download/i) });
+    expect(real.downloads).toHaveLength(0);
+    real.destroy();
+});
+
 it("keeps a denial that lands before the service listens, and fails the download with its reason", async () => {
     expectLog("error");
     const { SlskClient } = await import("../../lib/soulseek/p2p-client");
