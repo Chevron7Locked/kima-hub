@@ -181,10 +181,12 @@ async function readYtDlpPlaylist(url: string): Promise<Tracklist> {
         const coverUrl: string | null = track.thumbnailUrl;
 
         if (!track.hasNativeMetadata) {
+          // The give-up timer is cleared as soon as the race is decided, so a song that answered holds nothing open.
+          let giveUp: NodeJS.Timeout | undefined;
           try {
             const resolved = await Promise.race([
               trackIdentityService.resolveUrl(track.url),
-              new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+              new Promise<null>((resolve) => { giveUp = setTimeout(() => resolve(null), 8_000); }),
             ]);
             if (resolved?.title && resolved?.artist) {
               resolvedTracks.push({
@@ -204,6 +206,8 @@ async function readYtDlpPlaylist(url: string): Promise<Tracklist> {
             }
           } catch {
             // song.link could not resolve it; fall back to yt-dlp's own metadata below
+          } finally {
+            clearTimeout(giveUp);
           }
         }
 

@@ -53,6 +53,24 @@ it("fails a Spotify import left scanning past its deadline, with no Lidarr set u
     });
 });
 
+it("fails a scan that began 45 minutes ago although its last re-queue touched the row 15 minutes ago", async () => {
+    const job = await prisma.spotifyImportJob.create({
+        data: {
+            userId: USER, spotifyPlaylistId: "37i9dQZF1DXcBWIGoYBM5M", playlistName: "Today's Top Hits",
+            status: "scanning", albumsTotal: 1, tracksTotal: 1, pendingTracks: [],
+            scanStartedAt: new Date(Date.now() - 45 * 60_000),
+        },
+    });
+    await prisma.$executeRaw`UPDATE "SpotifyImportJob" SET "updatedAt" = now() - interval '15 minutes' WHERE id = ${job.id}`;
+
+    await queueCleaner.recoverStuckWork();
+
+    expect(await prisma.spotifyImportJob.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject({
+        status: "failed",
+        error: "Scan timed out after 30 minutes",
+    });
+});
+
 it("tells the person's import page when it fails a scan that timed out", async () => {
     const job = await prisma.spotifyImportJob.create({
         data: {

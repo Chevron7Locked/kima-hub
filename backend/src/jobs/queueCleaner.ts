@@ -103,9 +103,12 @@ class QueueCleanerService {
                 const { failImportJob } = await import("../services/playlistImport");
                 if (await failImportJob(job.id, "Import never started")) recoveredCount++;
             } else if (job.status === "scanning") {
-                if (jobAge > SCANNING_FAIL_TIMEOUT) {
+                // The scan is timed from when it began: re-asking for it touches the row, and must not restart the clock.
+                // A row that began scanning before that was stamped is timed from its last touch.
+                const scanAge = Date.now() - (job.scanStartedAt ?? job.updatedAt).getTime();
+                if (scanAge > SCANNING_FAIL_TIMEOUT) {
                     logger.debug(
-                        `[IMPORT STUCK] Job ${job.id} stuck in scanning for ${Math.round(jobAge / 60000)}min - force failing`
+                        `[IMPORT STUCK] Job ${job.id} stuck in scanning for ${Math.round(scanAge / 60000)}min - force failing`
                     );
 
                     // An import that closed while this check ran keeps its outcome, and is not counted as recovered.

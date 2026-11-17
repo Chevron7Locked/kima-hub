@@ -127,6 +127,36 @@ describe("any other site", () => {
         expect(list.tracks[0]).toMatchObject({ title: "Raw 0", artist: "Raw A", coverUrl: "t0" });
     });
 
+    describe("when song.link is slow", () => {
+        const oneSong = {
+            id: "pl", title: "Set", platform: "soundcloud", uploader: null,
+            tracks: [{ url: "u0", title: "Raw 0", artist: "Raw A", album: null, duration: 10, thumbnailUrl: "t0", hasNativeMetadata: false }],
+        };
+        afterEach(() => jest.useRealTimers());
+
+        it("leaves no timer running once every song has been read", async () => {
+            jest.useFakeTimers();
+            ytdlp.mockResolvedValue(oneSong);
+            identity.resolveUrl.mockResolvedValue({ spotifyId: "", title: "Clean 0", artist: "Clean A", album: "", isrc: null, coverUrl: null });
+
+            await readMusicLink(link("https://soundcloud.com/dj/sets/set"));
+
+            expect(jest.getTimerCount()).toBe(0);
+        });
+
+        it("gives up on a song after 8 seconds and keeps yt-dlp's own words", async () => {
+            jest.useFakeTimers();
+            ytdlp.mockResolvedValue(oneSong);
+            identity.resolveUrl.mockReturnValue(new Promise(() => {}));
+
+            const reading = readMusicLink(link("https://soundcloud.com/dj/sets/set"));
+            await jest.advanceTimersByTimeAsync(8_000);
+            const list = await reading;
+
+            expect(list.tracks[0]).toMatchObject({ title: "Raw 0", artist: "Raw A" });
+        });
+    });
+
     it("says so when a playlist has no songs", async () => {
         ytdlp.mockResolvedValue({ id: "pl", title: "Empty", platform: "mixcloud", uploader: null, tracks: [] });
         await expect(readMusicLink(link("https://www.mixcloud.com/a/playlist/b"))).rejects.toThrow("No tracks found in mixcloud playlist");

@@ -364,7 +364,8 @@ export const NOT_WAITING_FOR_DOWNLOADS: ImportJob["status"][] = ["pending", "fet
 export function recordDownloadsCheck(job: ImportJob, fields: { status?: ImportJob["status"]; error?: string }): Promise<boolean> {
   return updateImportJobFields(
     job.id,
-    { progress: job.progress, ...fields },
+    // The move to scanning is stamped, so a scan that never finishes is timed from here, not from its last re-queue.
+    { progress: job.progress, ...fields, ...(fields.status === "scanning" ? { scanStartedAt: new Date() } : {}) },
     NOT_WAITING_FOR_DOWNLOADS,
   );
 }

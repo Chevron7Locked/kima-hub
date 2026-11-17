@@ -110,6 +110,16 @@ describe("checking an import's downloads", () => {
         expect(await row(id)).toMatchObject({ status: "completed", progress: 100 });
     });
 
+    it("stamps when the import began scanning", async () => {
+        const id = await downloading(["completed"]);
+        const before = Date.now();
+
+        await playlistImportService.checkImportCompletion(id);
+
+        const stored = await row(id);
+        expect(stored?.scanStartedAt?.getTime()).toBeGreaterThanOrEqual(before);
+    });
+
     it("has the import marked as scanning before the scan is asked for", async () => {
         const id = await downloading(["completed"]);
         let statusAtRequest: string | undefined;

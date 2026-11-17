@@ -613,6 +613,9 @@ model SpotifyImportJob {
   pendingTracks      Json
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+  /// When the import moved to scanning. Unlike updatedAt, a retry of the scan does not move it, so a scan that never
+  /// finishes fails after a total time. Null on a row that has not scanned.
+  scanStartedAt      DateTime?
   sourceUrl          String?
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
