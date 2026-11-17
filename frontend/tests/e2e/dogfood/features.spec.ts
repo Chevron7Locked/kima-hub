@@ -25,14 +25,10 @@ const GPU_INSTALL_MS = 25 * 60_000;
  * word for word, so this block is updated with each release; the older releases stay, since the changelog keeps them.
  */
 const NEWEST = {
-    version: "1.12.4",
-    heading: "Kima 1.12",
-    // A fresh library: "sound.rebuild" is only for libraries upgraded from 1.11.
-    items: [
-        "hotfix.1124", "hotfix.1123", "hotfix.1122", "hotfix.1121", "moods.learned", "radio.stations", "mixes.recipes", "discover.only", "panel.redesign",
-        "podcasts.browse", "analysis.middle", "enrichment.rerun", "updates.pings", "fixes.12",
-    ],
-    changelogText: /podcast browser/i,
+    version: "1.13.0",
+    heading: "Kima 1.13",
+    items: ["ios.app", "upgrade.13", "plays.kept", "playlists.unavailable", "stats.library", "twofactor.recovery", "subsonic.13", "fixes.13"],
+    changelogText: /two-factor recovery/i,
 };
 
 /** GET /api<path> as the holder of `token`, expecting 200, and parse the body. */
@@ -466,6 +462,8 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
                 for (const key of NEWEST.items) {
                     await expect(dialog.locator(`[data-item="${key}"]`)).toBeVisible();
                 }
+                await expect(dialog.getByTestId("whatsnew-star").getByRole("link", { name: /star kima on github/i })).toBeVisible();
+                await expect(dialog.locator('[data-release="1.12.4"]')).toHaveCount(0);
                 await expect(dialog.locator('[data-release="1.11.0"]')).toHaveCount(0);
                 await expect(dialog.locator('[data-release="1.10.1"]')).toHaveCount(0);
             });

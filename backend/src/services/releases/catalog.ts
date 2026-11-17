@@ -111,6 +111,119 @@ const KEVIN_1_11 = [
 
 export const RELEASES: Release[] = [
     {
+        // The date is the release day; it decides who counts as upgrading from 1.12.
+        version: "1.13.0",
+        title: "Kima 1.13",
+        summary:
+            "Listening history that survives a song leaving, playlists that mark songs that can't play, stats for your library only, two-factor recovery, and a large round of fixes.",
+        date: "2026-11-16",
+        items: [
+            {
+                kind: "note",
+                key: "ios.app",
+                title: "Kima on iPhone",
+                summary: "The official Kima iPhone app is on the App Store, and its source is on GitHub.",
+                body:
+                    "The official Kima iPhone app is on the App Store, and works with this release.\n\n" +
+                    "Its source code is on GitHub, if you want to build it yourself or see how it works.",
+                links: [
+                    { label: "Get the iPhone app", href: "https://apps.apple.com/app/id6789728815" },
+                    { label: "iPhone app source code", href: "https://github.com/Chevron7Locked/kima-ios" },
+                ],
+            },
+            {
+                kind: "note",
+                key: "upgrade.13",
+                title: "After upgrading",
+                summary: "A one-time history check and cover pass on first start, a library scan for Subsonic bitrates, and admin-only metrics.",
+                body:
+                    "On the first start, Kima rewrites and checks your play history once. On a very large history this is a short wait.\n\n" +
+                    "Covers get a one-time pass after start: every stored cover is versioned so a changed picture is fetched fresh, and " +
+                    "album covers move into an albums folder inside the covers folder. Pictures already shown keep working while it runs.\n\n" +
+                    "Run a library scan so Subsonic apps see each song's real bitrate. A song's genres show in vote order the next time they are written.\n\n" +
+                    "/api/metrics is admin-only: a metrics scraper needs an admin's app key.",
+                links: [{ label: "Open library settings", href: "/settings/library" }],
+            },
+            {
+                kind: "note",
+                key: "plays.kept",
+                title: "Your listening history stays",
+                summary: "A song's plays, like and playlist places follow it to another copy, and its plays stay in your stats when no copy is left.",
+                body:
+                    "When a song leaves your library and the same recording is on another album you have, for example a " +
+                    "deluxe edition, its plays, like and playlist places move there.\n\n" +
+                    "When no copy is left, its plays stay in your stats under the song's name, and go back to the song if it returns.\n\n" +
+                    "Your play history is rewritten and checked once on the first start after this update, which adds a short " +
+                    "wait on a very large history.",
+            },
+            {
+                kind: "note",
+                key: "playlists.unavailable",
+                title: "Playlists mark songs that can't play",
+                summary: "A song whose file is missing or unreadable stays in its playlist, marked unavailable, and playback skips it.",
+                body:
+                    "A playlist keeps listing a song whose file went missing or can't be read, or that now sits only in " +
+                    "Discover, marked \"unavailable\". Play, shuffle and add to queue skip it.\n\n" +
+                    "A playlist can also list a song more than once now: imports keep a song the source lists twice, and adding " +
+                    "a song that is already there asks whether to add it again.\n\n" +
+                    "Imported songs that turn up later go into their place in the playlist, not at the end.",
+            },
+            {
+                kind: "note",
+                key: "stats.library",
+                title: "Stats count your library",
+                summary: "Discover plays are left out of the stats page, and every count of your plays counts real listens.",
+                body:
+                    "The stats page counts only your library. Plays of Discover songs are left out; a Discover album you like " +
+                    "moves to your library, and its plays count from then on.\n\n" +
+                    "Counts read listens, not every repeat or skip, and the stats page opens fast with a long history.",
+            },
+            {
+                kind: "note",
+                key: "twofactor.recovery",
+                title: "Two-factor recovery",
+                summary: "Turn two-factor off with a recovery code, make new codes, and admins can help someone locked out.",
+                body:
+                    "If you lose your authenticator, you can turn two-factor sign-in off in settings with a recovery code. You " +
+                    "can also make a new set of recovery codes without turning it off; the old ones stop working.\n\n" +
+                    "An admin can turn off two-factor for someone locked out, from the users list. That person is signed out on every device.\n\n" +
+                    "New recovery codes are 16 characters long, and codes can be pasted with spaces or dashes in any case. Older " +
+                    "8-character codes keep working until you make new ones.",
+            },
+            {
+                kind: "note",
+                key: "subsonic.13",
+                title: "Subsonic apps",
+                summary: "Subsonic apps see only songs that play and can no longer manage accounts. Run a library scan for real bitrates.",
+                body:
+                    "Subsonic apps see only songs that play, the names, years, genres and pictures you set, and changes as they happen.\n\n" +
+                    "They can no longer change passwords or create, edit or delete users: manage accounts in the web app. " +
+                    "Starring works for songs only, and a share holds one item.\n\n" +
+                    "Run a library scan after upgrading so Subsonic apps see each song's real bitrate.",
+            },
+            {
+                kind: "note",
+                key: "fixes.13",
+                title: "Fixes and small improvements",
+                summary: "Saved queues, imports, downloads, Discover, covers, enrichment and sign-in all behave more reliably.",
+                body:
+                    "- A song replaced by another copy keeps its plays, likes and playlist places, and deleting music cleans up its share links and empty albums\n" +
+                    "- Albums and artists with nothing to play leave the library lists, and recently added keeps its order after a rescan\n" +
+                    "- The saved queue shows the right song and place, follows you between devices without overwriting newer state, and the web player skips songs it can't read\n" +
+                    "- Playlist imports find the right songs, read M3U files the way music players do, and a cancelled import stays cancelled and stops its Lidarr downloads\n" +
+                    "- Downloads end the same way wherever they're stopped, retrying is safe, and a failed Soulseek download leaves no partial file\n" +
+                    "- Discover tells apart artists who share a name, starts from the artists you play most, and clearing it deletes its albums again\n" +
+                    "- Share links offer only songs that play and show their cover when pasted into a chat app\n" +
+                    "- A changed cover shows without clearing the cache, and a cover you set is never overwritten\n" +
+                    "- Stopping enrichment holds, a failing similarity step no longer stops it, and a year or genres you set while it ran are kept\n" +
+                    "- Wrong-password limits count per account, a server restart no longer signs you out, and the last admin can't be deleted\n" +
+                    "- Saving settings reloads only what changed, so Soulseek no longer drops when you change something else\n" +
+                    "- Popular songs come in the same order on the artist page and in Subsonic apps, and passwords over 72 characters are refused instead of cut short",
+                links: [{ label: "Full changelog", href: "/changelog" }],
+            },
+        ],
+    },
+    {
         // 1.12 and its fixes share one window. The date stays 1.12's: it decides who counts as upgrading from 1.11.
         version: "1.12.4",
         title: "Kima 1.12",

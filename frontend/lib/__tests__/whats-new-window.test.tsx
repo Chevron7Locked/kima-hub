@@ -181,6 +181,18 @@ describe("WhatsNewWindow", () => {
         expect(container.textContent).not.toContain("A note from");
     });
 
+    it.each([
+        ["with a note", R11],
+        ["without a note", R12],
+    ])("asks for a GitHub star above the opening view of a release %s, on any width", async (_, release) => {
+        await renderWindow([release]);
+        const star = container.querySelector<HTMLElement>('[data-testid="whatsnew-star"]');
+        expect(star?.textContent).toContain("star Kima on GitHub");
+        const link = star?.querySelector<HTMLAnchorElement>('a[href="https://github.com/Chevron7Locked/kima-hub"]');
+        expect(link?.target).toBe("_blank");
+        expect(star!.closest("div.overflow-y-auto")!.classList.contains("hidden")).toBe(false);
+    });
+
     it("gives Escape to a confirm opened inside it first, then leaves the page, then closes", async () => {
         const R13: Release = {
             version: "1.13.0",

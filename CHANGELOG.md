@@ -20,10 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Two-factor recovery from settings.** You can turn two-factor sign-in off with a recovery code if you have lost your authenticator, and make a new set of recovery codes without turning it off; the old codes stop working.
 - **An admin can turn off two-factor sign-in for someone locked out**, from the users list. That person is signed out on every device.
+- **The what's new window asks you to star Kima on GitHub**, with a link, above every release.
 
 ### Changed
 
 - **Your listening history survives when a song leaves the library.** When the same recording is on another album in your library, for example a deluxe edition, its plays, like and playlist places move there. When no copy is left, its plays stay in your stats under the song's name, and return to the song if it comes back.
+- **On a phone, the what's new window opens on the release's summary**, above its list, instead of on the list alone.
 - **Saving settings reloads only what changed.** Changing one setting no longer drops the Soulseek connection or reloads Lidarr, Audiobookshelf and fanart; each reloads only when its own settings change, and turning Audiobookshelf on or off takes effect at once.
 - **Saving Lidarr settings sets up its webhook only when something changed.** The webhook is set up again only when Lidarr's on-switch, address or key changed; a broken link is still repaired at the next health check. Soulseek now also reconnects when it is switched on or off.
 - **Playlists mark songs that can't play.** A playlist keeps listing a song whose file went missing or unreadable, or that now sits only in Discover, marked "unavailable"; play, shuffle and add to queue skip it, and the play buttons hide when nothing in the playlist can play. Adding such a song to a playlist is refused.

@@ -141,6 +141,21 @@ beforeEach(async () => {
 const keysIn = async (version: string) =>
     (await changelogFor(USER)).releases.find((r) => r.version === version)!.items.map((i) => i.key);
 
+/** 1.12.4's re-file as this user's changelog lists it, or undefined when it is not offered. */
+const refileOnChangelog = async (userId = USER) =>
+    (await changelogFor(userId)).releases.find((r) => r.version === "1.12.4")!.items.find((i) => i.key === "albums.refile");
+
+/** Runs `fn` with a later release, holding a copy of 1.12.4's re-file as `later.refile`, as the newest. */
+async function withLaterRefileRelease(fn: () => Promise<void>) {
+    const refile = catalog.RELEASES.find((r) => r.version === "1.12.4")!.items.find((i) => i.key === "albums.refile")!;
+    catalog.RELEASES.unshift({ version: "9.0.0", title: "Kima 9", summary: "Later.", date: "2099-01-01", items: [{ ...refile, key: "later.refile" }] });
+    try {
+        await fn();
+    } finally {
+        catalog.RELEASES.shift();
+    }
+}
+
 describe("dismissRelease", () => {
     it("records a decision for every unanswered choice, not an absence", async () => {
         const out = await dismissRelease(USER, "9.9.9");
@@ -313,10 +328,13 @@ describe("an older release's unfinished work is open on the changelog, skipped o
         expect(await item("1.11.0", "moods.mixes.retired")).toMatchObject({ open: true, requires: "retiredMoodMix" });
     });
 
-    it("leaves the newest release's actions to its window until it is closed", async () => {
-        expect((await item("1.12.4", "albums.refile")).open).toBeUndefined();
-        await acknowledge("1.12.4");
+    it("opens an older release's re-file at once, and leaves the newest release's actions to its window until it is closed", async () => {
         expect((await item("1.12.4", "albums.refile")).open).toBe(true);
+        await withLaterRefileRelease(async () => {
+            expect((await item("9.0.0", "later.refile")).open).toBeUndefined();
+            await acknowledge("9.0.0");
+            expect((await item("9.0.0", "later.refile")).open).toBe(true);
+        });
     });
 });
 
@@ -398,26 +416,34 @@ describe("catalog", () => {
 
         jest.restoreAllMocks();
         noMix();
-        const keys = async (userId = USER) =>
-            (await pendingReleases(userId)).find((r) => r.version === "1.12.4")!.items.map((i) => i.key);
         // Still offered once the upgrade's re-analysis leaves no song analysed before the release.
         await libraryAnalysedBefore(false);
-        expect(await keys()).toContain("albums.refile");
+        expect(await refileOnChangelog()).toBeDefined();
         // Not offered to a server set up after the release.
         await settingsRow("2026-12-01T00:00:00Z");
-        expect(await keys()).not.toContain("albums.refile");
+        expect(await refileOnChangelog()).toBeUndefined();
         await settingsRow("2026-01-01T00:00:00Z");
         await libraryAnalysedBefore(true);
-        expect(await keys(MEMBER)).not.toContain("albums.refile");
+        expect(await refileOnChangelog(MEMBER)).toBeUndefined();
     });
 
     it("stops asking about the re-file once a clean run is recorded", async () => {
         jest.restoreAllMocks();
         noMix();
-        const keys = async () => (await pendingReleases(USER)).find((r) => r.version === "1.12.4")!.items.map((i) => i.key);
-        expect(await keys()).toContain("albums.refile");
+        expect((await refileOnChangelog())!.open).toBe(true);
         await settingsRow("2026-01-01T00:00:00Z", new Date());
-        expect(await keys()).not.toContain("albums.refile");
+        expect((await refileOnChangelog())!.open).toBe(false);
+    });
+
+    it("leaves a recorded re-file out of the newest release's window", async () => {
+        jest.restoreAllMocks();
+        noMix();
+        await withLaterRefileRelease(async () => {
+            const keys = async () => (await pendingReleases(USER))[0].items.map((i) => i.key);
+            expect(await keys()).toContain("later.refile");
+            await settingsRow("2026-01-01T00:00:00Z", new Date());
+            expect(await keys()).not.toContain("later.refile");
+        });
     });
 
     it("offers the wipe to an upgraded library and not to a fresh install", async () => {
@@ -475,8 +501,8 @@ describe("the release questions read the settings through the settings module", 
             throw new Error("the settings table was read directly");
         }) as never);
     };
-    const refileOffered = async () =>
-        (await pendingReleases(USER)).find((r) => r.version === "1.12.4")!.items.some((i) => i.key === "albums.refile");
+    // Offered: listed on the changelog and still open there.
+    const refileOffered = async () => (await refileOnChangelog())?.open === true;
 
     beforeEach(() => {
         jest.restoreAllMocks();

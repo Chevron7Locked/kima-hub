@@ -31,6 +31,9 @@ type WindowView =
     | { pane: "release"; version: string }
     | { pane: "item"; key: string; from?: string };
 
+/** The main repository, which the star request asks people to star. */
+const KIMA_REPO = "https://github.com/Chevron7Locked/kima-hub";
+
 /** A click that replaces this page: a plain left click. Cmd, ctrl, shift or a middle click opens another tab or window. */
 export function opensHere(e: React.MouseEvent): boolean {
     return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
@@ -254,6 +257,16 @@ export function WhatsNewWindow({
         </section>
     );
 
+    // Asked above the opening view of every release, whatever the release says.
+    const starRequest = (
+        <section aria-label="Star Kima on GitHub" data-testid="whatsnew-star" className="flex flex-col gap-3 max-w-prose pb-5 mb-5 border-b border-white/10">
+            <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
+                If you haven&apos;t yet, please star Kima on GitHub. Stars help more people find Kima.
+            </p>
+            <ReleaseLinks links={[{ label: "Star Kima on GitHub", href: KIMA_REPO }]} />
+        </section>
+    );
+
     const noteSection = (r: Release) => (
         <section aria-labelledby={`whats-new-note-${r.version}`} className="flex flex-col gap-4">
             <h3 id={`whats-new-note-${r.version}`} className="text-base font-semibold text-white">
@@ -356,10 +369,11 @@ export function WhatsNewWindow({
             releasePage(readRelease)
         ) : view.pane === "needs" ? (
             needsPage
-        ) : release.note ? (
-            noteSection(release)
         ) : (
-            intro
+            <>
+                {starRequest}
+                {release.note ? noteSection(release) : intro}
+            </>
         );
 
     const pageOpen = view.pane !== "list";
@@ -395,7 +409,7 @@ export function WhatsNewWindow({
                     </div>
                     <div
                         ref={contentRef}
-                        className={`min-h-0 overflow-y-auto px-5 sm:px-6 py-6 flex-1 ${pageOpen || release.note ? "block" : "hidden lg:block"} ${
+                        className={`min-h-0 overflow-y-auto px-5 sm:px-6 py-6 flex-1 block ${
                             pageOpen ? "" : "max-h-[38vh] lg:max-h-none"
                         }`}
                     >
