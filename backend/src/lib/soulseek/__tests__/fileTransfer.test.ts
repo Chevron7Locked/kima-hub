@@ -73,7 +73,9 @@ describe('FileTransferReader', () => {
     expect(t.looked).toEqual([TOKEN_HEX])
     expect(d.status).toBe('downloading')
     expect(t.replies).toHaveLength(1)
+    expect(t.replies[0].readBigUInt64LE(0)).toBe(0n)
     expect(d.receivedBytes).toBe(0n)
+    expect(t.ended()).toBe(0)
   })
 
   it('takes the token and file data from one chunk', () => {
