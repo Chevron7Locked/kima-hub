@@ -1,8 +1,16 @@
 import { EventEmitter } from "events";
 import stream from "stream";
 
-import type { DownloadWithToken, SlskDownloadEventEmitter } from "../downloads";
-import { FileTransferReader, findAwaitingDownload } from "../fileTransfer";
+import type {
+  Download,
+  DownloadWithToken,
+  SlskDownloadEventEmitter,
+} from "../downloads";
+import {
+  acceptTransferRequest,
+  FileTransferReader,
+  findAwaitingDownload,
+} from "../fileTransfer";
 
 const TOKEN = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
 const TOKEN_HEX = "deadbeef";
@@ -223,14 +231,31 @@ describe("FileTransferReader", () => {
   });
 
   describe("close", () => {
-    it("fails a transfer cut short, with no listener on the download", () => {
+    it("destroys the stream of a transfer cut short, with no listener on the download or the stream", async () => {
       const d = makeDownload(10n);
       const t = setup(d);
       t.reader.push(Buffer.concat([TOKEN, Buffer.from("abc")]));
       expect(d.events.listenerCount("error")).toBe(0);
+      expect(d.stream.listenerCount("error")).toBe(0);
       expect(() => t.reader.close()).not.toThrow();
       expect(t.settled).toEqual([d]);
-      expect(d.stream.writableEnded).toBe(true);
+      expect(d.stream.destroyed).toBe(true);
+      // an unhandled 'error' on the stream would crash the run here
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+
+    it("gives the stream the error when something is listening for it", async () => {
+      const d = makeDownload(10n);
+      const t = setup(d);
+      const errors: Error[] = [];
+      d.stream.on("error", (e) => errors.push(e));
+      t.reader.push(Buffer.concat([TOKEN, Buffer.from("abc")]));
+      t.reader.close();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(d.stream.destroyed).toBe(true);
+      expect(errors.map((e) => e.message)).toEqual([
+        "Connection closed before transfer completed",
+      ]);
     });
 
     it("tells a listener that the transfer was cut short", () => {
@@ -243,6 +268,24 @@ describe("FileTransferReader", () => {
       expect(errors.map((e) => e.message)).toEqual([
         "Connection closed before transfer completed",
       ]);
+    });
+
+    it("fail destroys the stream with the connection's error only if the stream has a listener", async () => {
+      const d = makeDownload(10n);
+      const t = setup(d);
+      t.reader.push(Buffer.concat([TOKEN, Buffer.from("abc")]));
+      expect(() => t.reader.fail(new Error("reset"))).not.toThrow();
+      expect(d.stream.destroyed).toBe(true);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      const d2 = makeDownload(10n);
+      const t2 = setup(d2);
+      const errors: Error[] = [];
+      d2.stream.on("error", (e) => errors.push(e));
+      t2.reader.push(Buffer.concat([TOKEN, Buffer.from("abc")]));
+      t2.reader.fail(new Error("reset"));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(errors.map((e) => e.message)).toEqual(["reset"]);
     });
 
     it("leaves a completed download alone", () => {
@@ -292,5 +335,47 @@ describe("findAwaitingDownload", () => {
     expect(
       findAwaitingDownload([make({ status: "complete" })], "peer", TOKEN_HEX),
     ).toBeUndefined();
+  });
+});
+
+describe("acceptTransferRequest", () => {
+  const queued = (
+    status: "requested" | "queued" | "downloading" | "complete",
+  ) =>
+    ({
+      ...makeDownload(0n),
+      status,
+      token: undefined,
+      totalBytes: undefined,
+    }) as unknown as Download;
+
+  it("connects a requested or queued download to the peer's offer", () => {
+    for (const status of ["requested", "queued"] as const) {
+      const d = queued(status);
+      const statuses: string[] = [];
+      d.events.on("status", (s) => statuses.push(s));
+      expect(acceptTransferRequest(d, { token: TOKEN_HEX, size: 9n })).toBe(
+        true,
+      );
+      expect(d.status).toBe("connected");
+      expect((d as DownloadWithToken).token).toBe(TOKEN_HEX);
+      expect((d as DownloadWithToken).totalBytes).toBe(9n);
+      expect(statuses).toEqual(["connected"]);
+    }
+  });
+
+  it("leaves a download alone once it is connected, downloading or complete", () => {
+    for (const status of ["connected", "downloading", "complete"] as const) {
+      const d = { ...makeDownload(5n), status } as unknown as Download;
+      const statuses: string[] = [];
+      d.events.on("status", (s) => statuses.push(s));
+      expect(acceptTransferRequest(d, { token: "00000001", size: 9n })).toBe(
+        false,
+      );
+      expect(d.status).toBe(status);
+      expect((d as DownloadWithToken).token).toBe(TOKEN_HEX);
+      expect((d as DownloadWithToken).totalBytes).toBe(5n);
+      expect(statuses).toEqual([]);
+    }
   });
 });

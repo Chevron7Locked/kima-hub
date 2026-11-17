@@ -9,7 +9,7 @@ import type TypedEventEmitter from 'typed-emitter'
 import type { Address } from './common'
 import type { Download, RequestedDownload, SlskDownloadEventEmitter } from './downloads'
 import { makeDownloadStatusData } from './downloads'
-import { FileTransferReader, findAwaitingDownload } from './fileTransfer'
+import { acceptTransferRequest, FileTransferReader, findAwaitingDownload } from './fileTransfer'
 import type { SlskListenEvents } from './listen'
 import { SlskListen } from './listen'
 import { ConnectionType, TransferDirection, UserStatus } from './messages/common'
@@ -195,7 +195,7 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
                 })
 
                 conn.on('error', (error) => {
-                  reader.download?.stream.destroy(error)
+                  reader.fail(error)
                 })
                 conn.on('close', () => {
                   reader.close()
@@ -243,12 +243,9 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
                 return
               }
 
-              const dl = this.downloads[existingDownloadIndex] as any
-              dl.status = 'connected'
-              dl.queuePosition = 0
-              dl.token = msg.token
-              dl.totalBytes = msg.size
-              dl.events.emit('status', 'connected', makeDownloadStatusData(dl))
+              // A repeat offer for a transfer already under way is not answered.
+              const offer = { token: msg.token, size: msg.size }
+              if (!acceptTransferRequest(this.downloads[existingDownloadIndex], offer)) return
 
               peer.send('transferResponse', {
                 token: msg.token,

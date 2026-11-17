@@ -41,20 +41,14 @@ export type ConnectedDownload = Omit<QueuedDownload, 'status'> & {
   token: string
   totalBytes: bigint
 }
-const isConnectedDownload = (download: Download): download is ConnectedDownload =>
-  download.status === 'connected'
 
 export type DownloadingDownload = Omit<ConnectedDownload, 'status'> & {
   status: 'downloading'
 }
-const isDownloadingDownload = (download: Download): download is DownloadingDownload =>
-  download.status === 'downloading'
 
 export type CompleteDownload = Omit<DownloadingDownload, 'status'> & {
   status: 'complete'
 }
-const isCompleteDownload = (download: Download): download is CompleteDownload =>
-  download.status === 'complete'
 
 type DeniedDownload = Omit<RequestedDownload, 'status'> & {
   status: 'denied'
@@ -62,8 +56,6 @@ type DeniedDownload = Omit<RequestedDownload, 'status'> & {
 }
 
 export type DownloadWithToken = ConnectedDownload | DownloadingDownload | CompleteDownload
-export const downloadHasToken = (download: Download): download is DownloadWithToken =>
-  isConnectedDownload(download) || isDownloadingDownload(download) || isCompleteDownload(download)
 
 export type DownloadStatusData = DistributiveOmit<
   Download,

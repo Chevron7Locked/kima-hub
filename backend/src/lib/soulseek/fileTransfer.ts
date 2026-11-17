@@ -22,6 +22,22 @@ export type FileTransferPort = {
   resume: () => void;
 };
 
+/** The peer's transfer offer for a download. Only a download still waiting for one takes it; a repeat mid-transfer must not reset it. */
+export function acceptTransferRequest(
+  download: Download,
+  offer: { token: string; size: bigint },
+): boolean {
+  if (download.status !== "requested" && download.status !== "queued")
+    return false;
+  const dl = download as unknown as ConnectedDownload;
+  dl.status = "connected";
+  dl.queuePosition = 0;
+  dl.token = offer.token;
+  dl.totalBytes = offer.size;
+  dl.events.emit("status", "connected", makeDownloadStatusData(dl));
+  return true;
+}
+
 /** The download a peer's transfer token belongs to: only one still waiting for its transfer. */
 export function findAwaitingDownload(
   downloads: Download[],
@@ -90,20 +106,31 @@ export class FileTransferReader {
     else this.finishIfWhole(download);
   }
 
-  /** The connection closed: a transfer cut short fails, and the download's stream ends. */
+  /**
+   * The connection failed: the download's stream is destroyed with the error. A stream with no
+   * 'error' listener would throw it as an uncaught exception, so then it is destroyed bare.
+   */
+  fail(error: Error): void {
+    const stream = this.download?.stream;
+    if (!stream) return;
+    stream.destroy(stream.listenerCount("error") > 0 ? error : undefined);
+  }
+
+  /** The connection closed: a transfer cut short fails, and a whole one's stream ends. */
   close(): void {
     const download = this.download;
-    if (download && download.status !== "complete") {
-      // An EventEmitter throws on 'error' with no listener; a closing connection must not.
-      if (download.events.listenerCount("error") > 0) {
-        download.events.emit(
-          "error",
-          new Error("Connection closed before transfer completed"),
-        );
-      }
-      this.port.settle(download);
+    if (!download) return;
+    if (download.status === "complete") {
+      if (!download.stream.destroyed) download.stream.end();
+      return;
     }
-    if (download && !download.stream.destroyed) download.stream.end();
+    const error = new Error("Connection closed before transfer completed");
+    // An EventEmitter throws on 'error' with no listener; a closing connection must not.
+    if (download.events.listenerCount("error") > 0)
+      download.events.emit("error", error);
+    this.port.settle(download);
+    // A destroyed stream, not an ended one: a consumer must not take the cut-short file as whole.
+    this.fail(error);
   }
 
   /** File bytes from a peer go to its download; at the full size the transfer ends. */
