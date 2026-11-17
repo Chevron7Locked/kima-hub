@@ -1315,10 +1315,22 @@ class SoulseekService {
 
                     download.stream.pipe(writeStream);
 
-                    download.events.on("complete", () => {
+                    download.events.on("complete", async () => {
+                        if (resolved) return;
+                        // The peer's last byte is in, not yet on disk: success waits for the write stream to
+                        // close. A write error before then fails the download (its handler runs first), and the
+                        // timeout stays armed meanwhile.
+                        if (!writeStream.closed) {
+                            await new Promise<void>((done) =>
+                                writeStream.once("close", () => done())
+                            );
+                        }
                         if (resolved) return;
                         clearTimeout(timeoutId);
                         cleanup();
+                        // The p2p reader has dropped it already; the slskd client's stream ending on its own
+                        // has not, and the stuck-download sweep would find it later.
+                        this.client?.removeDownload(download);
 
                         if (fs.existsSync(destPath)) {
                             const stats = fs.statSync(destPath);
@@ -1350,6 +1362,11 @@ class SoulseekService {
                             "ERROR"
                         );
                         this.client?.removeDownload(download);
+                        try {
+                            download.stream.destroy();
+                        } catch {
+                            // ignore
+                        }
                         await removePartialFile();
                         resolve({
                             success: false,
@@ -1393,7 +1410,8 @@ class SoulseekService {
                         } catch {
                             // ignore
                         }
-                        await this.recordUserFailure(match.username);
+                        // A write stream fails on this machine's file system (full disk, no permission,
+                        // read-only, a folder in the way), so the peer is not put on cooldown.
                         await removePartialFile();
                         resolve({
                             success: false,

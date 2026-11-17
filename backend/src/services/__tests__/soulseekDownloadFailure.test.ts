@@ -111,8 +111,15 @@ it("sorts a reset connection as a connection failure and cools the peer down", a
     expect(t.markUserFailed).toHaveBeenCalledWith("peer");
 });
 
-/** Runs downloadTrack for a fake download; `onPipe` fires once the service has attached everything. */
-async function failEarly(name: string, onPipe: (download: DownloadWithToken) => void, timeout?: number) {
+/**
+ * Runs downloadTrack for a fake download; `onPipe` fires once the service has attached everything, while the
+ * write stream is still opening. `folderAtDest` puts a folder where the file should go, so it cannot be written.
+ */
+async function runEarly(
+    name: string,
+    onPipe: (download: DownloadWithToken) => void,
+    options: { timeout?: number; folderAtDest?: boolean } = {},
+) {
     expectLog("error");
     const service = soulseekService as any;
     const download = makeDownload();
@@ -124,12 +131,14 @@ async function failEarly(name: string, onPipe: (download: DownloadWithToken) => 
         queueMicrotask(() => onPipe(download));
         return piped;
     };
-    service.client = { download: async () => download, removeDownload: jest.fn() };
+    const removeDownload = jest.fn();
+    service.client = { download: async () => download, removeDownload };
     jest.spyOn(service, "ensureConnected").mockResolvedValue(undefined);
-    jest.spyOn(service, "markUserFailed").mockResolvedValue(undefined);
+    const markUserFailed = jest.spyOn(service, "markUserFailed").mockResolvedValue(undefined);
     const limit = service.DOWNLOAD_TIMEOUT_INITIAL;
-    if (timeout !== undefined) service.DOWNLOAD_TIMEOUT_INITIAL = timeout;
+    if (options.timeout !== undefined) service.DOWNLOAD_TIMEOUT_INITIAL = options.timeout;
     const dest = path.join(dir, `${name}.flac`);
+    if (options.folderAtDest) fs.mkdirSync(dest);
     let result;
     try {
         result = await service.downloadTrack(
@@ -140,12 +149,33 @@ async function failEarly(name: string, onPipe: (download: DownloadWithToken) => 
         service.DOWNLOAD_TIMEOUT_INITIAL = limit;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
-    return { result, leftBehind: fs.existsSync(dest) };
+    return {
+        result,
+        download,
+        dest,
+        removeDownload,
+        markUserFailed,
+        cooledDown: service.userConnectionCooldowns.has(name) as boolean,
+        leftBehind: fs.existsSync(dest),
+    };
+}
+
+/** The peer sends the whole file, in the same breath as the connection opens. */
+function sendWholeFile(download: DownloadWithToken) {
+    const reader = new FileTransferReader({
+        findDownload: () => download,
+        reply: () => {},
+        end: () => {},
+        settle: () => {},
+        pause: () => {},
+        resume: () => {},
+    });
+    reader.push(Buffer.concat([Buffer.from(TOKEN_HEX, "hex"), Buffer.alloc(10, 1)]));
 }
 
 describe("a failed download leaves no partial file", () => {
     it("after an error on the download's events, even one that arrives while the file is opening", async () => {
-        const { result, leftBehind } = await failEarly("events-err", (d) =>
+        const { result, leftBehind } = await runEarly("events-err", (d) =>
             d.events.emit("error", new Error("peer went away")),
         );
         expect(result).toEqual({ success: false, error: "peer went away" });
@@ -153,37 +183,48 @@ describe("a failed download leaves no partial file", () => {
     });
 
     it("after an error on the stream, even one that arrives while the file is opening", async () => {
-        const { result, leftBehind } = await failEarly("stream-err", (d) => d.stream.destroy(new Error("read ECONNRESET")));
+        const { result, leftBehind } = await runEarly("stream-err", (d) => d.stream.destroy(new Error("read ECONNRESET")));
         expect(result).toEqual({ success: false, error: "read ECONNRESET" });
         expect(leftBehind).toBe(false);
     });
 
     it("after a timeout", async () => {
-        const { result, leftBehind } = await failEarly("timed-out", () => {}, 1);
+        const { result, leftBehind } = await runEarly("timed-out", () => {}, { timeout: 1 });
         expect(result).toEqual({ success: false, error: "Download timed out" });
         expect(leftBehind).toBe(false);
     });
 });
 
-it("fails a download whose file cannot be written, with the write error, and cools the peer down", async () => {
-    expectLog("error");
-    const service = soulseekService as any;
-    const download = makeDownload();
-    (download as any).username = "unwritable";
-    service.client = { download: async () => download, removeDownload: jest.fn() };
-    jest.spyOn(service, "ensureConnected").mockResolvedValue(undefined);
-    const markUserFailed = jest.spyOn(service, "markUserFailed").mockResolvedValue(undefined);
+it("closes the download's own stream when its events report an error", async () => {
+    const { download } = await runEarly("events-destroy", (d) => d.events.emit("error", new Error("peer went away")));
+    expect(download.stream.destroyed).toBe(true);
+});
+
+describe("a finished download", () => {
+    it("is reported only once the whole file is on disk, even when the peer's last byte lands while the file is opening", async () => {
+        const { result, dest } = await runEarly("whole-file", sendWholeFile);
+        expect(result).toEqual({ success: true });
+        expect(fs.statSync(dest).size).toBe(10);
+    });
+
+    it("is dropped from the client's list", async () => {
+        const { download, removeDownload } = await runEarly("dropped", sendWholeFile);
+        expect(removeDownload).toHaveBeenCalledWith(download);
+    });
+
+    it("fails with the write error when the file cannot be written, though the peer sent every byte", async () => {
+        const { result } = await runEarly("whole-unwritable", sendWholeFile, { folderAtDest: true });
+        expect(result).toEqual({ success: false, error: expect.stringMatching(/^Write error: EISDIR/) });
+    });
+});
+
+it("fails a download whose file cannot be written with the write error, and leaves the peer alone", async () => {
     // a folder where the file should go: the file system refuses to open it for writing
-    const dest = path.join(dir, "unwritable.flac");
-    fs.mkdirSync(dest);
-
-    const result = await service.downloadTrack(
-        { username: "unwritable", filename: "a.flac", fullPath: "a.flac", size: 10, quality: "flac", score: 10 },
-        dest,
-    );
-
+    const { result, markUserFailed, cooledDown } = await runEarly("unwritable", () => {}, { folderAtDest: true });
     expect(result).toEqual({ success: false, error: expect.stringMatching(/^Write error: EISDIR/) });
-    expect(markUserFailed).toHaveBeenCalledWith("unwritable");
+    // the fault is this machine's, not the peer's
+    expect(markUserFailed).not.toHaveBeenCalled();
+    expect(cooledDown).toBe(false);
 });
 
 it("fails a download that sat unfinished past its limit at once, with a stuck-download reason", async () => {
