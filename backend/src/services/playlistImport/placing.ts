@@ -416,7 +416,18 @@ class PlaylistImportService {
             }
 
             jobLogger?.debug(`[Spotify Import] Job ${job.id}: still ${stored.status}, polling again in 15s...`);
-            await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+            // A stop in this process ends the wait at once and the loop's next turn returns; one from another process is
+            // seen by the stored-status check after the wait.
+            await new Promise<void>((resolve) => {
+              const done = () => {
+                clearTimeout(timer);
+                signal.removeEventListener("abort", done);
+                resolve();
+              };
+              const timer = setTimeout(done, POLL_INTERVAL_MS);
+              signal.addEventListener("abort", done);
+              if (signal.aborted) done();
+            });
           }
         }
 

@@ -361,13 +361,15 @@ export const NOT_WAITING_FOR_DOWNLOADS: ImportJob["status"][] = ["pending", "fet
  * The check read the import some time ago, so a person's cancel (the row is gone) or a path that closed or handed the
  * import on in the meantime is not written over. False when nothing was written.
  */
-export function recordDownloadsCheck(job: ImportJob, fields: { status?: ImportJob["status"]; error?: string }): Promise<boolean> {
-  return updateImportJobFields(
-    job.id,
-    // The move to scanning is stamped, so a scan that never finishes is timed from here, not from its last re-queue.
-    { progress: job.progress, ...fields, ...(fields.status === "scanning" ? { scanStartedAt: new Date() } : {}) },
-    NOT_WAITING_FOR_DOWNLOADS,
-  );
+export async function recordDownloadsCheck(job: ImportJob, fields: { status?: ImportJob["status"]; error?: string }): Promise<boolean> {
+  const written = await updateImportJobFields(job.id, { progress: job.progress, ...fields }, NOT_WAITING_FOR_DOWNLOADS);
+  // The first move to scanning is stamped, so a scan that never finishes is timed from there: not from its last
+  // re-queue, and not from a retry after a scan request that failed and was rolled back. A stop between the two writes
+  // leaves no stamp, and the queue cleaner then times the scan from the row's last write.
+  if (written && fields.status === "scanning") {
+    await prisma.spotifyImportJob.updateMany({ where: { id: job.id, scanStartedAt: null }, data: { scanStartedAt: new Date() } });
+  }
+  return written;
 }
 /** Every state but scanning: the write that undoes the move to scanning leaves an import that has moved on since. */
 export const NOT_SCANNING: ImportJob["status"][] = ["pending", "fetching", "downloading", "creating_playlist", "completed", "failed", "cancelled"];

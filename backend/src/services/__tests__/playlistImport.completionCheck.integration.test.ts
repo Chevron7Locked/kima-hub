@@ -154,4 +154,27 @@ describe("checking an import's downloads", () => {
         await playlistImportService.checkImportCompletion(id);
         expect(await row(id)).toMatchObject({ status: "scanning", progress: 75 });
     });
+
+    it("times a scan from its first attempt: a scan request that failed and was tried again keeps the first start", async () => {
+        const id = await downloading(["completed"]);
+        (requestScan as jest.Mock).mockRejectedValueOnce(new Error("queue down"));
+
+        await expect(playlistImportService.checkImportCompletion(id)).rejects.toThrow("queue down");
+        const first = (await row(id))?.scanStartedAt;
+        expect(first).toBeInstanceOf(Date);
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await playlistImportService.checkImportCompletion(id);
+
+        expect(await row(id)).toMatchObject({ status: "scanning", scanStartedAt: first });
+    });
+
+    it("stamps an import that has no scan start yet", async () => {
+        const id = await downloading(["completed"]);
+        await prisma.spotifyImportJob.update({ where: { id }, data: { scanStartedAt: null } });
+
+        await playlistImportService.checkImportCompletion(id);
+
+        expect((await row(id))?.scanStartedAt).toBeInstanceOf(Date);
+    });
 });

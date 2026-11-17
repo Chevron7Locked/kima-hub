@@ -297,6 +297,19 @@ describe("an import that was stopped before its worker started", () => {
         expect(check).not.toHaveBeenCalled();
     }, 5000);
 
+    it("stops at once when this process stops the import between two checks, without waiting out the 15 seconds", async () => {
+        const running = await importRow("downloading");
+        // The downloads are never done: the import keeps waiting, and a stop in this process lands while it does.
+        const check = jest.spyOn(playlistImportService as any, "checkImportCompletion").mockImplementation((async () => {
+            setTimeout(() => { void failImportJob(running.id, "stopped elsewhere"); }, 50);
+        }) as never);
+
+        await run(running.id);
+
+        expect(check).toHaveBeenCalledTimes(1);
+        expect(build).not.toHaveBeenCalled();
+    }, 5000);
+
     it("never lowers the counts a later write left, whatever order an album's progress lands in", async () => {
         const running = await importRow("downloading");
         acquire.mockImplementation((async () => {
