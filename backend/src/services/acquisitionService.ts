@@ -41,6 +41,8 @@ interface AcquisitionContext {
     existingJobId?: string;
     retryCount?: number;
     signal?: AbortSignal;
+    /** Asked before a download starts: false once whoever asked no longer wants it (an import stopped from another process). */
+    stillOpen?: () => Promise<boolean>;
 }
 
 interface AlbumAcquisitionRequest {
@@ -213,6 +215,13 @@ class AcquisitionService {
         }
     }
 
+    /** The import this acquisition is for was stopped: in this process (the signal) or in another (its stored status). */
+    private async importStopped(context: AcquisitionContext): Promise<boolean> {
+        if (context.signal?.aborted) return true;
+        if (context.stillOpen && !(await context.stillOpen())) return true;
+        return !!context.signal?.aborted;
+    }
+
     /** Acquire an album from Soulseek or Lidarr per the user's settings, with fallback; queued so albums run in parallel. */
     async acquireAlbum(
         request: AlbumAcquisitionRequest,
@@ -257,7 +266,7 @@ class AcquisitionService {
         request: AlbumAcquisitionRequest,
         context: AcquisitionContext
     ): Promise<AcquisitionResult> {
-        if (context.signal?.aborted) {
+        if (await this.importStopped(context)) {
             return { success: false, error: 'Import cancelled' };
         }
 
@@ -392,6 +401,10 @@ class AcquisitionService {
         requests: TrackAcquisitionRequest[],
         context: AcquisitionContext
     ): Promise<AcquisitionResult[]> {
+        if (await this.importStopped(context)) {
+            return requests.map(() => ({ success: false, error: 'Import cancelled' }));
+        }
+
         logger.debug(
             `\n[Acquisition] Acquiring ${requests.length} individual tracks via Soulseek`
         );
@@ -471,6 +484,10 @@ class AcquisitionService {
         request: AlbumAcquisitionRequest,
         context: AcquisitionContext
     ): Promise<AcquisitionResult> {
+        if (await this.importStopped(context)) {
+            return { success: false, error: 'Import cancelled' };
+        }
+
         logger.debug(
             `[Acquisition/Soulseek] Downloading: ${request.artistName} - ${request.albumTitle}`
         );
@@ -604,7 +621,7 @@ class AcquisitionService {
         request: AlbumAcquisitionRequest,
         context: AcquisitionContext
     ): Promise<AcquisitionResult> {
-        if (context.signal?.aborted) {
+        if (await this.importStopped(context)) {
             return { success: false, error: 'Import cancelled' };
         }
 

@@ -115,6 +115,18 @@ export async function updateImportJobFields(
 export const CLOSED_IMPORT_STATES: ImportJob["status"][] = ["completed", "failed", "cancelled"];
 
 /**
+ * Whether the import is still open in the database: its stored status, not this process's memory, so a stop from
+ * another process (the worker and the API run apart in the split image) holds the searches here too. An import whose
+ * row is gone is over. When it is over, this process's searches for it are aborted as well.
+ */
+export async function importStillOpen(importJobId: string): Promise<boolean> {
+  const row = await prisma.spotifyImportJob.findUnique({ where: { id: importJobId }, select: { status: true } });
+  const open = !!row && !CLOSED_IMPORT_STATES.includes(row.status as ImportJob["status"]);
+  if (!open) abortImportSearches(importJobId);
+  return open;
+}
+
+/**
  * An import is over (failed or cancelled by its person): its running searches are aborted, and its downloads still
  * pending or processing are stopped at the source, through the download manager's own cancel step, as a single
  * download's cancel does. Lidarr's queue entry goes and the album is no longer watched, except what another live job (another import's, a person's own download) still

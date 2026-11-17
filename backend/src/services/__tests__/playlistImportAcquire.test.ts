@@ -77,6 +77,12 @@ async function importWithoutAlbums(userId: string): Promise<void> {
     jest.spyOn(deezerService, "getTrackPreview").mockResolvedValue(null);
     const retry = jest.spyOn(playlistImportService as never, "autoRetryPendingTracks");
     const now = new Date();
+    // The import is open in the database, as the worker finds it: a worker never starts one that was stopped or is gone.
+    const id = `zz-import-${userId}`;
+    await prisma.spotifyImportJob.deleteMany({ where: { id } });
+    await prisma.spotifyImportJob.create({
+        data: { id, userId, spotifyPlaylistId: "90210", playlistName: `zz road trip ${userId}`, status: "pending", albumsTotal: 0, tracksTotal: 1, pendingTracks: [UNMATCHED] as never },
+    });
     await service.processImport(
         {
             id: `zz-import-${userId}`, userId, spotifyPlaylistId: "90210", playlistName: `zz road trip ${userId}`, status: "pending",

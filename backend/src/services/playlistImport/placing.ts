@@ -25,7 +25,7 @@ import { nameKey } from "../nameFold";
 import type { ImportJob, ImportPreview, AlbumToDownload } from "./types";
 import { readMusicLink, musicLinkName, M3UEntry, M3UNothingMatched } from "./reading";
 import { previewOfTracklist, pendingTracksOf, matchEntries, matchM3UEntries } from "./matching";
-import { failImportJob, jobLoggers, abortImportSearches, trackImportSearches, untrackImportSearches, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
+import { failImportJob, jobLoggers, abortImportSearches, importStillOpen, trackImportSearches, untrackImportSearches, stopImportDownloadsAtSource, saveImportJob, updateImportJobFields, CLOSED_IMPORT_STATES, markBuilding, publishImportJob, announceImportProgress, announceImportCounts, getImportJob, toImportJob, notifyImportFailed, HANDED_OFF_STATES, NOT_WAITING_FOR_DOWNLOADS, recordDownloadsCheck, NOT_SCANNING, newImportJobId, IMPORT_JOB_KEY, IMPORT_JOB_TTL } from "./jobState";
 
 /** Where an import's preview waits for the worker that runs the import. */
 const previewKey = (importJobId: string) => `import:preview:${importJobId}`;
@@ -173,17 +173,19 @@ class PlaylistImportService {
     let abortController: AbortController | undefined;
 
     try {
-      // Guard: if cancelled between startImport() and here, abort
-      if (job.status === "cancelled") {
-        jobLogger?.info("[Spotify Import] Job cancelled before downloading started");
-        return;
-      }
-
+      // Registered first, so a stop that lands from here on aborts these searches; then the stored status is read, for
+      // a stop that came before (the job given here is the copy the worker read when the import was queued).
       abortController = new AbortController();
       const { signal } = abortController;
       trackImportSearches(job.id, abortController);
 
       try {
+        const open = !signal.aborted && (await importStillOpen(job.id));
+        if (!open || signal.aborted) {
+          jobLogger?.info("[Spotify Import] Job was stopped before downloading started");
+          return;
+        }
+
         if (albumMbidsToDownload.length > 0) {
           job.status = "downloading";
           job.updatedAt = new Date();
@@ -252,6 +254,7 @@ class PlaylistImportService {
                   userId: job.userId,
                   spotifyImportJobId: job.id,
                   signal,
+                  stillOpen: () => importStillOpen(job.id),
                 };
 
                 let result;
@@ -1075,8 +1078,16 @@ class PlaylistImportService {
   private async cleanupImportArtifacts(jobId: string): Promise<void> {
     await stopImportDownloadsAtSource(jobId);
 
-    // The import goes first: the downloads' removal (below) settles the running ones, and a completion check that
-    // finds the import gone leaves it alone, so it cannot fail it and tell the person of an import they removed.
+    // The import is closed by now (cancelled or failed): the rows go first, through the download module's own removal,
+    // in this import's lane after the completion checks already queued for it have read them. A completion check that
+    // finds a closed import has nothing to tell. If the removal fails, the import row is still there, closed, for the
+    // next cancel to finish. The removal does not wait for the rows.
+    const downloads = await prisma.downloadJob.findMany({
+      where: { metadata: { path: ["spotifyImportJobId"], equals: jobId } },
+      select: { id: true },
+    });
+    await jobMoves.remove(downloads);
+
     try {
       await prisma.spotifyImportJob.delete({ where: { id: jobId } });
     } catch (err: any) {
@@ -1090,14 +1101,6 @@ class PlaylistImportService {
     } catch {
       // Non-critical
     }
-
-    // The download module's own removal: the rows go in this import's lane, after the completion checks already queued
-    // for it have read them, so a check cannot find the import's downloads half gone. It does not wait for them.
-    const downloads = await prisma.downloadJob.findMany({
-      where: { metadata: { path: ["spotifyImportJobId"], equals: jobId } },
-      select: { id: true },
-    });
-    await jobMoves.remove(downloads);
 
     // Clean up job logger
     jobLoggers.delete(jobId);
@@ -1136,22 +1139,20 @@ class PlaylistImportService {
       return { playlistCreated: false, playlistId: null, tracksMatched: 0 };
     }
 
-    // Emit cancelled SSE event before cleanup so frontend gets notified
-    eventBus.emit({
-      type: "import:progress",
-      userId: job.userId,
-      payload: {
-        jobId: job.id,
-        playlistName: job.playlistName,
-        status: "cancelled",
-        progress: 0,
-        albumsTotal: job.albumsTotal,
-        albumsCompleted: job.albumsCompleted,
-        tracksMatched: 0,
-        tracksTotal: job.tracksTotal,
-        error: null,
-      },
-    });
+    // Closed first, by a move that only a still-open import accepts: an import that completed since it was read keeps
+    // its result and its downloads. The move aborts this process's searches and announces "cancelled" to the page.
+    if (!(await updateImportJobFields(jobId, { status: "cancelled", error: null }, CLOSED_IMPORT_STATES))) {
+      // Read from the database, not the cache: the cache is what this cancel read the import from.
+      const now = await prisma.spotifyImportJob.findUnique({ where: { id: jobId } });
+      if (now?.status === "completed") {
+        return {
+          playlistCreated: !!now.createdPlaylistId,
+          playlistId: now.createdPlaylistId || null,
+          tracksMatched: now.tracksMatched,
+        };
+      }
+      // Failed or cancelled by someone else meanwhile, or already gone: only the cleanup is left.
+    }
 
     // Full cleanup -- remove all traces from DB and Redis
     await this.cleanupImportArtifacts(jobId);

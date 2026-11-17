@@ -197,10 +197,15 @@ describe("failing an import", () => {
 
 describe("an import that ends in an error", () => {
     const preview = { summary: { total: 1, inLibrary: 1 }, albumsToDownload: [], matchedTracks: [] } as never;
-    const crash = (job: ReturnType<typeof importJob>) => {
-        jest.spyOn(playlistImportService, "buildPlaylist").mockRejectedValue(new Error("Disk full"));
+    /** The build fails; `meanwhile` is what happened to the import's row while the worker was at it. */
+    const crash = (job: ReturnType<typeof importJob>, meanwhile?: () => Promise<unknown>) => {
+        jest.spyOn(playlistImportService, "buildPlaylist").mockImplementation(async () => {
+            await meanwhile?.();
+            throw new Error("Disk full");
+        });
         return (playlistImportService as any).processImport(job, [], preview);
     };
+    const setRow = (data: Record<string, unknown>) => () => prisma.spotifyImportJob.update({ where: { id: JOB }, data });
     const withRow = (status: string) =>
         prisma.spotifyImportJob.create({
             data: { id: JOB, userId: USER, spotifyPlaylistId: "pl", playlistName: `${P} list`, status, albumsTotal: 0, tracksTotal: 1, pendingTracks: [matched()] as any },
@@ -218,19 +223,20 @@ describe("an import that ends in an error", () => {
     });
 
     it("leaves an import a person cancelled meanwhile cancelled, and tells no one it failed", async () => {
-        await withRow("cancelled");
+        await withRow("scanning");
 
-        await expect(crash(importJob([matched()]))).rejects.toThrow("Disk full");
+        await expect(crash(importJob([matched()]), setRow({ status: "cancelled" }))).rejects.toThrow("Disk full");
 
         expect((await row()).status).toBe("cancelled");
         expect(notificationService.notifyImportFailed).not.toHaveBeenCalled();
     });
 
     it("keeps the reason an import already failed with, and tells its owner only once", async () => {
-        await withRow("failed");
-        await prisma.spotifyImportJob.update({ where: { id: JOB }, data: { error: "No download jobs were created" } });
+        await withRow("scanning");
 
-        await expect(crash(importJob([matched()]))).rejects.toThrow("Disk full");
+        await expect(
+            crash(importJob([matched()]), setRow({ status: "failed", error: "No download jobs were created" })),
+        ).rejects.toThrow("Disk full");
 
         expect(await row()).toMatchObject({ status: "failed", error: "No download jobs were created" });
         expect(notificationService.notifyImportFailed).not.toHaveBeenCalled();
