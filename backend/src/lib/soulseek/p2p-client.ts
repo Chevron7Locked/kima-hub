@@ -12,11 +12,11 @@ import type {
   ConnectedDownload,
   Download,
   DownloadingDownload,
-  DownloadWithToken,
   RequestedDownload,
   SlskDownloadEventEmitter,
 } from './downloads'
 import { downloadHasToken, makeDownloadStatusData } from './downloads'
+import { FileTransferReader } from './fileTransfer'
 import type { SlskListenEvents } from './listen'
 import { SlskListen } from './listen'
 import { ConnectionType, TransferDirection, UserStatus } from './messages/common'
@@ -184,14 +184,29 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
 
                 this.fileTransferConnections.push(conn)
 
-                let download: DownloadWithToken | undefined
+                const reader = new FileTransferReader({
+                  findDownload: (token) => {
+                    const found = this.downloads.find(
+                      (d): d is ConnectedDownload | DownloadingDownload | CompleteDownload =>
+                        d.username === msg.username && downloadHasToken(d) && d.token === token
+                    )
+                    if (!found) {
+                      logger.error(`[Soulseek] No download found for ${JSON.stringify(msg)}`)
+                    }
+                    return found
+                  },
+                  reply: (data) => conn.write(data),
+                  end: () => conn.end(),
+                  settle: (done) => {
+                    this.downloads = this.downloads.filter((d) => d !== done)
+                  },
+                })
 
                 conn.on('error', (error) => {
-                  if (download) {
-                    download.stream.destroy(error)
-                  }
+                  reader.download?.stream.destroy(error)
                 })
                 conn.on('close', () => {
+                  const download = reader.download
                   if (download && download.status !== 'complete') {
                     download.events.emit(
                       'error',
@@ -211,32 +226,7 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
                   conn.write(toPeerMessage.pierceFirewall({ token: msg.token }).getBuffer())
                 })
 
-                conn.on('data', (data) => {
-                  if (download === undefined) {
-                    const token = data.toString('hex', 0, 4)
-                    const download_ = this.downloads.find(
-                      (d): d is ConnectedDownload | DownloadingDownload | CompleteDownload =>
-                        d.username === msg.username && downloadHasToken(d) && d.token === token
-                    )
-                    if (!download_) {
-                      logger.error(`[Soulseek] No download found for ${JSON.stringify(msg)}`)
-                      conn.end()
-                      return
-                    }
-                    download = download_
-                    download.status = 'downloading'
-                    download.events.emit('status', 'downloading', makeDownloadStatusData(download))
-
-                    const fileOffsetBuffer = Buffer.alloc(8)
-                    fileOffsetBuffer.writeBigUInt64LE(download.receivedBytes, 0)
-                    conn.write(fileOffsetBuffer)
-
-                    // Process any remaining file data in this chunk beyond the 4-byte token
-                    if (data.length > 4) this.receiveFileData(download, conn, data.subarray(4))
-                  } else {
-                    this.receiveFileData(download, conn, data)
-                  }
-                })
+                conn.on('data', (data) => reader.push(data))
 
                 break
               }
@@ -254,30 +244,6 @@ export class SlskClient extends (EventEmitter as new () => TypedEventEmitter<Sls
         this.emit('client-error', error)
       }
     })
-  }
-
-  /** File bytes from a peer go to its download; at the full size the transfer ends and the download leaves the list. */
-  private receiveFileData(download: DownloadWithToken, conn: net.Socket, data: Buffer): void {
-    download.receivedBytes += BigInt(data.length)
-    download.stream.write(data)
-    download.events.emit('data', data)
-    download.events.emit('progress', {
-      receivedBytes: download.receivedBytes,
-      totalBytes: download.totalBytes,
-      progress:
-        download.totalBytes > 0n
-          ? Number((download.receivedBytes * 100n) / download.totalBytes) / 100
-          : 0,
-    })
-
-    if (download.receivedBytes >= download.totalBytes) {
-      conn.end()
-      download.stream.end()
-      download.status = 'complete'
-      download.events.emit('complete', download.receivedBytes)
-      download.events.emit('status', 'complete', makeDownloadStatusData(download))
-      this.downloads = this.downloads.filter((d) => d !== download)
-    }
   }
 
   private wirePeerMessageHandlers() {
