@@ -2,6 +2,7 @@
  * Which Kima server a test run may talk to. Kept free of other imports so the
  * Playwright config and the sign-in setup can load it without needing a login.
  */
+import type { APIRequestContext } from "@playwright/test";
 
 /** Port the real, in-use Kima server listens on. No test run may ever target it. */
 const PRODUCTION_PORT = "3030";
@@ -46,7 +47,8 @@ const TEST_COPY_MARKER = "__kima-test-copy__";
 export type DestructiveVerdict = { ok: true } | { ok: false; reason: string };
 
 /**
- * Whether tests that permanently delete play history may run against this server.
+ * Whether tests that delete or rebuild what a real server keeps (play history, enrichment, sound vectors,
+ * album folders, GPU settings) may run against this server. Such a test checks this before its first change.
  * All three must hold: the server is on the exact-address allowlist (never the
  * production port), the run was opted in for exactly this address, and the
  * signed-in account owns a playlist named TEST_COPY_MARKER.
@@ -74,4 +76,18 @@ export async function destructiveVerdict(baseUrl: string, playlistNames: () => P
         return { ok: false, reason: `the signed-in account has no playlist named ${TEST_COPY_MARKER}, so it is not a marked test copy` };
     }
     return { ok: true };
+}
+
+/** The names of the playlists the signed-in user owns, every page of them, read for destructiveVerdict. */
+export function ownedPlaylistNames(api: APIRequestContext, token: string): () => Promise<string[]> {
+    const PAGE = 100;
+    return async () => {
+        const names: string[] = [];
+        for (let page = 1; ; page++) {
+            const res = await api.get(`/api/playlists?limit=${PAGE}&page=${page}`, { headers: { Authorization: `Bearer ${token}` } });
+            const lists = res.ok() ? ((await res.json()) as Array<{ name: string; isOwner: boolean }>) : [];
+            names.push(...lists.filter((l) => l.isOwner).map((l) => l.name));
+            if (lists.length < PAGE) return names;
+        }
+    };
 }

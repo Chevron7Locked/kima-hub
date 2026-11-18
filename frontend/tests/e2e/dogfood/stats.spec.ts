@@ -7,7 +7,7 @@ import { test, expect, Browser, Page, BrowserContext } from "@playwright/test";
 import { DogfoodSession } from "./session";
 import { PLAYER, settle } from "../fixtures/shared";
 import { dismissWhatsNew, getAuthToken, loginAsTestUser } from "../fixtures/test-helpers";
-import { requireBaseUrl, destructiveVerdict } from "../fixtures/target";
+import { requireBaseUrl, destructiveVerdict, ownedPlaylistNames } from "../fixtures/target";
 import { stackSql } from "../fixtures/stackDb";
 
 const baseUrl = requireBaseUrl();
@@ -547,11 +547,7 @@ test.describe("Dogfood: stats, filters, audit, queue", () => {
         session.setJourney("7b. Audit buttons");
 
         // The merge and remove buttons permanently delete play rows, so they only run on a marked test copy.
-        const verdict = await destructiveVerdict(baseUrl, async () => {
-            const res = await page.request.get("/api/playlists?limit=100", { headers: { Authorization: `Bearer ${token}` } });
-            const lists = res.ok() ? ((await res.json()) as Array<{ name: string; isOwner: boolean }>) : [];
-            return lists.filter((l) => l.isOwner).map((l) => l.name);
-        });
+        const verdict = await destructiveVerdict(baseUrl, ownedPlaylistNames(page.request, token));
         if (!verdict.ok) {
             session.noteNotCovered(`stats 7b (merge, ignore, restore, remove play history) did not run: ${verdict.reason}`);
             return;

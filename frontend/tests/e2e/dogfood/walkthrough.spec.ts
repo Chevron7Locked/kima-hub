@@ -8,7 +8,7 @@ import { DogfoodSession, navigateByClick, openAlbumById, playableRows } from "./
 import { outsideFailure, pickUnfollowedShow } from "./podcastReplies";
 import { readLibraryFacts, assertReady, coverageGaps, LibraryFacts } from "./preflight";
 import { PLAYER, escapeRegExp, pausesSeen, readPlayer, settle, softwareWebGL, watchPauses } from "../fixtures/shared";
-import { requireBaseUrl } from "../fixtures/target";
+import { destructiveVerdict, ownedPlaylistNames, requireBaseUrl } from "../fixtures/target";
 import { withApiKey } from "./apiKey";
 import { STORAGE_KEYS } from "../../../lib/storage-keys";
 import { LibraryPicker, PickedAlbum } from "../fixtures/picker";
@@ -965,6 +965,13 @@ test.describe("Dogfood walkthrough", () => {
     test("5. collect: rebuild the embeddings and watch the data reach the screen", async () => {
         session.setJourney("5. Collect");
         test.setTimeout(4_500_000);
+
+        // Making every sound vector again takes a real library's vectors away for hours, so only on a marked test copy.
+        const verdict = await destructiveVerdict(baseUrl, ownedPlaylistNames(page.request, token));
+        if (!verdict.ok) {
+            session.noteNotCovered(`journey 5 (rebuild the embeddings) did not run: ${verdict.reason}`);
+            return;
+        }
 
         // Asks for every song's sound vector to be made again. The old vectors stay readable meanwhile, so the wait
         // below, for every one to be made afresh, is what proves the embedder ran.

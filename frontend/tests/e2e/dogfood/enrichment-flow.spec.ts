@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { test, expect, APIRequestContext } from "@playwright/test";
-import { requireBaseUrl } from "../fixtures/target";
+import { destructiveVerdict, ownedPlaylistNames, requireBaseUrl } from "../fixtures/target";
 import { stackLog, stackSql } from "../fixtures/stackDb";
 import { completions, findOrderBreaks, mapLayouts, parseDockerLog, parseStageRows, STAGE_ROWS_SQL } from "../fixtures/enrichmentOrder";
 
@@ -54,7 +54,8 @@ test("enrichment: scan first, one heavy model at a time, each song once, moods a
     const api: APIRequestContext = await playwright.request.newContext({ baseURL: baseUrl });
     const login = await api.post("/api/auth/login", { data: { username, password } });
     expect(login.status()).toBe(200);
-    const headers = { Authorization: `Bearer ${(await login.json()).token}` };
+    const token: string = (await login.json()).token;
+    const headers = { Authorization: `Bearer ${token}` };
     const call = async (method: "GET" | "POST" | "PUT", path: string, data?: object) => {
         const res =
             method === "GET" ? await api.get(path, { headers }) : await api.fetch(path, { method, headers, data: data ?? {} });
@@ -62,6 +63,9 @@ test("enrichment: scan first, one heavy model at a time, each song once, moods a
         return res.json();
     };
     expect((await call("GET", "/api/auth/me")).role, "the test user must be an admin: it re-runs enrichment").toBe("admin");
+    // The re-run redoes a library's analysis and everything after it, so only on a marked test copy.
+    const verdict = await destructiveVerdict(baseUrl, ownedPlaylistNames(api, token));
+    test.skip(!verdict.ok, `the enrichment re-run did not run: ${verdict.ok ? "" : verdict.reason}`);
     expect((await call("GET", "/api/analysis/together")).together, "'run both at once' must be off").toBe(false);
     const complete = async () => (await call("GET", "/api/enrichment/progress")).isFullyComplete === true;
     const count = (sql: string) => Number(stackSql(sql));

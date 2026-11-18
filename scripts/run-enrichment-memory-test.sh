@@ -3,6 +3,7 @@
 # more than SUNRECLAIM_LIMIT_MB (default 1024). Usage: [container-name].
 # Env: KIMA_TEST_PASSWORD and KIMA_UI_BASE_URL (both required; never port 3030,
 # the production server), KIMA_TEST_USERNAME, KIMA_CONTAINER (default kima-test).
+# The wipe test also needs the marked test copy described in docs/development.md, or it skips.
 
 set -euo pipefail
 
@@ -81,10 +82,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="${SCRIPT_DIR}/../frontend"
 
 echo "[memory-test] Running enrichment-cycle spec..."
-TEST_EXIT=0
+TEST_LOG="$(mktemp)"
+set +e
 npx --prefix "${FRONTEND_DIR}" playwright test \
     tests/e2e/enrichment-cycle.spec.ts \
-    --reporter=list || TEST_EXIT=$?
+    --reporter=list 2>&1 | tee "${TEST_LOG}"
+TEST_EXIT=${PIPESTATUS[0]}
+set -e
+# A skipped wipe (an unmarked server, or too few songs) measured nothing, so it is not a pass.
+if grep -qE '[0-9]+ skipped' "${TEST_LOG}"; then
+    echo "[FAIL] The enrichment wipe was skipped (see its reason above), so no memory was measured."
+    rm -f "${TEST_LOG}"
+    exit 1
+fi
+rm -f "${TEST_LOG}"
 
 # ---------------------------------------------------------------------------
 # Post-test memory snapshot

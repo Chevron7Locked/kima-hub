@@ -9,7 +9,7 @@
  */
 import { test, expect, request, type Browser, type Page } from "@playwright/test";
 import { softwareWebGL } from "../fixtures/shared";
-import { requireBaseUrl } from "../fixtures/target";
+import { destructiveVerdict, ownedPlaylistNames, requireBaseUrl } from "../fixtures/target";
 
 const ARCH = process.env.KIMA_CAMPAIGN_ARCH ?? "arm";
 const BASE = requireBaseUrl();
@@ -129,6 +129,9 @@ test.describe(`native campaign (${ARCH})`, () => {
     if (ARCH === "linux") {
         test("5L. GPU flip under load (CPU start -> download mid-work -> GPU takeover)", async () => {
             test.setTimeout(90 * 60_000);
+            // Flips the server's GPU switches and rebuilds every sound vector, so only on a marked test copy.
+            const verdict = await destructiveVerdict(BASE, ownedPlaylistNames(api, token));
+            test.skip(!verdict.ok, `the GPU flip did not run: ${verdict.ok ? "" : verdict.reason}`);
             // Preconditions: both switches off, work queued. Switching off keeps the GPU download, so the
             // download half runs only on a stack that has none on disk (gpu-onnx deleted); the takeover always runs.
             const st = await (await api.get("/api/system-settings/gpu", { headers: auth() })).json();

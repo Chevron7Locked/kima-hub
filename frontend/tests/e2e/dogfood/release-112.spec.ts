@@ -5,7 +5,7 @@
 import { test, expect, devices, Browser, BrowserContext, Page, APIRequestContext } from "@playwright/test";
 import { DogfoodSession } from "./session";
 import { settle, softwareWebGL, readPlayer, escapeRegExp } from "../fixtures/shared";
-import { requireBaseUrl } from "../fixtures/target";
+import { destructiveVerdict, ownedPlaylistNames, requireBaseUrl } from "../fixtures/target";
 import { LibraryPicker } from "../fixtures/picker";
 
 const baseUrl = requireBaseUrl();
@@ -201,6 +201,13 @@ test.describe("Release 1.12 (non-podcast)", () => {
     test("2. per-step re-run: similarity + map runs, finishes, and the vibe map still loads", async () => {
         test.setTimeout(30 * 60_000);
         session.setJourney("2. similarity re-run");
+
+        // The re-run clears the similarities and the map until it finishes, so only on a marked test copy.
+        const verdict = await destructiveVerdict(baseUrl, ownedPlaylistNames(api, token));
+        if (!verdict.ok) {
+            session.noteNotCovered(`journey 2 (similarity re-run) did not run: ${verdict.reason}`);
+            return;
+        }
 
         const progress = async () => (await (await api.get("/api/enrichment/progress", { headers: bearer(token) })).json()) as {
             similarity: { total: number; completed: number };
@@ -1150,6 +1157,14 @@ test.describe("Release 1.12 (library, panels, stations)", () => {
     test("12. re-file albums: Settings starts it, the result reaches the tray, no song is lost, and a second run moves nothing", async () => {
         test.setTimeout(40 * 60_000);
         session.setJourney("12. re-file albums");
+
+        // The re-file moves album folders on disk and is not undone, so only on a marked test copy.
+        const verdict = await destructiveVerdict(baseUrl, ownedPlaylistNames(api, token));
+        if (!verdict.ok) {
+            session.noteNotCovered(`journey 12 (re-file albums) did not run: ${verdict.reason}`);
+            return;
+        }
+
         type Note = { id: string; title: string; message: string | null; createdAt: string };
         const RESULT = "Albums re-filed by their tags";
 

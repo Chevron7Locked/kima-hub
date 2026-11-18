@@ -11,7 +11,7 @@ import { DogfoodSession, navigateByClick, openAlbumById } from "./session";
 import { LibraryPicker } from "../fixtures/picker";
 import { readPlayer, settle } from "../fixtures/shared";
 import { dismissWhatsNew, getAuthToken, loginAsTestUser } from "../fixtures/test-helpers";
-import { requireBaseUrl } from "../fixtures/target";
+import { destructiveVerdict, ownedPlaylistNames, requireBaseUrl } from "../fixtures/target";
 
 const baseUrl = requireBaseUrl();
 const username = process.env.KIMA_TEST_USERNAME || "";
@@ -329,6 +329,13 @@ test.describe("Dogfood: tray, scrobbling, public feed, GPU, release window", () 
     test("5. GPU: the runtime stays while either switch is on and when both are off (inert), and each switch applies on its own", async () => {
         test.setTimeout(GPU_INSTALL_MS + 10 * 60_000);
         session.setJourney("5. GPU runtime");
+
+        // Flips the server's GPU switches and installs or removes the runtime, so only on a marked test copy.
+        const verdict = await destructiveVerdict(baseUrl, ownedPlaylistNames(page.request, token));
+        if (!verdict.ok) {
+            session.noteNotCovered(`journey 5 (GPU runtime) did not run: ${verdict.reason}`);
+            return;
+        }
 
         type Gpu = {
             supported: boolean; enabled: boolean; analysis: boolean; installed: boolean; installing: boolean;

@@ -1,9 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import { loginAsTestUser, getAuthToken } from "./fixtures/test-helpers";
+import { destructiveVerdict, ownedPlaylistNames, requireBaseUrl } from "./fixtures/target";
 
 // Wipes enrichment data, re-enriches, and checks the library still works.
-// Skips below 10 tracks. scripts/run-enrichment-memory-test.sh runs it with
-// memory monitoring.
+// Runs only on a marked test copy (fixtures/target.ts destructiveVerdict); skips below 10 tracks.
+// scripts/run-enrichment-memory-test.sh runs it with memory monitoring.
 
 const POLL_INTERVAL_MS = 10_000;
 const ENRICHMENT_TIMEOUT_MS = 45 * 60 * 1000;
@@ -53,6 +54,10 @@ test.describe("Enrichment Cycle", () => {
         test.setTimeout(55 * 60 * 1000);
 
         const token = await getAuthToken(page);
+
+        // The wipe clears a library's enrichment and takes hours to rebuild, so only on a marked test copy.
+        const verdict = await destructiveVerdict(requireBaseUrl(), ownedPlaylistNames(page.request, token));
+        test.skip(!verdict.ok, `the enrichment wipe did not run: ${verdict.ok ? "" : verdict.reason}`);
 
         const wipeRes = await page.request.post("/api/enrichment/wipe-and-rerun", {
             headers: { Authorization: `Bearer ${token}` },
