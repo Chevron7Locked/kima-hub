@@ -46,6 +46,9 @@ function ConfigSlider({ label, display, unit, min, max, step, value, onChange, c
 
 const CLEAR_GROUP = "discover-clear";
 
+/** The settings this tab saves, as the server takes them. */
+type SavedSettings = Parameters<typeof api.updateDiscoverConfig>[0];
+
 interface DiscoverSettingsTabProps {
     config: DiscoverConfig | null;
     onUpdateConfig: (updatedConfig: DiscoverConfig | null) => void;
@@ -61,31 +64,39 @@ export function DiscoverSettingsTab({
 }: DiscoverSettingsTabProps) {
     const [isClearing, setIsClearing] = useState(false);
     const debounceRef = useRef<NodeJS.Timeout | null>(null);
+    // Changes not yet sent, merged across sliders so a second slider moved inside the wait keeps the first one's change.
+    const pendingRef = useRef<SavedSettings>({});
 
+    // Sends what is waiting now. It reads only refs, so the copy the leave-time cleanup holds is current.
+    const savePendingRef = useRef(() => {
+        if (debounceRef.current) {
+            clearTimeout(debounceRef.current);
+            debounceRef.current = null;
+        }
+        const changes = pendingRef.current;
+        pendingRef.current = {};
+        if (Object.keys(changes).length === 0) return;
+        api.updateDiscoverConfig(changes).catch(() => {
+            notify.error("failed to save setting", { groupKey: "discover-config-save" });
+        });
+    });
+
+    // Leaving the settings (back to activity, or another page) saves a change still waiting for its half second.
     useEffect(() => {
-        return () => {
-            if (debounceRef.current) clearTimeout(debounceRef.current);
-        };
+        const savePending = savePendingRef.current;
+        return () => savePending();
     }, []);
 
-    function handleConfigChange<K extends keyof DiscoverConfig>(
-        key: K,
-        value: DiscoverConfig[K]
-    ) {
+    function handleConfigChange<K extends keyof SavedSettings>(key: K, value: DiscoverConfig[K]) {
         if (config) {
             onUpdateConfig({ ...config, [key]: value });
         }
 
+        pendingRef.current = { ...pendingRef.current, [key]: value };
         if (debounceRef.current) {
             clearTimeout(debounceRef.current);
         }
-        debounceRef.current = setTimeout(async () => {
-            try {
-                await api.updateDiscoverConfig({ [key]: value });
-            } catch {
-                notify.error("failed to save setting", { groupKey: "discover-config-save" });
-            }
-        }, 500);
+        debounceRef.current = setTimeout(savePendingRef.current, 500);
     }
 
     const [confirmClear, setConfirmClear] = useState(false);
