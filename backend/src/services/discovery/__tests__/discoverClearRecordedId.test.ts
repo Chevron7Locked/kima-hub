@@ -14,7 +14,8 @@ jest.mock("../../lidarr", () => ({
 
 import { prisma } from "../../../utils/db";
 import { removeDiscoveryAlbum } from "../lidarrRemoval";
-import { clearOrphanedDiscoverAlbums, clearSuggestion } from "../discoverClearing";
+import { lidarrService } from "../../lidarr";
+import { clearDiscoverAlbum, clearOrphanedDiscoverAlbums, clearSuggestion, clearUnsuggestedDownloads } from "../discoverClearing";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 
 const MARK = "zz-clear-recorded-id";
@@ -161,5 +162,66 @@ describe("sweeping a Discover album no suggestion covers", () => {
         const { cleared } = await clearOrphanedDiscoverAlbums();
         expect(cleared).toBe(1);
         expect(removeDiscoveryAlbum).toHaveBeenCalledWith(36406, PLACEHOLDER, expect.anything());
+    });
+});
+
+describe("an album Lidarr no longer has under the id Discover recorded, which Kima never scanned", () => {
+    const GONE = { removed: false, gone: true as const, reason: "Lidarr no longer knows this album, so its files may still be on disk; delete them by hand" };
+    const target = { rgMbid: MBID, artistName: "Ed O'Brien", artistMbid: null, albumTitle: "Blue Morpho", lidarrAlbumId: null, suggestionId: null };
+    const seed = async () => {
+        await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user" } });
+        await job(36410, "discover", null, MBID);
+    };
+
+    it("deletes it under the id Lidarr now has it by, when Lidarr re-added it", async () => {
+        await seed();
+        jest.mocked(removeDiscoveryAlbum).mockResolvedValueOnce(GONE);
+        jest.mocked(lidarrService.findAlbumByForeignId).mockResolvedValueOnce({ id: 36499, foreignAlbumId: MBID } as any);
+
+        expect(await clearDiscoverAlbum(target)).toEqual({ cleared: true });
+        expect(removeDiscoveryAlbum).toHaveBeenLastCalledWith(36499, MBID, expect.anything());
+    });
+
+    it("keeps Discover's record, and says why, when Lidarr cannot be asked for it by release-group id", async () => {
+        await seed();
+        jest.mocked(removeDiscoveryAlbum).mockResolvedValueOnce(GONE);
+        jest.mocked(lidarrService.findAlbumByForeignId).mockRejectedValueOnce(new Error("socket hang up"));
+
+        const result = await clearDiscoverAlbum(target);
+        expect(result).toEqual({ cleared: false, reason: expect.stringContaining("socket hang up") });
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(1);
+    });
+
+    it("keeps Discover's record when Lidarr says the id is gone yet still finds the album under it", async () => {
+        await seed();
+        jest.mocked(removeDiscoveryAlbum).mockResolvedValueOnce(GONE);
+        jest.mocked(lidarrService.findAlbumByForeignId).mockResolvedValueOnce({ id: 36410, foreignAlbumId: MBID } as any);
+
+        expect(await clearDiscoverAlbum(target)).toEqual({ cleared: false, reason: GONE.reason });
+        expect(removeDiscoveryAlbum).toHaveBeenCalledTimes(1);
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(1);
+    });
+
+    it("forgets Discover's record when Lidarr has it under no id", async () => {
+        await seed();
+        jest.mocked(removeDiscoveryAlbum).mockResolvedValueOnce(GONE);
+
+        expect(await clearDiscoverAlbum(target)).toEqual({ cleared: true });
+        expect(removeDiscoveryAlbum).toHaveBeenCalledTimes(1);
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
+    });
+});
+
+describe("a suggestion a clear claimed but never finished (the server stopped mid-clear)", () => {
+    it("does not stop the next clear deleting the album Lidarr still holds for it", async () => {
+        await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user" } });
+        await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: MBID, artistName: "Ed O'Brien", artistMbid: null, albumTitle: "Blue Morpho", weekStartDate: new Date("2026-11-02"), status: "DELETED" },
+        });
+        await job(36420, "discover", null, MBID);
+
+        expect(await clearUnsuggestedDownloads(USER)).toEqual([]);
+        expect(removeDiscoveryAlbum).toHaveBeenCalledWith(36420, MBID, expect.anything());
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
     });
 });

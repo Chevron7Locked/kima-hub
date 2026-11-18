@@ -197,6 +197,34 @@ describe("Lidarr no longer has the album id (recorded 404)", () => {
     });
 });
 
+describe("Lidarr no longer has the album and Kima holds no copy (recorded 404)", () => {
+    it("forgets Discover's download record of it, so no clear reports it again", async () => {
+        // The recorded id answers 404 and a lookup by release-group id finds nothing: Lidarr holds the album nowhere.
+        const gone = loadScenario("album-not-found");
+        const none = loadScenario("album-lookup-none");
+        lidarr = await startLidarrReplay({ name: "gone-everywhere", exchanges: [...gone.exchanges, ...none.exchanges], webhooks: [] });
+        lidarr.replay(4);
+        await useLidarr(lidarr.url);
+        const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: WEEK, targetSongCount: 10, status: "completed" } });
+        await prisma.downloadJob.create({
+            data: {
+                userId: USER, subject: `${ARTIST} - Moon Music`, type: "album", status: "completed", targetMbid: NO_SUCH_RG,
+                lidarrAlbumId: NO_SUCH_LIDARR_ID, discoveryBatchId: batch.id,
+                metadata: { downloadType: "discovery", artistName: ARTIST, albumTitle: "Moon Music", albumMbid: NO_SUCH_RG },
+            },
+        });
+
+        const result = await clearDiscoverAlbum({ rgMbid: NO_SUCH_RG, artistName: ARTIST, artistMbid: null, albumTitle: "Moon Music", lidarrAlbumId: null, suggestionId: null });
+
+        expect(result).toEqual({ cleared: true });
+        expect(lidarr!.asked.map((a) => `${a.method} ${a.path}`)).toEqual([
+            `GET /api/v1/album/${NO_SUCH_LIDARR_ID}`,
+            `GET /api/v1/album?foreignAlbumId=${NO_SUCH_RG}`,
+        ]);
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
+    });
+});
+
 describe("Lidarr has no album for a release-group id (recorded empty lookup)", () => {
     it("answers null from findAlbumByForeignId", async () => {
         await startReplay("album-lookup-none", 3);

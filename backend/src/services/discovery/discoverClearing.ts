@@ -17,7 +17,7 @@ import { markLibraryChangedQuietly } from "../libraryChanged";
 import { notificationService } from "../notificationService";
 import { deleteAlbums } from "../library/albumDelete";
 import { LINKED_OUT_REFUSAL, isBehindLinkOut, resolveWithinMusicRoot } from "../../routes/library/trackPath";
-import { removeDiscoveryAlbum } from "./lidarrRemoval";
+import { removeDiscoveryAlbum, type LidarrRemovalResult } from "./lidarrRemoval";
 import { NameIndex, RUNNING_BATCH, couldBeArtist, sameArtist, sameName } from "./discoverEvidence";
 import { forgetOwnedIndex } from "./ownedIndexVersion";
 
@@ -231,10 +231,20 @@ export async function recordedLidarrAlbumId(ref: AlbumRef, rgMbids: string[]): P
 async function lidarrHolding(
     target: ClearTarget,
     rgMbids: string[],
-): Promise<{ lidarrAlbumId: number | null; rgMbid: string } | { unknown: string }> {
+): Promise<{ lidarrAlbumId: number | null; rgMbid: string } | LidarrUnknown> {
     const known = target.lidarrAlbumId ?? (await recordedLidarrAlbumId(target, rgMbids));
     if (known) return { lidarrAlbumId: known, rgMbid: target.rgMbid };
     if (!(await lidarrService.isEnabled())) return { lidarrAlbumId: null, rgMbid: target.rgMbid };
+    return (await heldByReleaseGroup(rgMbids)) ?? { lidarrAlbumId: null, rgMbid: target.rgMbid };
+}
+
+/** Lidarr's album id and the release-group id it was found under. */
+type LidarrHeld = { lidarrAlbumId: number; rgMbid: string };
+/** Why Lidarr could not be asked. */
+type LidarrUnknown = { unknown: string };
+
+/** The album Lidarr holds under one of these release-group ids, null when none, or why Lidarr could not be asked. */
+async function heldByReleaseGroup(rgMbids: string[]): Promise<LidarrHeld | LidarrUnknown | null> {
     for (const rgMbid of rgMbids.filter(isMbid)) {
         try {
             const held = await lidarrService.findAlbumByForeignId(rgMbid);
@@ -243,7 +253,7 @@ async function lidarrHolding(
             return { unknown: `Lidarr could not be reached or answered with an error: ${error?.message || "no message"}` };
         }
     }
-    return { lidarrAlbumId: null, rgMbid: target.rgMbid };
+    return null;
 }
 
 const UNKNOWN_SOURCE =
@@ -293,7 +303,7 @@ type ClearResult = { cleared: true } | { cleared: false; reason: string };
 /**
  * Clears one Discover album: Lidarr's is deleted by Lidarr (lidarrRemoval), a known Soulseek one by deleting its
  * files, then the rows go. Anything else, or a file that stays, changes nothing and returns the reason. A scanned album
- * that is the library's is left; only the record's rows go.
+ * that is the library's is left; only the record's rows go. So is an album Lidarr no longer has and Kima never scanned.
  */
 export async function clearDiscoverAlbum(target: ClearTarget): Promise<ClearResult> {
     const album = await findScannedAlbum(target, "DISCOVER");
@@ -307,13 +317,8 @@ export async function clearDiscoverAlbum(target: ClearTarget): Promise<ClearResu
     if ("unknown" in holding) return { cleared: false, reason: holding.unknown };
 
     if (holding.lidarrAlbumId !== null) {
-        const outcome = await removeDiscoveryAlbum(holding.lidarrAlbumId, holding.rgMbid, {
-            rgMbids,
-            artistName: target.artistName,
-            artistMbid: target.artistMbid,
-            albumTitle: target.albumTitle,
-        });
-        if (!outcome.removed) return { cleared: false, reason: outcome.reason ?? "Lidarr did not delete the album" };
+        const kept = await removeFromLidarr({ lidarrAlbumId: holding.lidarrAlbumId, rgMbid: holding.rgMbid }, target, rgMbids, album !== null);
+        if (kept) return kept;
     } else if (album) {
         if (!(await isKnownSoulseekAlbum(target, rgMbids))) return { cleared: false, reason: UNKNOWN_SOURCE };
         const failure = await deleteAlbumFiles(album.id);
@@ -322,6 +327,27 @@ export async function clearDiscoverAlbum(target: ClearTarget): Promise<ClearResu
     await deleteAlbumRows(album?.id ?? null, target.suggestionId);
     await forgetDiscoverDownloads(target, rgMbids);
     return { cleared: true };
+}
+
+/**
+ * Lidarr deletes the album it holds. Returns why it was kept, or null when it is gone from Lidarr. An album Lidarr no
+ * longer has under the recorded id is looked for by release-group id, as Lidarr may hold it again under a new id; one
+ * Lidarr holds nowhere and Kima never scanned is gone, so its records go rather than being reported every clear. A
+ * scanned copy stays reported, as its files are still on disk.
+ */
+async function removeFromLidarr(held: LidarrHeld, target: ClearTarget, rgMbids: string[], scanned: boolean): Promise<ClearResult | null> {
+    const names = { rgMbids, artistName: target.artistName, artistMbid: target.artistMbid, albumTitle: target.albumTitle };
+    const keptBecause = (outcome: LidarrRemovalResult): ClearResult | null =>
+        outcome.removed ? null : { cleared: false, reason: outcome.reason ?? "Lidarr did not delete the album" };
+
+    const outcome = await removeDiscoveryAlbum(held.lidarrAlbumId, held.rgMbid, names);
+    if (!outcome.gone || scanned) return keptBecause(outcome);
+    const now = await heldByReleaseGroup(rgMbids);
+    if (now === null) return null;
+    if ("unknown" in now) return { cleared: false, reason: now.unknown };
+    // Lidarr answers both that the id is gone and that it holds the album under it: leave the records for a later clear.
+    if (now.lidarrAlbumId === held.lidarrAlbumId) return keptBecause(outcome);
+    return keptBecause(await removeDiscoveryAlbum(now.lidarrAlbumId, now.rgMbid, names));
 }
 
 /** The plain reason for an error thrown while clearing an album. */
@@ -411,10 +437,14 @@ export async function clearSuggestion(suggestion: SuggestionRow): Promise<Sugges
     };
 }
 
-/** Whether any of a download job's names is a suggestion this listener has, in any status. */
+/**
+ * Whether any of a download job's names is a suggestion this listener has that is not DELETED. A DELETED one whose
+ * download record is still here is a clear that never finished (a finished clear forgets the record, and a kept album
+ * goes back to ACTIVE), so the album is cleared here instead.
+ */
 async function hasSuggestion(userId: string, ref: AlbumRef): Promise<boolean> {
     const mine = await prisma.discoveryAlbum.findMany({
-        where: { userId },
+        where: { userId, status: { not: "DELETED" } },
         select: { rgMbid: true, artistName: true, artistMbid: true, albumTitle: true },
     });
     return mine.some((r) => r.rgMbid === ref.rgMbid || namesRecord(r, ref));
