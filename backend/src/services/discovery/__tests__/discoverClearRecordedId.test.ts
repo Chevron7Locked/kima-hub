@@ -17,6 +17,7 @@ import { removeDiscoveryAlbum } from "../lidarrRemoval";
 import { lidarrService } from "../../lidarr";
 import { clearDiscoverAlbum, clearOrphanedDiscoverAlbums, clearSuggestion, clearUnsuggestedDownloads } from "../discoverClearing";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import * as downloadJobs from "../../downloads/jobs";
 
 const MARK = "zz-clear-recorded-id";
 const USER = `${MARK}-user`;
@@ -167,7 +168,7 @@ describe("sweeping a Discover album no suggestion covers", () => {
 
 describe("an album Lidarr no longer has under the id Discover recorded, which Kima never scanned", () => {
     const GONE = { removed: false, gone: true as const, reason: "Lidarr no longer knows this album, so its files may still be on disk; delete them by hand" };
-    const target = { rgMbid: MBID, artistName: "Ed O'Brien", artistMbid: null, albumTitle: "Blue Morpho", lidarrAlbumId: null, suggestionId: null };
+    const target = { rgMbid: MBID, artistName: "Ed O'Brien", artistMbid: null, albumTitle: "Blue Morpho", lidarrAlbumId: null, suggestionIds: [] };
     const seed = async () => {
         await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user" } });
         await job(36410, "discover", null, MBID);
@@ -208,6 +209,8 @@ describe("an album Lidarr no longer has under the id Discover recorded, which Ki
 
         expect(await clearDiscoverAlbum(target)).toEqual({ cleared: true });
         expect(removeDiscoveryAlbum).toHaveBeenCalledTimes(1);
+        // A batch job is deleted in its batch lane, after the checks queued there.
+        await downloadJobs.whenIdle();
         expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
     });
 });
@@ -222,6 +225,7 @@ describe("a suggestion a clear claimed but never finished (the server stopped mi
 
         expect(await clearUnsuggestedDownloads(USER)).toEqual([]);
         expect(removeDiscoveryAlbum).toHaveBeenCalledWith(36420, MBID, expect.anything());
+        await downloadJobs.whenIdle();
         expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
     });
 });

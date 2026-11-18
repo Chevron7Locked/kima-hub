@@ -232,6 +232,40 @@ describe("clear with no suggestions", () => {
         expect(res.body.lidarrFailed).toEqual([]);
     });
 
+    it("leaves Lidarr's album and says so when the download record has no artist name to check it by", async () => {
+        const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: WEEK, targetSongCount: 10, status: "completed" } });
+        await prisma.downloadJob.create({
+            data: {
+                userId: USER, subject: "Loose Fetch", type: "album", targetMbid: RG_ORPHAN, status: "completed", lidarrAlbumId: 901,
+                metadata: { albumTitle: "Loose Fetch" }, discoveryBatchId: batch.id, completedAt: new Date(),
+            },
+        });
+        const res = await request(discoverApp()).delete("/discover/clear");
+        expect(res.body.lidarrFailed).toEqual([
+            {
+                artistName: "Unknown artist",
+                albumTitle: "Loose Fetch",
+                reason: "Kima's download record for this album has no artist or title, so it cannot rule out a listener's own copy and left it in Lidarr; delete it there if it is Discover's",
+            },
+        ]);
+        expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(1);
+    });
+
+    it("does not report a nameless download record whose album the listener liked", async () => {
+        const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: WEEK, targetSongCount: 10, status: "completed" } });
+        await prisma.downloadJob.create({
+            data: {
+                userId: USER, subject: "Loose Fetch", type: "album", targetMbid: RG_ORPHAN, status: "completed", lidarrAlbumId: 901,
+                metadata: {}, discoveryBatchId: batch.id, completedAt: new Date(),
+            },
+        });
+        await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: RG_ORPHAN, artistName: "Someone Else", albumTitle: "Loose Fetch", weekStartDate: WEEK, status: "LIKED" },
+        });
+        const res = await request(discoverApp()).delete("/discover/clear");
+        expect(res.body.lidarrFailed).toEqual([]);
+    });
+
     it("leaves the download of a batch that is still running alone", async () => {
         await addExtraJob(RG_ORPHAN, "Loose Fetch", "downloading");
         const res = await request(discoverApp()).delete("/discover/clear");
@@ -524,6 +558,38 @@ describe("which albums Kima deletes files of", () => {
         expect(res.body.lidarrFailed).toEqual([]);
         expect(await prisma.album.count({ where: { id: album.albumId } })).toBe(0);
         expect(await trayRow()).toBeNull();
+    });
+
+    it("keeps the suggestion and its Soulseek record of an album Kima has not scanned yet, and says a scan will bring it", async () => {
+        expectLog("warn");
+        const suggestion = await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: `${P}_rg_unscanned`, artistName: ARTIST, albumTitle: "Album unscanned", weekStartDate: WEEK, status: "ACTIVE" },
+        });
+        await addSoulseekJob(`${P}_rg_unscanned`, "Album unscanned");
+        const res = await request(discoverApp()).delete("/discover/clear");
+        expect(res.body.activeDeleted).toBe(0);
+        expect(res.body.lidarrFailed).toEqual([
+            {
+                artistName: ARTIST,
+                albumTitle: "Album unscanned",
+                reason: "the files came from Soulseek but Kima has not scanned them yet; the next library scan picks them up and the next clear deletes them",
+            },
+        ]);
+        expect((await prisma.discoveryAlbum.findUnique({ where: { id: suggestion.id } }))?.status).toBe("ACTIVE");
+        expect(await prisma.downloadJob.count({ where: { userId: USER, targetMbid: `${P}_rg_unscanned` } })).toBe(1);
+    });
+
+    it("deletes the song records of every week that suggested the album", async () => {
+        const album = await addAlbum({ key: "twoweeks", rg: `${P}_rg_twoweeks`, suggestion: {} });
+        const earlier = await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: `${P}_rg_twoweeks`, artistName: ARTIST, albumTitle: "Album twoweeks", weekStartDate: new Date(Date.UTC(2026, 9, 12)), status: "ACTIVE" },
+        });
+        await prisma.discoveryTrack.create({ data: { discoveryAlbumId: earlier.id, trackId: album.trackId, fileName: "01.flac", filePath: "x" } });
+        await addSoulseekJob(`${P}_rg_twoweeks`, "Album twoweeks");
+        const res = await request(discoverApp()).delete("/discover/clear");
+        expect(res.body.lidarrFailed).toEqual([]);
+        expect(await prisma.album.count({ where: { id: album.albumId } })).toBe(0);
+        expect(await prisma.discoveryTrack.count({ where: { discoveryAlbumId: { in: [album.suggestionId!, earlier.id] } } })).toBe(0);
     });
 
     it("the weekly regeneration also keeps an album with no download record and reports it", async () => {

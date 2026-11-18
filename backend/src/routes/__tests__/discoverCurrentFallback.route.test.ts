@@ -313,6 +313,23 @@ describe("GET /discover/current -- albums an earlier clear could not delete", ()
         expect(res.body.tracks[0].similarity).toBe(0.5);
     });
 
+    it("shows the album as liked when its earlier week's row is liked and a later week's is not", async () => {
+        await suggest(LAST_WEEK, "likedonce", { status: "LIKED" });
+        const first = await prisma.discoveryAlbum.findFirstOrThrow({ where: { userId: listener, albumTitle: `${MARK} likedonce LP` }, include: { tracks: true } });
+        await prisma.discoveryAlbum.create({
+            data: {
+                userId: listener, rgMbid: first.rgMbid, artistName: first.artistName, albumTitle: first.albumTitle,
+                weekStartDate: THIS_WEEK, status: "ACTIVE", downloadedAt: THIS_WEEK, similarity: 0.5, tier: "core",
+                tracks: { create: first.tracks.map((t) => ({ trackId: t.trackId, fileName: t.fileName, filePath: t.filePath })) },
+            },
+        });
+
+        const res = await request(app).get("/discover/current");
+
+        expect(res.body.tracks).toHaveLength(1);
+        expect(res.body.tracks[0].isLiked).toBe(true);
+    });
+
     it("drops a kept album with nothing left to play, rather than showing it as pending", async () => {
         await suggest(LAST_WEEK, "gone", { missing: true });
         await suggest(THIS_WEEK, "waiting", { missing: true });

@@ -15,7 +15,7 @@ import { lidarrService } from "../services/lidarr";
 import { discoveryArtistVerdict, otherSuggestionNeedsTag, removeDiscoveryArtist } from "../services/discovery/lidarrRemoval";
 import { requestDiscoverArtistCleanup } from "../services/discovery/discoverArtistCleanup";
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
-import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
+import { discoveryAlbumLifecycle, inClearTurn, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
 import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidarrFailures, takeAlbumClaimTurn } from "../services/discovery/discoverClearing";
 import { NameIndex, hasRealArtistId, relocateDiscoverAlbums, sameArtist, sameName } from "../services/discovery/discoverEvidence";
 import { artistNamed, isArtistNamed } from "../services/artistIdentity";
@@ -281,20 +281,20 @@ router.post("/generate", requireAcquirePermission, async (req, res) => {
 type UnavailableRow = Awaited<ReturnType<typeof prisma.unavailableAlbum.findMany>>[number];
 
 /**
- * Splits a week's unavailable albums into those still missing and those that turned up since: a suggestion of the
- * week downloaded the release, an album with its release id exists, or an album of the same artist (sameArtist: a
- * namesake under another MusicBrainz id is not) and title by the name fold exists. Another edition is not the album asked for.
+ * Splits unavailable albums into those still missing and those that turned up since: a suggestion of any week still
+ * showing (ACTIVE or LIKED) holds the release, an album with its release id exists, or an album of the same artist
+ * (sameArtist: a namesake under another MusicBrainz id is not) and title by the name fold exists. Another edition is
+ * not the album asked for.
  */
 async function unavailableStillMissing(
     userId: string,
-    weekStart: Date,
     albums: UnavailableRow[],
 ): Promise<{ missing: UnavailableRow[]; turnedUp: UnavailableRow[] }> {
     if (albums.length === 0) return { missing: [], turnedUp: [] };
     const mbids = albums.map((a) => a.albumMbid).filter(Boolean);
     const [suggested, withMbid, everyAlbum] = await Promise.all([
         prisma.discoveryAlbum.findMany({
-            where: { userId, weekStartDate: weekStart, status: { in: ["ACTIVE", "LIKED"] } },
+            where: { userId, rgMbid: { in: mbids }, status: { in: ["ACTIVE", "LIKED"] } },
             select: { rgMbid: true },
         }),
         prisma.album.findMany({ where: { rgMbid: { in: mbids } }, select: { rgMbid: true } }),
@@ -351,14 +351,21 @@ type RecordedSong = Awaited<ReturnType<typeof recordedSongs>>[number];
 type StandIn = { song: { id: string; title: string; duration: number }; coverUrl: string | null };
 
 /**
- * One row per album: a kept album a later week suggested again shows once, as the later suggestion. A row with no
- * release id is never merged, as nothing says which album it is.
+ * One row per album: a kept album a later week suggested again shows once, as its liked suggestion when one is liked
+ * (a like claims every row of the album, so this is only a row the like has not reached), else the later suggestion.
+ * A row with no release id is never merged, as nothing says which album it is.
  */
-function latestSuggestionOfEachAlbum<T extends { rgMbid: string; weekStartDate: Date }>(rows: T[]): T[] {
+function latestSuggestionOfEachAlbum<T extends { rgMbid: string; weekStartDate: Date; status: string }>(rows: T[]): T[] {
+    // A liked row wins over any other; between two of the same kind, the later week wins.
+    const before = (a: T, b: T) => {
+        const likedA = a.status === "LIKED";
+        const likedB = b.status === "LIKED";
+        return likedA !== likedB ? likedB : a.weekStartDate < b.weekStartDate;
+    };
     const latest = new Map<string, T>();
     for (const row of rows) {
         const seen = latest.get(row.rgMbid);
-        if (!seen || seen.weekStartDate < row.weekStartDate) latest.set(row.rgMbid, row);
+        if (!seen || before(seen, row)) latest.set(row.rgMbid, row);
     }
     return rows.filter((row) => !row.rgMbid || latest.get(row.rgMbid) === row);
 }
@@ -505,7 +512,7 @@ router.get("/current", async (req, res) => {
 
         const tracks = await suggestionSongs(discoveryAlbums, weekStart);
 
-        const { missing: filteredUnavailable } = await unavailableStillMissing(userId, weekStart, unavailableAlbums);
+        const { missing: filteredUnavailable } = await unavailableStillMissing(userId, unavailableAlbums);
 
         const unavailable = filteredUnavailable.map((album) => ({
             id: `unavailable-${album.id}`,
@@ -658,34 +665,34 @@ router.delete("/unlike", async (req, res) => {
             return refuseRequest(req, res, "albumId required");
         }
 
-        const discoveryAlbum = await prisma.discoveryAlbum.findFirst({
-            where: {
-                userId,
-                rgMbid: albumId,
-                status: "LIKED",
-            },
+        // In the clear turn: a clear running meanwhile would move the liked album to the library, or delete it once the
+        // unlike made it ACTIVE again, while the unlike moved it back.
+        const unliked = await inClearTurn(userId, async () => {
+            const discoveryAlbum = await prisma.discoveryAlbum.findFirst({
+                where: { userId, rgMbid: albumId, status: "LIKED" },
+            });
+            if (!discoveryAlbum) return false;
+
+            // Every liked row of the album, as the like claimed every one.
+            await prisma.discoveryAlbum.updateMany({
+                where: { userId, rgMbid: albumId, status: "LIKED" },
+                data: { status: "ACTIVE", likedAt: null },
+            });
+
+            // Back to Discover with the ownership the like gave it, unless another listener's like still keeps it.
+            const dbAlbum = await findScannedAlbum(discoveryAlbum, "LIBRARY");
+            if (dbAlbum) await returnToDiscover(dbAlbum, albumId);
+            return true;
         });
 
-        if (!discoveryAlbum) {
-            return res.status(404).json({ error: "Album not liked" });
-        }
-
-        // Every liked row of the album, as the like claimed every one.
-        await prisma.discoveryAlbum.updateMany({
-            where: { userId, rgMbid: albumId, status: "LIKED" },
-            data: {
-                status: "ACTIVE",
-                likedAt: null,
-            },
-        });
-
-        // Back to Discover with the ownership the like gave it, unless another listener's like still keeps it.
-        const dbAlbum = await findScannedAlbum(discoveryAlbum, "LIBRARY");
-        if (dbAlbum) await returnToDiscover(dbAlbum, albumId);
-
+        if (!unliked) return res.status(404).json({ error: "Album not liked" });
         res.json({ success: true });
     } catch (error) {
+        if (error instanceof LockHeldError) {
+            return res.status(409).json({ error: "a clear of your discover is running; try again when it is done" });
+        }
         logger.error("Unlike discovery album error:", error);
+        if (error instanceof LockUnavailableError) return res.status(500).json({ error: "kima could not reach redis" });
         res.status(500).json({ error: "Failed to unlike album" });
     }
 });
@@ -731,7 +738,6 @@ router.post("/retry-unavailable", requireAcquirePermission, async (req, res) => 
         );
         const { missing, turnedUp } = await unavailableStillMissing(
             userId,
-            weekStart,
             unavailableAlbums.filter((album) => !inFlight.has(album.albumMbid)),
         );
         const retriableAlbums = missing;
@@ -1012,11 +1018,20 @@ router.delete("/clear", async (req, res) => {
             likedMoved: result.moved,
             activeDeleted: result.deleted,
             orphanedAlbumsDeleted: result.orphansCleared,
-            lidarrFailed: [...result.lidarrFailed, ...result.unnamedFailed],
+            // Albums no record names belong to no one, so only an admin is told of them here.
+            lidarrFailed: req.user!.role === "admin" ? [...result.lidarrFailed, ...result.unnamedFailed] : result.lidarrFailed,
         });
     } catch (error: any) {
-        logger.error(`Clear discovery playlist error: ${error?.message ?? String(error)}`);
-        res.status(500).json({ error: "Failed to clear discovery playlist" });
+        if (error instanceof LockHeldError) {
+            return res.status(409).json({ error: "a clear of your discover is already running" });
+        }
+        // A reason Kima knows is named; any other error's text is the server's own and stays in its log.
+        const known =
+            error instanceof LockUnavailableError ? "kima could not reach redis"
+            : error instanceof LockLostError ? "kima lost its hold on the clear; clear again to finish it"
+            : null;
+        logger.error("Clear discovery playlist error:", error);
+        res.status(500).json({ error: `the clear stopped: ${known ?? "a server error; the server log has the reason"}` });
     }
 });
 

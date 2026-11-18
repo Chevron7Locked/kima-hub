@@ -15,6 +15,7 @@ import { prisma } from "../../../utils/db";
 import { removeDiscoveryAlbum } from "../lidarrRemoval";
 import { clearOrphanedDiscoverAlbums, clearSuggestion, clearUnsuggestedDownloads, findScannedAlbum } from "../discoverClearing";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
+import * as downloadJobs from "../../downloads/jobs";
 
 const MARK = "zz-clear-identity";
 const USER = `${MARK}-user`;
@@ -153,6 +154,8 @@ describe("forgetDiscoverDownloads (clearing an album that is the library's)", ()
         const own = await discoverJob(id);
 
         expect(await clearSuggestion(row(s))).toEqual({ outcome: "cleared" });
+        // A batch job is deleted in its batch lane, after the checks queued there.
+        await downloadJobs.whenIdle();
         expect(await prisma.downloadJob.findUnique({ where: { id: own.id } })).toBeNull();
     });
 });

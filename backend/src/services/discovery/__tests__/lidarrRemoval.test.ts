@@ -18,7 +18,7 @@ jest.mock("../../lidarr", () => ({
         deleteArtistById: jest.fn(),
         removeDiscoveryTagByMbid: jest.fn(),
         addTagsToArtist: jest.fn(),
-        getTrackFileCount: jest.fn(),
+        getTrackFileCountsByArtist: jest.fn(),
     },
 }));
 
@@ -27,6 +27,7 @@ import { lidarrService } from "../../lidarr";
 import { discoveryArtistVerdict, ensureDiscoverTag, removeDiscoveryAlbum, removeDiscoveryArtist } from "../lidarrRemoval";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 import { artistIdentityKey } from "../../artistIdentity";
+import * as downloadJobs from "../../downloads/jobs";
 
 const USER = "lr_user";
 const ARTIST = "lr_artist";
@@ -632,17 +633,18 @@ describe("removeDiscoveryArtist and what Lidarr cannot say", () => {
     it("asks Lidarr for the files of an album it gives no file count for, then deletes Discover's artist", async () => {
         await discovered("rg-1", "DELETED");
         lidarr.getAlbumsByArtistId.mockResolvedValue([noCount("rg-1", 7), noCount("rg-empty", 8)]);
-        lidarr.getTrackFileCount.mockImplementation(async (albumId: number) => (albumId === 7 ? 10 : 0));
+        lidarr.getTrackFileCountsByArtist.mockResolvedValue(new Map([[7, 10]]));
 
         expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "removed" });
-        expect(lidarr.getTrackFileCount).toHaveBeenCalledWith(7);
+        expect(lidarr.getTrackFileCountsByArtist).toHaveBeenCalledTimes(1);
+        expect(lidarr.getTrackFileCountsByArtist).toHaveBeenCalledWith(5);
         expect(lidarr.deleteArtistById).toHaveBeenCalledWith(5, true);
     });
 
     it("keeps an artist whose album with no file count turns out to hold files Discover has no record of", async () => {
         await discovered("rg-1", "DELETED");
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1"), noCount("rg-users-own", 8)]);
-        lidarr.getTrackFileCount.mockResolvedValue(4);
+        lidarr.getTrackFileCountsByArtist.mockResolvedValue(new Map([[8, 4]]));
 
         expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
@@ -650,7 +652,7 @@ describe("removeDiscoveryArtist and what Lidarr cannot say", () => {
 
     it("lets Lidarr forget an artist once it says the album with no file count holds no files", async () => {
         lidarr.getAlbumsByArtistId.mockResolvedValue([noCount("rg-empty", 8)]);
-        lidarr.getTrackFileCount.mockResolvedValue(0);
+        lidarr.getTrackFileCountsByArtist.mockResolvedValue(new Map());
 
         expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "removed" });
         expect(lidarr.deleteArtistById).toHaveBeenCalledWith(5, false);
@@ -659,7 +661,7 @@ describe("removeDiscoveryArtist and what Lidarr cannot say", () => {
     it("reports a failure, never a delete, when Lidarr cannot list an album's files", async () => {
         await discovered("rg-1", "DELETED");
         lidarr.getAlbumsByArtistId.mockResolvedValue([noCount("rg-1", 7)]);
-        lidarr.getTrackFileCount.mockRejectedValue(new Error("Request failed with status code 500"));
+        lidarr.getTrackFileCountsByArtist.mockRejectedValue(new Error("Request failed with status code 500"));
 
         expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "failed", reason: "Request failed with status code 500" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
@@ -685,8 +687,33 @@ describe("removeDiscoveryArtist and what Lidarr cannot say", () => {
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
 
         expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "removed" });
+        await downloadJobs.whenIdle();
         const left = await prisma.downloadJob.findMany({ where: { userId: USER }, select: { targetMbid: true }, orderBy: { targetMbid: "asc" } });
         expect(left).toEqual([{ targetMbid: "rg-9" }, { targetMbid: "rg-scanned" }, { targetMbid: "rg-slsk" }]);
+    });
+
+    it("also forgets the records that name the artist only by name, but not a namesake's under another id", async () => {
+        await discovered("rg-1", "DELETED");
+        const batch = await prisma.discoveryBatch.create({
+            data: { userId: USER, weekStart: new Date("2026-10-26"), targetSongCount: 10, status: "completed" },
+        });
+        const job = (targetMbid: string, artistMbid: string | null, artistName: string) =>
+            prisma.downloadJob.create({
+                data: {
+                    userId: USER, subject: `${artistName} - ${targetMbid}`, type: "album", status: "completed", targetMbid, artistMbid,
+                    lidarrAlbumId: 7, discoveryBatchId: batch.id, metadata: { artistName, albumTitle: targetMbid },
+                },
+            });
+        await job("rg-noid", null, "Interpol");
+        await job("rg-temp", "temp-123", "interpol");
+        await job("rg-namesake", "other-artist-mbid", "Interpol");
+        await job("rg-other-name", null, "Editors");
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
+
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "removed" });
+        await downloadJobs.whenIdle();
+        const left = await prisma.downloadJob.findMany({ where: { userId: USER }, select: { targetMbid: true }, orderBy: { targetMbid: "asc" } });
+        expect(left).toEqual([{ targetMbid: "rg-namesake" }, { targetMbid: "rg-other-name" }]);
     });
 
     it("still reports an artist Lidarr deleted as removed when its download records cannot be forgotten", async () => {

@@ -170,12 +170,12 @@ async function deleteAlbumFiles(albumId: string): Promise<{ failed: string } | n
 }
 
 /**
- * The suggestion's song records, then the album when it is Discover's (never a library album) with what goes with it
+ * The song records of the album's suggestions (one per week that suggested it), then the album when it is Discover's (never a library album) with what goes with it
  * (library/albumDelete.ts), in one transaction.
  */
-async function deleteAlbumRows(albumId: string | null, suggestionId: string | null): Promise<void> {
+async function deleteAlbumRows(albumId: string | null, suggestionIds: string[]): Promise<void> {
     const deleted = await prisma.$transaction(async (tx) => {
-        if (suggestionId) await tx.discoveryTrack.deleteMany({ where: { discoveryAlbumId: suggestionId } });
+        if (suggestionIds.length > 0) await tx.discoveryTrack.deleteMany({ where: { discoveryAlbumId: { in: suggestionIds } } });
         return deleteAlbums(albumId ? [albumId] : [], { within: tx, only: "DISCOVER" });
     });
     await deleted.settle();
@@ -256,6 +256,24 @@ async function heldByReleaseGroup(rgMbids: string[]): Promise<LidarrHeld | Lidar
     return null;
 }
 
+const NOT_SCANNED =
+    "the files came from Soulseek but Kima has not scanned them yet; the next library scan picks them up and the next clear deletes them";
+
+/**
+ * A `where` piece for the Discover jobs that could be the album's: those `byId` picks, or any (narrowed by `named`) that
+ * could be its artist's, to be told apart by name. With no real artist id any job could be, so nothing narrows.
+ */
+function orArtistsJobs(ref: AlbumRef, byId: Prisma.DownloadJobWhereInput, named: Prisma.DownloadJobWhereInput = {}) {
+    const artist = couldBeArtist(ref.artistMbid);
+    const byName = { AND: [named, artist] };
+    // Prisma reads an empty object inside OR as matching nothing, so "any job" is said by leaving OR out.
+    if (Object.keys(named).length === 0 && !("OR" in artist)) return {};
+    return { OR: [byId, byName] };
+}
+
+const UNNAMED_RECORD =
+    "Kima's download record for this album has no artist or title, so it cannot rule out a listener's own copy and left it in Lidarr; delete it there if it is Discover's";
+
 const UNKNOWN_SOURCE =
     "Kima can't tell where this album's files came from, so it left them; delete them in Lidarr or by hand";
 
@@ -265,7 +283,7 @@ const UNKNOWN_SOURCE =
  */
 async function isKnownSoulseekAlbum(ref: AlbumRef, rgMbids: string[]): Promise<boolean> {
     const candidates = await prisma.downloadJob.findMany({
-        where: { discoveryBatchId: { not: null } },
+        where: { discoveryBatchId: { not: null }, ...orArtistsJobs(ref, { targetMbid: { in: rgMbids } }) },
         select: { status: true, lidarrAlbumId: true, metadata: true, targetMbid: true, subject: true, artistMbid: true },
     });
     const jobs = candidates.filter(
@@ -282,20 +300,24 @@ async function isKnownSoulseekAlbum(ref: AlbumRef, rgMbids: string[]): Promise<b
  */
 async function forgetDiscoverDownloads(ref: AlbumRef, rgMbids: string[]): Promise<void> {
     const jobs = await prisma.downloadJob.findMany({
-        where: { discoveryBatchId: { not: null }, status: { notIn: downloadJobs.ACTIVE_STATUSES } },
+        where: {
+            discoveryBatchId: { not: null },
+            status: { notIn: downloadJobs.ACTIVE_STATUSES },
+            ...orArtistsJobs(ref, { targetMbid: { in: rgMbids } }, { targetMbid: null }),
+        },
         select: { id: true, targetMbid: true, subject: true, metadata: true, artistMbid: true },
     });
     // A job that names a release group is this album's only by that id: another album of the same name keeps its own.
     const naming = jobs.filter((j) =>
         j.targetMbid !== null ? rgMbids.includes(j.targetMbid) : jobNamesRecord(j, ref) || metadataNamesRecord(j, ref),
     );
-    if (naming.length > 0) await prisma.downloadJob.deleteMany({ where: { id: { in: naming.map((j) => j.id) } } });
+    await downloadJobs.remove(naming);
 }
 
-/** One Discover album to clear: its names, the Lidarr album id if known, and the suggestion row it belongs to if any. */
+/** One Discover album to clear: its names, the Lidarr album id if known, and the listener's suggestion rows of it. */
 interface ClearTarget extends AlbumRef {
     lidarrAlbumId: number | null;
-    suggestionId: string | null;
+    suggestionIds: string[];
 }
 
 type ClearResult = { cleared: true } | { cleared: false; reason: string };
@@ -309,7 +331,7 @@ export async function clearDiscoverAlbum(target: ClearTarget): Promise<ClearResu
     const album = await findScannedAlbum(target, "DISCOVER");
     const rgMbids = [...new Set([target.rgMbid, ...(album ? [album.rgMbid] : [])])];
     if (album?.location === "LIBRARY") {
-        await deleteAlbumRows(null, target.suggestionId);
+        await deleteAlbumRows(null, target.suggestionIds);
         await forgetDiscoverDownloads(target, rgMbids);
         return { cleared: true };
     }
@@ -323,8 +345,11 @@ export async function clearDiscoverAlbum(target: ClearTarget): Promise<ClearResu
         if (!(await isKnownSoulseekAlbum(target, rgMbids))) return { cleared: false, reason: UNKNOWN_SOURCE };
         const failure = await deleteAlbumFiles(album.id);
         if (failure) return { cleared: false, reason: failure.failed };
+    } else if (await isKnownSoulseekAlbum(target, rgMbids)) {
+        // Forgetting its records now would let the next scan file the downloaded files as the listener's own.
+        return { cleared: false, reason: NOT_SCANNED };
     }
-    await deleteAlbumRows(album?.id ?? null, target.suggestionId);
+    await deleteAlbumRows(album?.id ?? null, target.suggestionIds);
     await forgetDiscoverDownloads(target, rgMbids);
     return { cleared: true };
 }
@@ -424,7 +449,7 @@ export async function clearSuggestion(suggestion: SuggestionRow): Promise<Sugges
     const ids = claimed.map((row) => row.id);
     const release = () =>
         prisma.discoveryAlbum.updateMany({ where: { id: { in: ids }, status: "DELETED" }, data: { status: "ACTIVE" } });
-    const result = await clearDiscoverAlbum({ ...suggestion, suggestionId: suggestion.id }).catch(async (error) => {
+    const result = await clearDiscoverAlbum({ ...suggestion, suggestionIds: ids }).catch(async (error) => {
         await release();
         throw error;
     });
@@ -438,17 +463,12 @@ export async function clearSuggestion(suggestion: SuggestionRow): Promise<Sugges
 }
 
 /**
- * Whether any of a download job's names is a suggestion this listener has that is not DELETED. A DELETED one whose
- * download record is still here is a clear that never finished (a finished clear forgets the record, and a kept album
- * goes back to ACTIVE), so the album is cleared here instead.
+ * Whether a download job's release-group id, or its artist and title, is one of the listener's suggestions that are not
+ * DELETED. A DELETED one whose download record is still here is a clear that never finished (a finished clear forgets
+ * the record, and a kept album goes back to ACTIVE), so the album is cleared here instead.
  */
-async function hasSuggestion(userId: string, ref: AlbumRef): Promise<boolean> {
-    const mine = await prisma.discoveryAlbum.findMany({
-        where: { userId, status: { not: "DELETED" } },
-        select: { rgMbid: true, artistName: true, artistMbid: true, albumTitle: true },
-    });
-    return mine.some((r) => r.rgMbid === ref.rgMbid || namesRecord(r, ref));
-}
+const namesSuggestion = (mine: (NamedRow & { rgMbid: string | null })[], ref: AlbumRef) =>
+    mine.some((r) => r.rgMbid === ref.rgMbid || namesRecord(r, ref));
 
 type JobMetadata = { artistName?: string; albumTitle?: string } | null;
 
@@ -458,7 +478,7 @@ type JobMetadata = { artistName?: string; albumTitle?: string } | null;
  * Lidarr's copy is removed, and one Lidarr does not delete is reported.
  */
 export async function clearUnsuggestedDownloads(userId: string): Promise<ClearFailure[]> {
-    const [jobs, liked] = await Promise.all([
+    const [jobs, liked, mine] = await Promise.all([
         prisma.downloadJob.findMany({
             where: {
                 userId,
@@ -470,26 +490,38 @@ export async function clearUnsuggestedDownloads(userId: string): Promise<ClearFa
             },
         }),
         prisma.discoveryAlbum.findMany({ where: { userId, status: { in: ["LIKED", "MOVED"] } }, select: { artistName: true, artistMbid: true } }),
+        prisma.discoveryAlbum.findMany({
+            where: { userId, status: { not: "DELETED" } },
+            select: { rgMbid: true, artistName: true, artistMbid: true, albumTitle: true },
+        }),
     ]);
     const likedArtist = (ref: AlbumRef) => liked.some((a) => sameArtist(a, ref));
 
     const failures: ClearFailure[] = [];
     for (const job of jobs) {
         const metadata = job.metadata as JobMetadata;
+        const unnamed = !metadata?.artistName?.trim() || !metadata.albumTitle?.trim();
         const ref: AlbumRef = {
             rgMbid: job.targetMbid as string,
             artistName: metadata?.artistName ?? "",
-            albumTitle: metadata?.albumTitle || job.subject,
+            albumTitle: metadata?.albumTitle ?? "",
             artistMbid: job.artistMbid,
         };
+        // Empty names match nothing in these checks, so a nameless record is still skipped by its ids.
         if (likedArtist(ref)) continue;
-        if (await hasSuggestion(userId, ref)) continue;
+        if (namesSuggestion(mine, ref)) continue;
+        if (unnamed) {
+            if (await prisma.album.findFirst({ where: { rgMbid: ref.rgMbid, location: "DISCOVER" }, select: { id: true } })) continue;
+            // With no names, only the release-group id could find a listener's own copy, so Lidarr's is left.
+            failures.push({ artistName: "Unknown artist", albumTitle: job.subject, reason: UNNAMED_RECORD });
+            continue;
+        }
         if (await findDiscoverAlbum(ref)) continue;
 
-        const result = await clearOrReport({ ...ref, lidarrAlbumId: job.lidarrAlbumId, suggestionId: null });
+        const result = await clearOrReport({ ...ref, lidarrAlbumId: job.lidarrAlbumId, suggestionIds: [] });
         if (!result.cleared) {
             logger.warn(`[DiscoverClear] Kept extra album ${ref.artistName} - ${ref.albumTitle}: ${result.reason}`);
-            failures.push({ artistName: ref.artistName || "Unknown artist", albumTitle: ref.albumTitle, reason: result.reason });
+            failures.push({ artistName: ref.artistName, albumTitle: ref.albumTitle, reason: result.reason });
         }
     }
     return failures;
@@ -608,7 +640,7 @@ export async function clearOrphanedDiscoverAlbums(): Promise<{ cleared: number; 
             if (await returnToLibrary(album.id)) returned++;
             continue;
         }
-        const result = await clearOrReport({ ...ref, lidarrAlbumId: null, suggestionId: null });
+        const result = await clearOrReport({ ...ref, lidarrAlbumId: null, suggestionIds: [] });
         if (result.cleared) cleared++;
         else failures.push({ artistName: ref.artistName, albumTitle: ref.albumTitle, reason: result.reason, userIds: await listenersNaming(ref) });
     }

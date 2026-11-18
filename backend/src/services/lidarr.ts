@@ -903,12 +903,20 @@ class LidarrService {
         return (await client.get("/api/v1/album", { params: { artistId } })).data ?? [];
     }
 
-    /** How many files Lidarr tracks for an album, for when its album listing leaves the count out. Errors throw. */
-    async getTrackFileCount(albumId: number): Promise<number> {
+    /**
+     * How many files Lidarr tracks for each of an artist's albums, by Lidarr album id, in one call: for when its album
+     * listing leaves the counts out. An album with no files is absent. Errors throw.
+     */
+    async getTrackFileCountsByArtist(artistId: number): Promise<Map<number, number>> {
         const client = await this.requireClient();
-        const files = (await client.get("/api/v1/trackfile", { params: { albumId } })).data;
-        if (!Array.isArray(files)) throw new Error(`Lidarr gave no file list for album ${albumId}`);
-        return files.length;
+        const files = (await client.get("/api/v1/trackfile", { params: { artistId } })).data;
+        if (!Array.isArray(files)) throw new Error(`Lidarr gave no file list for artist ${artistId}`);
+        const counts = new Map<number, number>();
+        for (const file of files as { albumId?: unknown }[]) {
+            if (typeof file.albumId !== "number") throw new Error(`Lidarr listed a file of artist ${artistId} with no album`);
+            counts.set(file.albumId, (counts.get(file.albumId) ?? 0) + 1);
+        }
+        return counts;
     }
 
     /** Delete an album from Lidarr; a 404 counts as done. Callers go through discovery/lidarrRemoval. */

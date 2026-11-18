@@ -250,7 +250,7 @@ async function artistOwner(
         ]);
         if (liked || library || owned || openRequest) return { owner: "theirs", albums: [] };
     }
-    const albums = await withFileCounts(await lidarrService.getAlbumsByArtistId(artist.id));
+    const albums = await withFileCounts(artist.id, await lidarrService.getAlbumsByArtistId(artist.id));
     const filed = albums.filter((a) => (a.statistics?.trackFileCount ?? 0) > 0);
     if (filed.length === 0) return { owner: "unsure", albums };
     const keys: AlbumKeys = { lidarrAlbumIds: filed.map((a) => a.id), rgMbids: filed.map((a) => a.foreignAlbumId) };
@@ -261,20 +261,17 @@ async function artistOwner(
 
 /**
  * Lidarr's albums, each with a file count: Lidarr's album listing can leave the count out (an album it has not yet
- * refreshed), so Lidarr is asked for that album's files. Errors throw: an album whose files cannot be counted may hold
- * some, so nothing is decided on a guess.
+ * refreshed), so Lidarr is asked once for the artist's files. Errors throw: an album whose files cannot be counted may
+ * hold some, so nothing is decided on a guess.
  */
-async function withFileCounts(albums: LidarrAlbum[]): Promise<LidarrAlbum[]> {
-    const counted: LidarrAlbum[] = [];
-    for (const album of albums) {
-        if (typeof album.statistics?.trackFileCount === "number") {
-            counted.push(album);
-            continue;
-        }
-        const trackFileCount = await lidarrService.getTrackFileCount(album.id);
-        counted.push({ ...album, statistics: { ...album.statistics, trackFileCount } } as LidarrAlbum);
-    }
-    return counted;
+async function withFileCounts(artistId: number, albums: LidarrAlbum[]): Promise<LidarrAlbum[]> {
+    if (albums.every((album) => typeof album.statistics?.trackFileCount === "number")) return albums;
+    const files = await lidarrService.getTrackFileCountsByArtist(artistId);
+    return albums.map((album) =>
+        typeof album.statistics?.trackFileCount === "number"
+            ? album
+            : ({ ...album, statistics: { ...album.statistics, trackFileCount: files.get(album.id) ?? 0 } } as LidarrAlbum),
+    );
 }
 
 /**
@@ -345,24 +342,30 @@ export async function discoveryArtistVerdict(
  * Forget Discover's finished downloads of an artist Lidarr just deleted, so no clear reports its albums again. Only
  * downloads Lidarr fetched (a recorded Lidarr album id) go, and not one whose album Kima scanned: that album's files
  * are still Kima's to clear, and its record is what shows it is Discover's. A failure here is logged, as the artist is
- * already gone. The verdict matched the artist by MusicBrainz id, and "in use" left no running Discover download of it.
+ * already gone. A record with the artist's MusicBrainz id is its; one with no real id is, when its artist name is the
+ * artist's (sameArtist). "In use" left no running Discover download of it.
  */
 async function forgetArtistDownloads(artist: LidarrArtist): Promise<void> {
     try {
-        const jobs = await prisma.downloadJob.findMany({
+        const candidates = await prisma.downloadJob.findMany({
             where: {
-                artistMbid: artist.foreignArtistId,
+                ...couldBeArtist(artist.foreignArtistId),
                 discoveryBatchId: { not: null },
                 lidarrAlbumId: { not: null },
                 status: { notIn: downloadJobs.ACTIVE_STATUSES },
             },
-            select: { id: true, targetMbid: true },
+            select: { id: true, targetMbid: true, artistMbid: true, metadata: true },
+        });
+        // A record with no real artist id names the artist only by name.
+        const lidarrIdentity = { artistMbid: artist.foreignArtistId, artistName: artist.artistName };
+        const jobs = candidates.filter((j) => {
+            const name = (j.metadata as { artistName?: unknown } | null)?.artistName;
+            return sameArtist({ artistMbid: j.artistMbid, artistName: typeof name === "string" ? name : null }, lidarrIdentity);
         });
         const scanned = new Set(
             (await prisma.album.findMany({ where: { rgMbid: { in: jobs.flatMap((j) => (j.targetMbid ? [j.targetMbid] : [])) } }, select: { rgMbid: true } })).map((a) => a.rgMbid),
         );
-        const gone = jobs.filter((j) => !j.targetMbid || !scanned.has(j.targetMbid)).map((j) => j.id);
-        if (gone.length > 0) await prisma.downloadJob.deleteMany({ where: { id: { in: gone } } });
+        await downloadJobs.remove(jobs.filter((j) => !j.targetMbid || !scanned.has(j.targetMbid)));
     } catch (error: any) {
         logger.warn(`[Discover] Removed ${artist.artistName} from Lidarr but kept its download records: ${error.message}`);
     }

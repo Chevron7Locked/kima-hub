@@ -45,6 +45,7 @@ import { clearDiscoverAlbum } from "../../services/discovery/discoverClearing";
 import discoverRoutes from "../discover";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { mountAsServer } from "./helpers/serverMount";
+import * as downloadJobs from "../../services/downloads/jobs";
 import { discoverArtistsQueue } from "../../workers/queues";
 
 jest.setTimeout(120_000);
@@ -214,13 +215,15 @@ describe("Lidarr no longer has the album and Kima holds no copy (recorded 404)",
             },
         });
 
-        const result = await clearDiscoverAlbum({ rgMbid: NO_SUCH_RG, artistName: ARTIST, artistMbid: null, albumTitle: "Moon Music", lidarrAlbumId: null, suggestionId: null });
+        const result = await clearDiscoverAlbum({ rgMbid: NO_SUCH_RG, artistName: ARTIST, artistMbid: null, albumTitle: "Moon Music", lidarrAlbumId: null, suggestionIds: [] });
 
         expect(result).toEqual({ cleared: true });
         expect(lidarr!.asked.map((a) => `${a.method} ${a.path}`)).toEqual([
             `GET /api/v1/album/${NO_SUCH_LIDARR_ID}`,
             `GET /api/v1/album?foreignAlbumId=${NO_SUCH_RG}`,
         ]);
+        // A batch job is deleted in its batch lane, after the checks queued there.
+        await downloadJobs.whenIdle();
         expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(0);
     });
 });
@@ -236,7 +239,7 @@ describe("Lidarr has no album for a release-group id (recorded empty lookup)", (
         await startReplay("album-lookup-none", 3);
         const orphan = await addAlbum("lost", "Moon Music", NO_SUCH_RG);
 
-        const result = await clearDiscoverAlbum({ rgMbid: NO_SUCH_RG, artistName: ARTIST, artistMbid: null, albumTitle: "Moon Music", lidarrAlbumId: null, suggestionId: null });
+        const result = await clearDiscoverAlbum({ rgMbid: NO_SUCH_RG, artistName: ARTIST, artistMbid: null, albumTitle: "Moon Music", lidarrAlbumId: null, suggestionIds: [] });
 
         expect(result.cleared).toBe(false);
         expect(lidarr!.asked.map((a) => `${a.method} ${a.path}`)).toEqual([`GET /api/v1/album?foreignAlbumId=${NO_SUCH_RG}`]);

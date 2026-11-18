@@ -1,6 +1,6 @@
 /**
- * The week's unavailable albums (suggestions no download found) leave the list once they turn up: a suggestion of the
- * week downloaded the release, an album with its release id exists, or an album of the same artist and title by the
+ * The week's unavailable albums (suggestions no download found) leave the list once they turn up: a showing suggestion
+ * of any week holds the release, an album with its release id exists, or an album of the same artist and title by the
  * shared name fold exists. Another edition ("Plain (Deluxe)" for "Plain") is not the album asked for. GET /discover/current hides those; POST
  * /discover/retry-unavailable deletes them instead of downloading them again. Both apply the same rule. Real database
  * and router; auth is passed through.
@@ -94,6 +94,21 @@ describe("unavailable albums that have turned up", () => {
     });
 });
 
+describe("a suggestion from an earlier week", () => {
+    it("counts an album an earlier week's kept suggestion holds as turned up, but not a deleted one", async () => {
+        const earlier = new Date(week().getTime() - 7 * 24 * 60 * 60 * 1000);
+        const suggest = (rgMbid: string, status: "ACTIVE" | "DELETED") =>
+            prisma.discoveryAlbum.create({
+                data: { userId: listener, rgMbid, artistName: `${MARK} Band`, albumTitle: rgMbid, weekStartDate: earlier, status },
+            });
+        await suggest(`${MARK}-rg-missing`, "ACTIVE");
+        await suggest(`${MARK}-rg-deluxe`, "DELETED");
+
+        const res = await request(app).get("/discover/current").expect(200);
+        expect(res.body.unavailable.map((a: { albumId: string }) => a.albumId)).toEqual([`${MARK}-rg-deluxe`]);
+    });
+});
+
 describe("a namesake's album does not mark an unavailable album as turned up", () => {
     const ARTIST = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";
     const NAMESAKE = "9c9f1380-2016-4671-bd33-fe2d94d1ed44";
@@ -170,7 +185,7 @@ describe("a Discover clear that fails", () => {
         const refusal = jest.spyOn(prisma.discoveryAlbum, "findMany").mockRejectedValueOnce(new Error("internal detail"));
         try {
             const res = await request(app).delete("/discover/clear").expect(500);
-            expect(res.body).toEqual({ error: "Failed to clear discovery playlist" });
+            expect(res.body).toEqual({ error: "the clear stopped: a server error; the server log has the reason" });
         } finally {
             refusal.mockRestore();
         }
