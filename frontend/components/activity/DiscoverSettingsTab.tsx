@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
-import { api } from "@/lib/api";
+import { api, answeredByKima } from "@/lib/api";
 import { notify } from "@/lib/notify";
 import { Trash2, Loader2, ArrowLeft } from "lucide-react";
 import type { DiscoverConfig } from "@/features/discover/types";
@@ -44,6 +44,8 @@ function ConfigSlider({ label, display, unit, min, max, step, value, onChange, c
     );
 }
 
+const CLEAR_GROUP = "discover-clear";
+
 interface DiscoverSettingsTabProps {
     config: DiscoverConfig | null;
     onUpdateConfig: (updatedConfig: DiscoverConfig | null) => void;
@@ -81,7 +83,7 @@ export function DiscoverSettingsTab({
             try {
                 await api.updateDiscoverConfig({ [key]: value });
             } catch {
-                notify.error("Failed to save setting");
+                notify.error("failed to save setting", { groupKey: "discover-config-save" });
             }
         }, 500);
     }
@@ -97,18 +99,28 @@ export function DiscoverSettingsTab({
             const albums = (n: number) => `${n} album${n !== 1 ? "s" : ""}`;
             const kept = result.lidarrFailed?.length ?? 0;
             const parts = [
-                result.likedMoved > 0 && `Moved ${albums(result.likedMoved)} you liked to your library.`,
-                result.activeDeleted > 0 && `Deleted ${albums(result.activeDeleted)}.`,
+                result.likedMoved > 0 && `moved ${albums(result.likedMoved)} you liked to your library.`,
+                result.activeDeleted > 0 && `deleted ${albums(result.activeDeleted)}.`,
                 // Lidarr refusing, a file Kima could not delete, or Lidarr off: the server's own alert lists them and why.
-                kept > 0 && `Kept ${albums(kept)} the clear could not finish; the alert says why.`,
+                kept > 0 && `kept ${albums(kept)} the clear could not finish; the alert says why.`,
             ].filter(Boolean);
-            notify.info("Discover playlist cleared", {
-                message: parts.length > 0 ? parts.join(" ") : "There were no albums to clear.",
+            notify.info("discover playlist cleared", {
+                message: parts.length > 0 ? parts.join(" ") : "there were no albums to clear.",
+                groupKey: CLEAR_GROUP,
             });
 
             onPlaylistCleared?.();
-        } catch {
-            notify.error("Failed to clear playlist");
+        } catch (err) {
+            if (answeredByKima(err)) {
+                notify.error("failed to clear playlist", { message: err.message, groupKey: CLEAR_GROUP });
+            } else {
+                // No answer from Kima: the connection dropped, or a proxy in front of it gave up waiting. The clear
+                // may still be running, so this is not a failure, and the page is not reloaded as if it had finished.
+                notify.info("no answer from the discover clear yet", {
+                    message: "the clear may still be running or may have finished. refresh in a minute to see what it did.",
+                    groupKey: CLEAR_GROUP,
+                });
+            }
         } finally {
             setIsClearing(false);
         }

@@ -91,6 +91,17 @@ export interface ApiError extends Error {
     data?: Record<string, unknown>;
 }
 
+/**
+ * An error Kima itself answered with: Kima's error replies always carry an `error` string. A proxy in front of Kima
+ * that gave up waiting answers in its own words instead (Next's proxy timeout is a plain-text 500), so the request
+ * may still have run to the end.
+ */
+export function answeredByKima(err: unknown): err is ApiError {
+    if (!(err instanceof Error)) return false;
+    const { status, data } = err as ApiError;
+    return typeof status === "number" && !data?.parseError && typeof data?.error === "string";
+}
+
 interface ServiceTestResult {
     success?: boolean;
     version?: string;
@@ -1327,6 +1338,8 @@ class ApiClient {
             lidarrFailed: { artistName: string; albumTitle: string; reason: string }[];
         }>("/discover/clear", {
             method: "DELETE",
+            // Deleting albums in Lidarr and on disk can outlast the usual 30 s; the page waits for the real answer.
+            noTimeout: true,
         });
     }
 
