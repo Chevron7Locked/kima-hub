@@ -22,6 +22,7 @@ import { lidarrService } from "../../lidarr";
 import { discoverArtistsQueue } from "../../../workers/queues";
 import {
     discoverArtistsGroupKey,
+    previewDiscoverArtists,
     requestDiscoverArtistCleanup,
     runDiscoverArtistCleanup,
     takeDiscoverArtistsTurn,
@@ -118,10 +119,35 @@ describe("runDiscoverArtistCleanup", () => {
     });
 });
 
+describe("previewDiscoverArtists", () => {
+    it("names what a run would remove and keep, removing nothing and leaving the tray alone", async () => {
+        await prisma.notification.create({
+            data: { userId: ADMIN, groupKey: discoverArtistsGroupKey, type: "error", title: "1 Discover artist not removed from Lidarr" },
+        });
+        lidarr.readDiscoveryTaggedArtists.mockResolvedValue([artist(1, "Interpol"), { ...artist(2, "Untagged"), tags: [] }]);
+
+        expect(await previewDiscoverArtists()).toEqual({
+            removed: ["Interpol"],
+            kept: ["Untagged (files Discover did not fetch, or Kima cannot tell)"],
+            errors: [],
+        });
+        expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
+        expect(await trayRow()).not.toBeNull();
+    });
+
+    it("throws when Lidarr cannot be read, and is null when Lidarr is not set up", async () => {
+        lidarr.readDiscoveryTaggedArtists.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+        await expect(previewDiscoverArtists()).rejects.toThrow("connect ECONNREFUSED");
+
+        lidarr.readDiscoveryTaggedArtists.mockResolvedValueOnce(null);
+        expect(await previewDiscoverArtists()).toBeNull();
+    });
+});
+
 describe("requestDiscoverArtistCleanup", () => {
     it("queues a run", async () => {
         queue.getJobs.mockResolvedValue([]);
-        await requestDiscoverArtistCleanup();
+        await expect(requestDiscoverArtistCleanup()).resolves.toBeNull();
         expect(queue.add).toHaveBeenCalledTimes(1);
     });
 
@@ -134,7 +160,7 @@ describe("requestDiscoverArtistCleanup", () => {
     it("puts a run that could not be queued in the admin tray instead of failing the clear", async () => {
         queue.getJobs.mockRejectedValue(new Error("Connection is closed."));
 
-        await expect(requestDiscoverArtistCleanup()).resolves.toBeUndefined();
+        await expect(requestDiscoverArtistCleanup()).resolves.toBe("the removal could not be started: Connection is closed.");
 
         const row = await trayRow();
         expect(row?.title).toBe("Discover's artists not removed from Lidarr");

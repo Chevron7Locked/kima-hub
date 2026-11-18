@@ -1197,19 +1197,6 @@ class LidarrService {
         return artists.filter((artist) => artist.tags?.includes(tag.id));
     }
 
-    /**
-     * The artists carrying Discover's tag, for the clean-ups: none when Lidarr is off, cannot be read, or has no such
-     * tag. Looking does not create the tag.
-     */
-    async getDiscoveryArtists(): Promise<LidarrArtist[]> {
-        try {
-            return (await this.readDiscoveryTaggedArtists()) ?? [];
-        } catch (error: any) {
-            logger.error("[LIDARR] Failed to read Discover's artists:", error.message);
-            return [];
-        }
-    }
-
     /** Takes the discovery tag off an artist, as when the user likes an album and the artist becomes owned. */
     async removeDiscoveryTagByMbid(artistMbid: string): Promise<boolean> {
         await this.ensureInitialized();

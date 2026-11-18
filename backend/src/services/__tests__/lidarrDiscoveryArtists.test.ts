@@ -1,6 +1,7 @@
 /**
  * The clean-ups' list of Discover's artists: the artists carrying Discover's tag; none when Lidarr has no such tag,
- * without creating one just to look; none (logged) when Lidarr cannot be read. Lidarr's replies are stood in for.
+ * without creating one just to look; null when Lidarr is not set up; an error when Lidarr cannot be read, never "none".
+ * Lidarr's replies are stood in for.
  */
 import { lidarrService } from "../lidarr";
 
@@ -22,16 +23,22 @@ it("lists the artists carrying the tag", async () => {
             ? { data: [{ id: 9, label: "lidify-discovery" }] }
             : { data: [{ id: 1, artistName: "Tagged", tags: [9] }, { id: 2, artistName: "Not", tags: [] }] },
     );
-    expect((await lidarrService.getDiscoveryArtists()).map((a) => a.artistName)).toEqual(["Tagged"]);
+    expect((await lidarrService.readDiscoveryTaggedArtists())!.map((a) => a.artistName)).toEqual(["Tagged"]);
 });
 
 it("lists none and creates no tag when Lidarr has none", async () => {
     client.get.mockResolvedValue({ data: [] });
-    expect(await lidarrService.getDiscoveryArtists()).toEqual([]);
+    expect(await lidarrService.readDiscoveryTaggedArtists()).toEqual([]);
     expect(client.post).not.toHaveBeenCalled();
 });
 
-it("lists none when Lidarr cannot be read", async () => {
+it("throws when Lidarr cannot be read, so no caller takes it for no artists", async () => {
     client.get.mockRejectedValue(new Error("ECONNREFUSED"));
-    expect(await lidarrService.getDiscoveryArtists()).toEqual([]);
+    await expect(lidarrService.readDiscoveryTaggedArtists()).rejects.toThrow("ECONNREFUSED");
+});
+
+it("answers null when Lidarr is not set up", async () => {
+    service.enabled = false;
+    expect(await lidarrService.readDiscoveryTaggedArtists()).toBeNull();
+    expect(client.get).not.toHaveBeenCalled();
 });

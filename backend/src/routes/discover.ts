@@ -12,8 +12,8 @@ import { discoverQueue } from "../workers/queues";
 import { requestScan } from "../workers/scanRequest";
 import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
-import { discoveryArtistVerdict, otherSuggestionNeedsTag, removeDiscoveryArtist } from "../services/discovery/lidarrRemoval";
-import { requestDiscoverArtistCleanup } from "../services/discovery/discoverArtistCleanup";
+import { otherSuggestionNeedsTag } from "../services/discovery/lidarrRemoval";
+import { previewDiscoverArtists, requestDiscoverArtistCleanup } from "../services/discovery/discoverArtistCleanup";
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, inClearTurn, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
 import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidarrFailures, takeAlbumClaimTurn } from "../services/discovery/discoverClearing";
@@ -1037,65 +1037,44 @@ router.delete("/clear", async (req, res) => {
 
 // Removes artists discovery added to Lidarr that nothing references any more. DESTRUCTIVE: removes
 // their files too. Dry run unless ?dryRun=false. Protection is global, because Lidarr is shared:
-// an artist survives if any user owns or liked their work.
+// an artist survives if any user owns or liked their work. A real run is the queued artist job a
+// clear asks for (Lidarr can take many seconds per artist), so it answers once queued and reports
+// in the admins' tray; a dry run answers with what that job would do now.
 router.post("/cleanup-lidarr", async (req, res) => {
     try {
         const dryRun = req.query.dryRun !== "false";
 
-        logger.debug(
-            `\n[CLEANUP] Starting Lidarr cleanup of discovery-only artists (dryRun=${dryRun})...`
-        );
-
-        const settings = await getSystemSettings();
-
-        if (!isLidarrConfigured(settings)) {
+        if (!isLidarrConfigured(await getSystemSettings())) {
             return res.status(400).json({ error: "Lidarr not configured" });
         }
 
-        const discoveryArtists = await lidarrService.getDiscoveryArtists();
-        const activeDiscoveryArtistMbids = new Set(
-            (await prisma.discoveryAlbum.findMany({
-                where: { status: "ACTIVE" },
-                select: { artistMbid: true },
-                distinct: ["artistMbid"],
-            })).map((da) => da.artistMbid)
-        );
-
-        const artistsRemoved: string[] = [];
-        const artistsKept: string[] = [];
-        const errors: string[] = [];
-
-        for (const lidarrArtist of discoveryArtists) {
-            const artistName = lidarrArtist.artistName;
-            if (activeDiscoveryArtistMbids.has(lidarrArtist.foreignArtistId)) {
-                artistsKept.push(`${artistName} (has active discovery)`);
-                continue;
-            }
-            try {
-                const outcome = dryRun
-                    ? ["delete", "forget"].includes(await discoveryArtistVerdict(lidarrArtist)) ? { outcome: "removed" as const } : { outcome: "kept" as const }
-                    : await removeDiscoveryArtist(lidarrArtist);
-                if (outcome.outcome === "removed") artistsRemoved.push(artistName);
-                else if (outcome.outcome === "kept") artistsKept.push(`${artistName} (library, liked, in a current Discover week, or files Discover did not fetch)`);
-                else errors.push(`Failed to process ${artistName}: ${outcome.reason}`);
-            } catch (error: any) {
-                errors.push(`Failed to process ${artistName}: ${error.message}`);
-            }
+        if (!dryRun) {
+            const notStarted = await requestDiscoverArtistCleanup();
+            if (notStarted) return res.status(503).json({ error: `Discover's artists were not removed: ${notStarted}` });
+            return res.status(202).json({ success: true, dryRun, started: true });
         }
 
-        logger.debug(`[CLEANUP] ${artistsRemoved.length} removed, ${artistsKept.length} kept, ${errors.length} errors`);
+        let preview;
+        try {
+            preview = await previewDiscoverArtists();
+        } catch (error: any) {
+            const reason = `Discover's artists could not be read from Lidarr: ${error?.message ?? String(error)}`;
+            logger.warn(`[CLEANUP] ${reason}`);
+            return res.status(502).json({ error: reason });
+        }
+        if (!preview) return res.status(400).json({ error: "Lidarr not configured" });
 
         res.json({
             success: true,
             dryRun,
-            // In a dry run this is the list that WOULD be removed; nothing was touched.
-            removed: artistsRemoved,
-            kept: artistsKept,
-            errors,
+            // The list that WOULD be removed; nothing was touched.
+            removed: preview.removed,
+            kept: preview.kept,
+            errors: preview.errors,
             summary: {
-                removed: artistsRemoved.length,
-                kept: artistsKept.length,
-                errors: errors.length,
+                removed: preview.removed.length,
+                kept: preview.kept.length,
+                errors: preview.errors.length,
             },
         });
     } catch (error: any) {
