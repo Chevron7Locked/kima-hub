@@ -91,4 +91,18 @@ describe("like then unlike on a suggestion that names the listener's own library
         await request(app).delete("/discover/unlike").send({ albumId: `${P}rg` });
         expect(await location()).toBe("LIBRARY");
     });
+
+    it("an album suggested in two weeks (kept by an earlier clear, then suggested again): like and unlike change both", async () => {
+        expectLog("warn");
+        await seed(null);
+        await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: `${P}rg`, artistName: "Cl Artist", albumTitle: "Cl Album", weekStartDate: new Date(Date.UTC(2026, 9, 26)), status: "ACTIVE" },
+        });
+        const statuses = async () => (await prisma.discoveryAlbum.findMany({ where: { userId: USER }, select: { status: true } })).map((r) => r.status);
+
+        expect((await request(app).post("/discover/like").send({ albumId: `${P}rg` })).status).toBe(200);
+        expect(await statuses()).toEqual(["LIKED", "LIKED"]);
+        expect((await request(app).delete("/discover/unlike").send({ albumId: `${P}rg` })).status).toBe(200);
+        expect(await statuses()).toEqual(["ACTIVE", "ACTIVE"]);
+    });
 });

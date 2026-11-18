@@ -16,7 +16,7 @@ import { discoveryArtistVerdict, otherSuggestionNeedsTag, removeDiscoveryArtist 
 import { requestDiscoverArtistCleanup } from "../services/discovery/discoverArtistCleanup";
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
-import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidarrFailures } from "../services/discovery/discoverClearing";
+import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidarrFailures, takeAlbumClaimTurn } from "../services/discovery/discoverClearing";
 import { NameIndex, hasRealArtistId, relocateDiscoverAlbums, sameArtist, sameName } from "../services/discovery/discoverEvidence";
 import { artistNamed, isArtistNamed } from "../services/artistIdentity";
 import { distributedLock } from '../utils/distributedLock';
@@ -351,12 +351,26 @@ type RecordedSong = Awaited<ReturnType<typeof recordedSongs>>[number];
 type StandIn = { song: { id: string; title: string; duration: number }; coverUrl: string | null };
 
 /**
- * The songs GET /current lists for a week's suggestions, in suggestion order, in a fixed number of queries. A
- * suggestion lists its recorded songs that are playable; with none, one stand-in: the first playable song in track
- * order of its album, found by release id (title and the same artist (sameArtist) only when it has no release id); with no album or no
- * playable song yet, a pending placeholder.
+ * One row per album: a kept album a later week suggested again shows once, as the later suggestion. A row with no
+ * release id is never merged, as nothing says which album it is.
  */
-async function suggestionSongs(suggestions: SuggestionWithSongs[]) {
+function latestSuggestionOfEachAlbum<T extends { rgMbid: string; weekStartDate: Date }>(rows: T[]): T[] {
+    const latest = new Map<string, T>();
+    for (const row of rows) {
+        const seen = latest.get(row.rgMbid);
+        if (!seen || seen.weekStartDate < row.weekStartDate) latest.set(row.rgMbid, row);
+    }
+    return rows.filter((row) => !row.rgMbid || latest.get(row.rgMbid) === row);
+}
+
+/**
+ * The songs GET /current lists for the suggestions, in suggestion order, in a fixed number of queries. A suggestion
+ * lists its recorded songs that are playable; with none, one stand-in: the first playable song in track order of its
+ * album, found by release id (title and the same artist (sameArtist) only when it has no release id). With no album or
+ * no playable song yet, a suggestion of the shown week shows as pending (still downloading, or nothing plays); a kept
+ * album from an earlier week has nothing left to show, so it is left out.
+ */
+async function suggestionSongs(suggestions: SuggestionWithSongs[], weekStart: Date) {
     // A liked suggestion's album is in the library now; any other's is a Discover album, never a library album of the
     // same name, so each kind is looked up under its own rule.
     const found = new Map<string, ReturnType<typeof suggestionSong>[]>();
@@ -368,6 +382,7 @@ async function suggestionSongs(suggestions: SuggestionWithSongs[]) {
     return suggestions.flatMap((s) => {
         const songs = found.get(s.id);
         if (songs && songs.length > 0) return songs;
+        if (s.weekStartDate < weekStart) return [];
         // The album is not in the library yet (downloading or pending), or none of its songs can play.
         return [
             {
@@ -465,17 +480,17 @@ router.get("/current", async (req, res) => {
         const weekStart = view.weekStart;
         const weekEnd = endOfWeek(view.weekOf, { weekStartsOn: WEEK_STARTS_ON });
 
-        const discoveryAlbums = await prisma.discoveryAlbum.findMany({
-            where: {
-                userId,
-                weekStartDate: weekStart,
-                status: { in: ["ACTIVE", "LIKED"] },
-            },
+        // The shown week's suggestions, and any album an earlier clear could not delete: it stays ACTIVE under its own
+        // week, still a Discover album on disk, and stays here (liked too) until a clear removes or moves it. A clear
+        // moves every liked row, so an older week's ACTIVE or LIKED row is always such an album.
+        const rows = await prisma.discoveryAlbum.findMany({
+            where: { userId, weekStartDate: { lte: weekStart }, status: { in: ["ACTIVE", "LIKED"] } },
             include: {
                 tracks: true, // DiscoveryTrack records (trackId is just a string, not a relation)
             },
             orderBy: { downloadedAt: "asc" },
         });
+        const discoveryAlbums = latestSuggestionOfEachAlbum(rows);
 
         const unavailableAlbums = await prisma.unavailableAlbum.findMany({
             where: {
@@ -488,7 +503,7 @@ router.get("/current", async (req, res) => {
             ],
         });
 
-        const tracks = await suggestionSongs(discoveryAlbums);
+        const tracks = await suggestionSongs(discoveryAlbums, weekStart);
 
         const { missing: filteredUnavailable } = await unavailableStillMissing(userId, weekStart, unavailableAlbums);
 
@@ -589,14 +604,15 @@ router.post("/like", async (req, res) => {
                 .json({ error: "Album not in active discovery" });
         }
 
-        // Claim only an ACTIVE row; count 0 means cleanup claimed it first and its
-        // files are being removed (409).
-        const claimed = await prisma.discoveryAlbum.updateMany({
-            where: { id: discoveryAlbum.id, status: "ACTIVE" },
-            data: {
-                status: "LIKED",
-                likedAt: new Date(),
-            },
+        // Claim only ACTIVE rows, in the album's claim turn so a clear takes all of them or none; count 0 means a
+        // clear claimed them first and the files are being removed (409). Every row of the album: a kept album a
+        // later week suggested again has one per week.
+        const claimed = await prisma.$transaction(async (tx) => {
+            await takeAlbumClaimTurn(tx, userId, albumId);
+            return tx.discoveryAlbum.updateMany({
+                where: { userId, rgMbid: albumId, status: "ACTIVE" },
+                data: { status: "LIKED", likedAt: new Date() },
+            });
         });
         if (claimed.count === 0) {
             return res.status(409).json({
@@ -654,8 +670,9 @@ router.delete("/unlike", async (req, res) => {
             return res.status(404).json({ error: "Album not liked" });
         }
 
-        await prisma.discoveryAlbum.update({
-            where: { id: discoveryAlbum.id },
+        // Every liked row of the album, as the like claimed every one.
+        await prisma.discoveryAlbum.updateMany({
+            where: { userId, rgMbid: albumId, status: "LIKED" },
             data: {
                 status: "ACTIVE",
                 likedAt: null,

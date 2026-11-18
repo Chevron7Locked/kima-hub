@@ -78,7 +78,13 @@ class DiscoveryAlbumLifecycle {
 
         // Each clear can be a Lidarr call with a 10 s timeout, so run a few at a time.
         const CLEAR_CONCURRENCY = 5;
-        const active = suggestions.filter((a) => a.status === 'ACTIVE');
+        // One clear per album, through its latest week's suggestion: it claims every week's (see clearSuggestion).
+        const latest = new Map<string, (typeof suggestions)[number]>();
+        for (const a of suggestions) {
+            const seen = latest.get(a.rgMbid);
+            if (a.status === 'ACTIVE' && a.rgMbid && (!seen || seen.weekStartDate < a.weekStartDate)) latest.set(a.rgMbid, a);
+        }
+        const active = suggestions.filter((a) => a.status === 'ACTIVE' && (!a.rgMbid || latest.get(a.rgMbid) === a));
         let deleted = 0;
         const lidarrFailed: ClearFailure[] = [];
         for (let i = 0; i < active.length; i += CLEAR_CONCURRENCY) {

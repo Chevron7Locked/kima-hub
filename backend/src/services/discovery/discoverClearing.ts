@@ -5,6 +5,7 @@
  */
 import fs from "fs";
 import path from "path";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../utils/db";
 import { logger } from "../../utils/logger";
 import { config } from "../../config";
@@ -347,19 +348,56 @@ export type SuggestionClear =
     | { outcome: "skipped" }
     | { outcome: "kept"; failure: ClearFailure };
 
+/** Rolls a claim back when its rows changed under it. */
+class ClaimMoved extends Error {}
+
 /**
- * Clear an ACTIVE suggestion's album. The row is claimed first (ACTIVE to DELETED), so a like either lands first and
- * keeps the album or finds it gone. When the album is kept, or anything throws, the claim is put back to ACTIVE.
+ * Holds, until the transaction ends, the one turn a listener's like and a clear share for an album. Postgres claims an
+ * album's rows one at a time, so without it a like and a clear could each take one week's row of the same album.
+ * Statements after it see what the other committed.
+ */
+export async function takeAlbumClaimTurn(tx: Prisma.TransactionClient, userId: string, rgMbid: string): Promise<void> {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`discover-claim:${userId}:${rgMbid}`}, 0))`;
+}
+
+/**
+ * Clear an ACTIVE suggestion's album. Every ACTIVE suggestion of the album this listener has (a kept album a later
+ * week suggested again has one per week) is claimed first (ACTIVE to DELETED), in the album's claim turn
+ * (`takeAlbumClaimTurn`), so a like either lands first and keeps the album or finds it gone. None is claimed while any
+ * suggestion of the album is liked. A suggestion with no release id is claimed alone, as nothing says which album it
+ * is. When the album is kept, or anything throws, the claims are put back to ACTIVE.
  */
 export async function clearSuggestion(suggestion: SuggestionRow): Promise<SuggestionClear> {
-    const claimed = await prisma.discoveryAlbum.updateMany({
-        where: { id: suggestion.id, status: "ACTIVE" },
-        data: { status: "DELETED" },
+    const claimed = await prisma.$transaction(async (tx) => {
+        const own = await tx.discoveryAlbum.findUnique({ where: { id: suggestion.id }, select: { userId: true, rgMbid: true } });
+        if (!own) return [];
+        if (!own.rgMbid) {
+            const one = await tx.discoveryAlbum.updateMany({ where: { id: suggestion.id, status: "ACTIVE" }, data: { status: "DELETED" } });
+            return one.count > 0 ? [{ id: suggestion.id }] : [];
+        }
+        await takeAlbumClaimTurn(tx, own.userId, own.rgMbid);
+        const rows = await tx.discoveryAlbum.findMany({
+            where: { userId: own.userId, rgMbid: own.rgMbid },
+            select: { id: true, status: true },
+        });
+        const active = rows.filter((r) => r.status === "ACTIVE");
+        if (rows.some((r) => r.status === "LIKED") || !active.some((r) => r.id === suggestion.id)) return [];
+        const taken = await tx.discoveryAlbum.updateMany({
+            where: { id: { in: active.map((r) => r.id) }, status: "ACTIVE" },
+            data: { status: "DELETED" },
+        });
+        // A writer outside the claim turn (expiry, the one-time sort) moved a row meanwhile: claim none of them.
+        if (taken.count !== active.length) throw new ClaimMoved();
+        return active.map((r) => ({ id: r.id }));
+    }).catch((error) => {
+        if (error instanceof ClaimMoved) return [];
+        throw error;
     });
-    if (claimed.count === 0) return { outcome: "skipped" };
+    if (claimed.length === 0) return { outcome: "skipped" };
 
+    const ids = claimed.map((row) => row.id);
     const release = () =>
-        prisma.discoveryAlbum.updateMany({ where: { id: suggestion.id, status: "DELETED" }, data: { status: "ACTIVE" } });
+        prisma.discoveryAlbum.updateMany({ where: { id: { in: ids }, status: "DELETED" }, data: { status: "ACTIVE" } });
     const result = await clearDiscoverAlbum({ ...suggestion, suggestionId: suggestion.id }).catch(async (error) => {
         await release();
         throw error;

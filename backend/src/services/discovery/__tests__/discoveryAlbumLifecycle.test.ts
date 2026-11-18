@@ -3,7 +3,7 @@
  * album here has a Lidarr id, so every clear takes the Soulseek path.
  */
 import { discoveryAlbumLifecycle } from "../discoveryAlbumLifecycle";
-import { clearSuggestion } from "../discoverClearing";
+import { clearSuggestion, takeAlbumClaimTurn } from "../discoverClearing";
 import { prisma } from "../../../utils/db";
 import { useLidarr } from "../../../__tests__/helpers/lidarrSettings";
 
@@ -106,6 +106,74 @@ describe("clearSuggestion", () => {
         expect(await clearSuggestion(suggestion)).toEqual({ outcome: "skipped" });
         expect(await prisma.album.count({ where: { id: `${P}_alb` } })).toBe(1);
         expect((await prisma.discoveryAlbum.findUnique({ where: { id: suggestion.id } }))?.status).toBe("LIKED");
+    });
+
+    // A clear that could not delete an album leaves it ACTIVE under its week; a later week can suggest it again.
+    const olderWeek = (status: "ACTIVE" | "LIKED", lidarrAlbumId: number | null = null) =>
+        prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: `${P}_rg`, artistName: `${P} artist`, albumTitle: `${P} Album`, weekStartDate: new Date(Date.UTC(2026, 9, 12)), status, lidarrAlbumId },
+        });
+
+    it("takes every week's suggestion of the album at once, so a like cannot keep one while the files go", async () => {
+        await discoverAlbum();
+        const older = await olderWeek("ACTIVE");
+        const suggestion = await suggest("ACTIVE");
+
+        expect(await clearSuggestion(suggestion)).toEqual({ outcome: "cleared" });
+        expect((await prisma.discoveryAlbum.findUnique({ where: { id: older.id } }))?.status).toBe("DELETED");
+        expect((await prisma.discoveryAlbum.findUnique({ where: { id: suggestion.id } }))?.status).toBe("DELETED");
+    });
+
+    it("leaves the album alone when a like took another week's suggestion of it first", async () => {
+        await discoverAlbum();
+        await olderWeek("LIKED");
+        const suggestion = await suggest("ACTIVE");
+
+        expect(await clearSuggestion(suggestion)).toEqual({ outcome: "skipped" });
+        expect(await prisma.album.count({ where: { id: `${P}_alb` } })).toBe(1);
+        expect((await prisma.discoveryAlbum.findUnique({ where: { id: suggestion.id } }))?.status).toBe("ACTIVE");
+    });
+
+    it("puts every week's suggestion back to ACTIVE when the album is kept", async () => {
+        await discoverAlbum();
+        const older = await olderWeek("ACTIVE", 77);
+        const suggestion = await prisma.discoveryAlbum.create({
+            data: { userId: USER, rgMbid: `${P}_rg`, artistName: `${P} artist`, albumTitle: `${P} Album`, weekStartDate: WEEK, status: "ACTIVE", lidarrAlbumId: 77 },
+        });
+
+        expect(await clearSuggestion(suggestion)).toMatchObject({ outcome: "kept" });
+        expect((await prisma.discoveryAlbum.findUnique({ where: { id: older.id } }))?.status).toBe("ACTIVE");
+        expect((await prisma.discoveryAlbum.findUnique({ where: { id: suggestion.id } }))?.status).toBe("ACTIVE");
+    });
+
+    it("a like at the same moment as a clear takes every week's suggestion or none", async () => {
+        // As /like claims: in the album's claim turn, every ACTIVE row of the album.
+        const like = () =>
+            prisma.$transaction(async (tx) => {
+                await takeAlbumClaimTurn(tx, USER, `${P}_rg`);
+                return tx.discoveryAlbum.updateMany({ where: { userId: USER, rgMbid: `${P}_rg`, status: "ACTIVE" }, data: { status: "LIKED" } });
+            });
+        for (let round = 0; round < 15; round++) {
+            await prisma.discoveryAlbum.deleteMany({ where: { userId: USER } });
+            await olderWeek("ACTIVE", 77);
+            const suggestion = await prisma.discoveryAlbum.create({
+                data: { userId: USER, rgMbid: `${P}_rg`, artistName: `${P} artist`, albumTitle: `${P} Album`, weekStartDate: WEEK, status: "ACTIVE", lidarrAlbumId: 77 },
+            });
+            const [liked] = await Promise.all([like(), clearSuggestion(suggestion)]);
+            const statuses = (await prisma.discoveryAlbum.findMany({ where: { userId: USER } })).map((r) => r.status);
+            // Lidarr is off, so the clear keeps the album and puts its claims back: the like then finds both, or neither.
+            expect(statuses).toEqual(liked.count === 2 ? ["LIKED", "LIKED"] : ["ACTIVE", "ACTIVE"]);
+        }
+    });
+
+    it("takes only its own suggestion when it has no release id", async () => {
+        const blank = (week: Date) =>
+            prisma.discoveryAlbum.create({ data: { userId: USER, rgMbid: "", artistName: "x", albumTitle: "y", weekStartDate: week, status: "ACTIVE" } });
+        const other = await blank(new Date(Date.UTC(2026, 9, 12)));
+        const suggestion = await blank(WEEK);
+
+        await clearSuggestion(suggestion);
+        expect((await prisma.discoveryAlbum.findUnique({ where: { id: other.id } }))?.status).toBe("ACTIVE");
     });
 
     it("keeps everything and puts the suggestion back to ACTIVE when Lidarr (turned off) does not delete", async () => {

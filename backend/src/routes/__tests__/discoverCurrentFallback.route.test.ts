@@ -74,23 +74,36 @@ const batch = (weekStart: Date, status: string, extra: { createdAt?: Date; compl
         data: { userId: listener, weekStart, targetSongCount: 5, status, ...extra },
     });
 
-/** A suggestion of that week with a Discover song, as the downloaded album leaves it. Returns the song's title. */
-async function suggest(weekStartDate: Date, name: string): Promise<string> {
+/**
+ * A suggestion of that week with a song, as the downloaded album leaves it (in the library once liked). Returns the song's
+ * title. An older week's suggestion a clear removed is DELETED; one Lidarr would not delete stays ACTIVE (kept).
+ */
+async function suggest(
+    weekStartDate: Date,
+    name: string,
+    { status = "ACTIVE", userId = listener, missing = false }: { status?: "ACTIVE" | "LIKED" | "DELETED"; userId?: string; missing?: boolean } = {},
+): Promise<string> {
     const artist = await prisma.artist.create({ data: { name: `${MARK} ${name}`, identityKey: `${MARK}-${name}` } });
     const album = await prisma.album.create({
-        data: { rgMbid: `${MARK}-rg-${name}`, identityKey: `${MARK}-${name}`, title: `${MARK} ${name} LP`, primaryType: "Album", artistId: artist.id, location: "DISCOVER" },
+        data: {
+            rgMbid: `${MARK}-rg-${name}`, identityKey: `${MARK}-${name}`, title: `${MARK} ${name} LP`, primaryType: "Album",
+            artistId: artist.id, location: status === "LIKED" ? "LIBRARY" : "DISCOVER",
+        },
     });
     const track = await prisma.track.create({
-        data: { albumId: album.id, title: `${MARK} ${name} song`, trackNo: 1, duration: 320, filePath: `/music/${MARK}/${name}.flac`, fileModified: new Date(), fileSize: 1 },
+        data: {
+            albumId: album.id, title: `${MARK} ${name} song`, trackNo: 1, duration: 320, filePath: `/music/${MARK}/${name}.flac`,
+            fileModified: new Date(), fileSize: 1, missingSince: missing ? new Date() : null,
+        },
     });
     await prisma.discoveryAlbum.create({
         data: {
-            userId: listener,
+            userId,
             rgMbid: album.rgMbid,
             artistName: artist.name,
             albumTitle: album.title,
             weekStartDate,
-            status: "ACTIVE",
+            status,
             downloadedAt: weekStartDate,
             similarity: 0.9,
             tier: "core",
@@ -135,7 +148,7 @@ describe("GET /discover/current -- shows the latest completed batch", () => {
 
     it("falls back to the calendar week, not stale, when no batch has completed", async () => {
         const thisWeeks = await suggest(THIS_WEEK, "this");
-        await suggest(LAST_WEEK, "last");
+        await suggest(LAST_WEEK, "last", { status: "DELETED" });
 
         const res = await request(app).get("/discover/current");
 
@@ -149,7 +162,7 @@ describe("GET /discover/current -- shows the latest completed batch", () => {
         // An in-flight or failed batch must not decide the week /current shows.
         await batch(LAST_WEEK, "scanning");
         await batch(LAST_WEEK, "failed", { completedAt: new Date() });
-        await suggest(LAST_WEEK, "last");
+        await suggest(LAST_WEEK, "last", { status: "DELETED" });
         const thisWeeks = await suggest(THIS_WEEK, "this");
 
         const res = await request(app).get("/discover/current");
@@ -172,7 +185,7 @@ describe("GET /discover/current -- shows the latest completed batch", () => {
     it("takes the newest completed batch", async () => {
         await batch(addWeeks(THIS_WEEK, -2), "completed", { completedAt: new Date(), createdAt: addWeeks(new Date(), -2) });
         await batch(LAST_WEEK, "completed", { completedAt: new Date(), createdAt: addWeeks(new Date(), -1) });
-        await suggest(addWeeks(THIS_WEEK, -2), "older");
+        await suggest(addWeeks(THIS_WEEK, -2), "older", { status: "DELETED" });
         const newer = await suggest(LAST_WEEK, "newer");
 
         const res = await request(app).get("/discover/current");
@@ -198,7 +211,8 @@ describe("GET /discover/current -- shows the latest completed batch", () => {
     it("serves a batch generated early for the upcoming week as not stale", async () => {
         await batch(NEXT_WEEK, "completed", { completedAt: new Date() });
         const upcoming = await suggest(NEXT_WEEK, "next");
-        await suggest(THIS_WEEK, "this");
+        // Generating next week's batch cleared this week's suggestions.
+        await suggest(THIS_WEEK, "this", { status: "DELETED" });
 
         const res = await request(app).get("/discover/current");
 
@@ -237,6 +251,76 @@ describe("GET /discover/current -- shows the latest completed batch", () => {
         expect(res.body.stale).toBe(false);
         expect(instant(res.body.weekStart)).toBe(THIS_WEEK.getTime());
         expect(titles(res.body)).toEqual([thisWeeks]);
+    });
+});
+
+describe("GET /discover/current -- albums an earlier clear could not delete", () => {
+    beforeEach(() => batch(THIS_WEEK, "completed", { completedAt: new Date() }));
+
+    it("keeps showing a kept album from an older week with the shown week's albums", async () => {
+        const thisWeeks = await suggest(THIS_WEEK, "this");
+        const kept = await suggest(addWeeks(THIS_WEEK, -3), "kept");
+        await suggest(LAST_WEEK, "cleared", { status: "DELETED" });
+
+        const res = await request(app).get("/discover/current");
+
+        expect(res.status).toBe(200);
+        expect(titles(res.body)).toEqual([kept, thisWeeks].sort());
+        expect(instant(res.body.weekStart)).toBe(THIS_WEEK.getTime());
+    });
+
+    it("keeps showing a kept album once it is liked, until a clear moves it", async () => {
+        const liked = await suggest(LAST_WEEK, "liked", { status: "LIKED" });
+
+        const res = await request(app).get("/discover/current");
+
+        expect(titles(res.body)).toEqual([liked]);
+    });
+
+    it("shows kept albums with a batch generated early for the upcoming week", async () => {
+        await batch(NEXT_WEEK, "completed", { completedAt: addHours(new Date(), 1) });
+        const nextWeeks = await suggest(NEXT_WEEK, "next");
+        const kept = await suggest(LAST_WEEK, "kept");
+
+        const res = await request(app).get("/discover/current");
+
+        expect(instant(res.body.weekStart)).toBe(NEXT_WEEK.getTime());
+        expect(titles(res.body)).toEqual([kept, nextWeeks].sort());
+    });
+
+    it("does not show another listener's kept album", async () => {
+        await suggest(LAST_WEEK, "theirs", { userId: other });
+
+        const res = await request(app).get("/discover/current");
+
+        expect(res.body.tracks).toEqual([]);
+    });
+
+    it("shows an album once when a later week suggests it again", async () => {
+        const song = await suggest(LAST_WEEK, "again");
+        const first = await prisma.discoveryAlbum.findFirstOrThrow({ where: { userId: listener, albumTitle: `${MARK} again LP` }, include: { tracks: true } });
+        await prisma.discoveryAlbum.create({
+            data: {
+                userId: listener, rgMbid: first.rgMbid, artistName: first.artistName, albumTitle: first.albumTitle,
+                weekStartDate: THIS_WEEK, status: "ACTIVE", downloadedAt: THIS_WEEK, similarity: 0.5, tier: "core",
+                tracks: { create: first.tracks.map((t) => ({ trackId: t.trackId, fileName: t.fileName, filePath: t.filePath })) },
+            },
+        });
+
+        const res = await request(app).get("/discover/current");
+
+        expect(titles(res.body)).toEqual([song]);
+        expect(res.body.tracks[0].similarity).toBe(0.5);
+    });
+
+    it("drops a kept album with nothing left to play, rather than showing it as pending", async () => {
+        await suggest(LAST_WEEK, "gone", { missing: true });
+        await suggest(THIS_WEEK, "waiting", { missing: true });
+
+        const res = await request(app).get("/discover/current");
+
+        expect(res.body.tracks).toHaveLength(1);
+        expect(res.body.tracks[0]).toMatchObject({ title: `${MARK} waiting LP (pending import)`, isPending: true });
     });
 });
 
