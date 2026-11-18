@@ -20,8 +20,7 @@ import { musicBrainzService } from "./musicbrainz";
 import { failureCause } from "../utils/outcome";
 import { sourcePauseController } from "./sourcePauseController";
 import { updateBatchStatus } from "./discovery/optimisticBatchUpdate";
-import { removeDiscoveryArtist } from "./discovery/lidarrRemoval";
-import { takeDiscoverArtistsTurn, type ArtistsTurn } from "./discovery/discoverArtistCleanup";
+import { removeDiscoverArtists, takeDiscoverArtistsTurn, type ArtistsTurn } from "./discovery/discoverArtistCleanup";
 import { lidarrService } from "./lidarr";
 import { isLidarrConfigured } from "./lidarrClient";
 import { requestScan } from "../workers/scanRequest";
@@ -1396,14 +1395,11 @@ class DiscoverWeeklyService {
     }
 
     /**
-     * Remove from Lidarr the Discover-tagged artists with no successful download in
-     * this batch and no active album from another week; lidarrRemoval decides files.
+     * Remove from Lidarr the Discover-tagged artists nothing keeps, sparing the ones this batch downloaded. It is the
+     * queued artist job's pass (removeDiscoverArtists), so a Lidarr that cannot be read or an artist Lidarr refuses
+     * goes to the admins' tray; lidarrRemoval decides each artist, and keeps one any listener's current week holds.
      */
     private async cleanupFailedArtists(batchId: string): Promise<void> {
-        logger.debug(
-            `\n[CLEANUP] Tag-based cleanup for failed discovery artists...`
-        );
-
         const batch = await prisma.discoveryBatch.findUnique({
             where: { id: batchId },
             include: { jobs: true },
@@ -1421,70 +1417,14 @@ class DiscoverWeeklyService {
             }
         }
 
-        logger.debug(
-            `   ${successfulArtistMbids.size} artists had successful downloads`
-        );
-
-        const discoveryArtists = await lidarrService.getDiscoveryArtists();
-        logger.debug(
-            `   ${discoveryArtists.length} artists in Lidarr have discovery tag`
-        );
-
-        let removed = 0;
-        let kept = 0;
-        let failed = 0;
-
         // Another listener's generation may be picking albums; its artists are not marked in use until its batch exists.
         const turn = await takeDiscoverArtistsTurn();
-        try {
-            for (const lidarrArtist of discoveryArtists) {
-                if (turn.signal.aborted) break;
-                const artistMbid = lidarrArtist.foreignArtistId;
-                const artistName = lidarrArtist.artistName;
-
-                if (!artistMbid) continue;
-
-                if (successfulArtistMbids.has(artistMbid)) {
-                    kept++;
-                    continue;
-                }
-
-                const hasActiveOther = await prisma.discoveryAlbum.findFirst({
-                    where: {
-                        artistMbid,
-                        status: "ACTIVE",
-                        weekStartDate: { not: batch.weekStart },
-                    },
-                });
-
-                if (hasActiveOther) {
-                    logger.debug(
-                        `   Keeping ${artistName} - has active albums from other batches`
-                    );
-                    kept++;
-                    continue;
-                }
-
-                const removal = await removeDiscoveryArtist(lidarrArtist);
-                if (removal.outcome === "removed") {
-                    logger.debug(`Removed: ${artistName}`);
-                    removed++;
-                } else if (removal.outcome === "kept") {
-                    kept++;
-                } else {
-                    // Logged by removeDiscoveryArtist; the next clear's artist run tries it again and reports it in the tray.
-                    failed++;
-                }
-            }
-        } finally {
-            await turn.release();
-        }
-
-        logger.debug(`   Cleanup complete: ${removed} removed, ${kept} kept, ${failed} failed`);
-        await discoveryBatchLogger.info(
-            batchId,
-            `Lidarr cleanup: ${removed} failed artists removed`
+        const result = await removeDiscoverArtists(turn, (artist) => successfulArtistMbids.has(artist.foreignArtistId)).finally(
+            () => turn.release(),
         );
+
+        const summary = `Lidarr cleanup: ${result.removed} artists removed, ${result.kept} kept, ${result.failed.length} failed`;
+        await discoveryBatchLogger.info(batchId, result.unread ? `${summary}; ${result.unread}` : summary);
     }
 
     /** Discovery looks for new artists, so one already in the user's library is skipped. */

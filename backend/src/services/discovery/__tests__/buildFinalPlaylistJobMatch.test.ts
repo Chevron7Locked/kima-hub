@@ -15,12 +15,12 @@ jest.mock("../../discovery", () => ({
     discoveryAlbumLifecycle: { processBeforeGeneration: jest.fn() },
 }));
 
-// cleanupFailedArtists calls lidarrService.getDiscoveryArtists after the catch
+// cleanupFailedArtists reads lidarrService.readDiscoveryTaggedArtists after the catch
 // and cleanupOrphanedLidarrQueue calls getSystemSettings. Both run on every
 // buildFinalPlaylist exit path, so stub them to no-op/empty.
 jest.mock("../../lidarr", () => ({
     lidarrService: {
-        getDiscoveryArtists: jest.fn().mockResolvedValue([]),
+        readDiscoveryTaggedArtists: jest.fn().mockResolvedValue([]),
     },
 }));
 jest.mock("../../../utils/systemSettings", () => ({
