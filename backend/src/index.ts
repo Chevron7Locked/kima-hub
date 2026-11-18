@@ -347,7 +347,7 @@ const listeningStartSteps: StartStep[] = [
             const { createBullBoard } = await import("@bull-board/api");
             const { BullMQAdapter } = await import("@bull-board/api/bullMQAdapter");
             const { ExpressAdapter } = await import("@bull-board/express");
-            const { scanQueue, discoverQueue, importQueue } = await import("./workers/queues");
+            const { scanQueue, discoverQueue, importQueue, discoverArtistsQueue } = await import("./workers/queues");
             const { artistQueue, trackQueue, vibeQueue, podcastQueue } = await import("./workers/enrichmentQueues");
 
             const serverAdapter = new ExpressAdapter();
@@ -358,6 +358,7 @@ const listeningStartSteps: StartStep[] = [
                     new BullMQAdapter(scanQueue),
                     new BullMQAdapter(discoverQueue),
                     new BullMQAdapter(importQueue),
+                    new BullMQAdapter(discoverArtistsQueue),
                     new BullMQAdapter(artistQueue),
                     new BullMQAdapter(trackQueue),
                     new BullMQAdapter(vibeQueue),

@@ -403,7 +403,7 @@ describe("removeDiscoveryArtist", () => {
         await discovered("rg-1", "DELETED");
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1"), lidarrAlbum("rg-empty", 0)]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(true);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "removed" });
         expect(lidarr.deleteArtistById).toHaveBeenCalledWith(5, true);
     });
 
@@ -412,7 +412,7 @@ describe("removeDiscoveryArtist", () => {
         await discovered("temp-b", "DELETED", 32);
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-a", 10, 31), lidarrAlbum("rg-b", 10, 32)]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(true);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "removed" });
         expect(lidarr.removeDiscoveryTagByMbid).not.toHaveBeenCalled();
     });
 
@@ -423,7 +423,7 @@ describe("removeDiscoveryArtist", () => {
         });
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-a", 10, 31)]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
     });
 
@@ -431,7 +431,7 @@ describe("removeDiscoveryArtist", () => {
         await discovered("rg-1", "DELETED");
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1"), lidarrAlbum("rg-unrecorded", 10, 8)]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
         expect(lidarr.removeDiscoveryTagByMbid).not.toHaveBeenCalled();
     });
@@ -440,7 +440,7 @@ describe("removeDiscoveryArtist", () => {
         await discovered("rg-1", "LIKED");
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.removeDiscoveryTagByMbid).toHaveBeenCalledWith("artist-mbid");
     });
 
@@ -448,7 +448,7 @@ describe("removeDiscoveryArtist", () => {
         await discovered("rg-1", "ACTIVE");
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
         expect(lidarr.removeDiscoveryTagByMbid).not.toHaveBeenCalled();
     });
@@ -463,7 +463,7 @@ describe("removeDiscoveryArtist", () => {
         });
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
         expect(lidarr.removeDiscoveryTagByMbid).not.toHaveBeenCalled();
     });
@@ -475,7 +475,7 @@ describe("removeDiscoveryArtist", () => {
         });
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
     });
 
@@ -565,11 +565,11 @@ describe("removeDiscoveryArtist", () => {
         });
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(true);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "removed" });
     });
 
     it("keeps an untagged artist", async () => {
-        expect(await removeDiscoveryArtist(lidarrArtist([]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
     });
 
@@ -577,7 +577,7 @@ describe("removeDiscoveryArtist", () => {
         await discovered("rg-1", "LIKED");
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
     });
 
@@ -585,14 +585,14 @@ describe("removeDiscoveryArtist", () => {
         await inLibrary("rg-owned");
         lidarr.getAlbumsByArtistId.mockResolvedValue([]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
     });
 
     it("lets Lidarr forget an artist with no files without deleting its folder", async () => {
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-empty", 0)]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(true);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "removed" });
         expect(lidarr.deleteArtistById).toHaveBeenCalledWith(5, false);
     });
 
@@ -603,7 +603,7 @@ describe("removeDiscoveryArtist", () => {
         });
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
     });
 
@@ -615,7 +615,7 @@ describe("removeDiscoveryArtist", () => {
         await prisma.ownedAlbum.create({ data: { artistId: ARTIST, rgMbid: "rg-1", source: "native_scan" } });
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1")]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
         await prisma.ownedAlbum.deleteMany({ where: { artistId: ARTIST } });
     });
@@ -625,7 +625,7 @@ describe("removeDiscoveryArtist and what Lidarr cannot say", () => {
     it("keeps an artist Lidarr gives no file count for, and its tag", async () => {
         lidarr.getAlbumsByArtistId.mockResolvedValue([{ id: 7, artistId: 5, title: "Album", foreignAlbumId: "rg-1" }] as any);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
         expect(lidarr.removeDiscoveryTagByMbid).not.toHaveBeenCalled();
     });
@@ -637,7 +637,7 @@ describe("removeDiscoveryArtist and what Lidarr cannot say", () => {
         });
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-1"), lidarrAlbum("rg-next", 0, 8)]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
         expect(lidarr.removeDiscoveryTagByMbid).toHaveBeenCalledWith("artist-mbid");
     });
@@ -648,8 +648,21 @@ describe("removeDiscoveryArtist and what Lidarr cannot say", () => {
         });
         lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-next", 0)]);
 
-        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toBe(false);
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "kept" });
         expect(lidarr.deleteArtistById).not.toHaveBeenCalled();
+    });
+
+    it("reports a failure with Lidarr's reason when Lidarr refuses the delete, never a keep", async () => {
+        lidarr.getAlbumsByArtistId.mockResolvedValue([lidarrAlbum("rg-empty", 0)]);
+        lidarr.deleteArtistById.mockResolvedValue({ success: false, message: "timeout of 30000ms exceeded" });
+
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "failed", reason: "timeout of 30000ms exceeded" });
+    });
+
+    it("reports a failure when Lidarr cannot be asked about the artist's albums", async () => {
+        lidarr.getAlbumsByArtistId.mockRejectedValue(new Error("connect ECONNREFUSED"));
+
+        expect(await removeDiscoveryArtist(lidarrArtist([TAG]))).toEqual({ outcome: "failed", reason: "connect ECONNREFUSED" });
     });
 });
 

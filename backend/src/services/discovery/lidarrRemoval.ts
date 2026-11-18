@@ -317,26 +317,31 @@ export async function discoveryArtistVerdict(
     return "unsure";
 }
 
+/** What one artist's removal came to: Lidarr refusing or not answering is a failure, never a keep. */
+export type ArtistRemoval = { outcome: "removed" } | { outcome: "kept" } | { outcome: "failed"; reason: string };
+
 /**
  * Delete a Discover artist with its files when the verdict allows. When a listener has made it theirs the Discover tag
  * comes off, so the artist stays in Lidarr as theirs; when Kima cannot tell, the artist and its tag stay as they are.
  */
-export async function removeDiscoveryArtist(artist: LidarrArtist): Promise<boolean> {
+export async function removeDiscoveryArtist(artist: LidarrArtist): Promise<ArtistRemoval> {
     try {
         const verdict = await discoveryArtistVerdict(artist);
         if (verdict === "in use") {
             logger.debug(`[Discover] ${artist.artistName} is in a current Discover week; left for a later clear`);
-            return false;
+            return { outcome: "kept" };
         }
         if (verdict === "theirs" || verdict === "unsure") {
             if (verdict === "theirs" && artist.foreignArtistId) await lidarrService.removeDiscoveryTagByMbid(artist.foreignArtistId);
             logger.debug(`[Discover] Keeping ${artist.artistName} in Lidarr (${verdict === "theirs" ? "a listener's" : "not provably Discover's"})`);
-            return false;
+            return { outcome: "kept" };
         }
         const result = await lidarrService.deleteArtistById(artist.id, verdict === "delete");
-        return result.success;
+        if (result.success) return { outcome: "removed" };
+        logger.warn(`[Discover] Lidarr did not remove artist ${artist.artistName}: ${result.message}`);
+        return { outcome: "failed", reason: result.message };
     } catch (error: any) {
         logger.warn(`[Discover] Lidarr artist ${artist.artistName} not removed: ${error.message}`);
-        return false;
+        return { outcome: "failed", reason: error.message };
     }
 }

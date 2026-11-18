@@ -24,6 +24,7 @@ jest.mock("../../workers/scanRequest", () => ({
 jest.mock("../../workers/queues", () => ({
     discoverQueue: { getJob: jest.fn(), add: jest.fn(), getActive: jest.fn().mockResolvedValue([]), getWaiting: jest.fn().mockResolvedValue([]) },
     scanQueue: { add: jest.fn().mockResolvedValue({ id: "test-scan" }) },
+    discoverArtistsQueue: { getJobs: jest.fn().mockResolvedValue([]), add: jest.fn().mockResolvedValue({ id: "test-artists" }) },
 }));
 jest.mock("../../workers/unifiedEnrichment", () => ({
     triggerEnrichmentNow: jest.fn().mockResolvedValue(undefined),
@@ -44,6 +45,7 @@ import { clearDiscoverAlbum } from "../../services/discovery/discoverClearing";
 import discoverRoutes from "../discover";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { mountAsServer } from "./helpers/serverMount";
+import { discoverArtistsQueue } from "../../workers/queues";
 
 jest.setTimeout(120_000);
 
@@ -147,6 +149,7 @@ describe("Lidarr deletes the album (recorded)", () => {
         await prisma.notification.create({
             data: { userId: USER, groupKey: TRAY_KEY, type: "error", title: "1 Discover album not deleted", message: "from an earlier clear" },
         });
+        jest.mocked(discoverArtistsQueue.add).mockClear();
 
         const res = await request(app()).delete("/discover/clear");
 
@@ -161,6 +164,10 @@ describe("Lidarr deletes the album (recorded)", () => {
         // Lidarr removes the files; Kima does not, so the temp file is still there.
         expect(fs.existsSync(moon.file)).toBe(true);
         expect(await trayRow()).toBeNull();
+        // Lidarr's artists are left to their own run, asked for and not waited on: the clear asked Lidarr about no artist.
+        expect(discoverArtistsQueue.add).toHaveBeenCalledTimes(1);
+        expect(lidarr!.asked.filter((a) => a.path === "/api/v1/artist" || a.path.startsWith("/api/v1/artist?"))).toEqual([]);
+        expect(lidarr!.asked.filter((a) => a.method === "DELETE" && a.path.startsWith("/api/v1/artist/"))).toEqual([]);
     });
 });
 

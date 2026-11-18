@@ -6,6 +6,7 @@ import {
     scanQueue,
     discoverQueue,
     importQueue,
+    discoverArtistsQueue,
 } from "./queues";
 import { processScan } from "./processors/scanProcessor";
 import { requestScan } from "./scanRequest";
@@ -14,6 +15,7 @@ import { SCAN_AGAIN_KEY } from "../services/stages/stageRecords";
 import { processRefile } from "./processors/refileProcessor";
 import { processDiscoverWeekly } from "./processors/discoverProcessor";
 import { processImportJob } from "./processors/importProcessor";
+import { runDiscoverArtistCleanup } from "../services/discovery/discoverArtistCleanup";
 import { createWorkerConnection } from "./enrichmentQueues";
 import { withTimeout } from "../utils/timeout";
 import { playlistImportService } from "../services/playlistImport";
@@ -71,6 +73,14 @@ const importWorker = new Worker("playlist-import", processImportJob, {
     connection: createWorkerConnection(),
     concurrency: 1,
     lockDuration: 600000, // 10 minutes -- imports with downloads can be slow
+});
+
+// One run at a time. BullMQ renews the job's lock while it runs; a run killed mid-way is retried once as stalled,
+// and the next Discover clear asks for another anyway.
+const discoverArtistsWorker = new Worker("discover-lidarr-artists", () => runDiscoverArtistCleanup(), {
+    connection: createWorkerConnection(),
+    concurrency: 1,
+    lockDuration: 120000,
 });
 
 // The enrichment loop: identification, artist metadata, analysis and sound vectors, moods, similarity.
@@ -157,6 +167,14 @@ importWorker.on("failed", async (job, err) => {
 
 importWorker.on("error", (err) => {
     logger.error("[ImportWorker] Worker error:", err.message);
+});
+
+discoverArtistsWorker.on("failed", (job, err) => {
+    logger.error(`[Discover] Lidarr artist run ${job?.id} failed: ${err.message}`);
+});
+
+discoverArtistsWorker.on("error", (err) => {
+    logger.error("[Discover] Lidarr artist worker error:", err.message);
 });
 
 logger.debug("BullMQ workers registered and event handlers attached");
@@ -292,8 +310,8 @@ export async function shutdownWorkers(): Promise<void> {
     timers.clear();
 
     // Close workers first so in-flight jobs complete, then close queues
-    await Promise.all([scanWorker.close(), discoverWorker.close(), importWorker.close()]);
-    await Promise.all([scanQueue.close(), discoverQueue.close(), importQueue.close()]);
+    await Promise.all([scanWorker.close(), discoverWorker.close(), importWorker.close(), discoverArtistsWorker.close()]);
+    await Promise.all([scanQueue.close(), discoverQueue.close(), importQueue.close(), discoverArtistsQueue.close()]);
 
     logger.debug("Workers shutdown complete");
 }

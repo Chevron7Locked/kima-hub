@@ -19,10 +19,7 @@ import {
     reportOrphanFailures,
     type ClearFailure,
 } from './discoverClearing';
-import { removeDiscoveryArtist } from './lidarrRemoval';
-import { isLidarrConfigured } from '../lidarrClient';
-import { lidarrService } from '../lidarr';
-import { getSystemSettings } from '../../utils/systemSettings';
+import { removeDiscoverArtists, type ArtistsTurn } from './discoverArtistCleanup';
 import { albumHasPlaylistTrack, discoverEvidence, loadDiscoverRecords } from './discoverEvidence';
 
 interface DiscoveryAlbumInfo {
@@ -56,14 +53,13 @@ class DiscoveryAlbumLifecycle {
 
     /**
      * Clears this listener's Discover down to what they liked: liked albums move to the library, every other suggestion is
-     * cleared, then the downloads, albums, unavailable list, failed downloads, 30-day-old records and Lidarr artists nothing
-     * keeps. An album Lidarr did not delete stays and is reported (`lidarrFailed`; `unnamedFailed` for orphans no record names).
+     * cleared, then the downloads, albums, unavailable list, failed downloads and 30-day-old records. Lidarr artists are
+     * not touched here: their removal is slow and runs after (discoverArtistCleanup). An album Lidarr did not delete stays and is reported (`lidarrFailed`; `unnamedFailed` for orphans no record names).
      */
     async clearDiscover(userId: string): Promise<{
         moved: number;
         deleted: number;
         orphansCleared: number;
-        lidarrArtistsRemoved: number;
         lidarrFailed: ClearFailure[];
         unnamedFailed: ClearFailure[];
     }> {
@@ -118,26 +114,19 @@ class DiscoveryAlbumLifecycle {
             where: { userId, status: { in: ['DELETED', 'MOVED'] }, downloadedAt: { lt: thirtyDaysAgo } },
         });
 
-        // Discover-tagged artists in Lidarr; lidarrRemoval decides whether their files go.
-        let lidarrArtistsRemoved = 0;
-        if (isLidarrConfigured(await getSystemSettings())) {
-            try {
-                for (const lidarrArtist of await lidarrService.getDiscoveryArtists()) {
-                    if (await removeDiscoveryArtist(lidarrArtist)) lidarrArtistsRemoved++;
-                }
-            } catch (error: any) {
-                logger.warn(`[DiscoveryLifecycle] Lidarr cleanup failed: ${error.message}`);
-            }
-        }
-
-        return { moved, deleted, orphansCleared: orphans.cleared, lidarrArtistsRemoved, lidarrFailed, unnamedFailed };
+        return { moved, deleted, orphansCleared: orphans.cleared, lidarrFailed, unnamedFailed };
     }
 
-    /** Before a new generation, Discover is cleared (clearDiscover); what Lidarr kept is reported in the tray. */
-    async processBeforeGeneration(userId: string): Promise<void> {
+    /**
+     * Before a new generation, Discover is cleared (clearDiscover); what Lidarr kept is reported in the tray. The weekly
+     * job is already in the background, so the artist removal runs here, inside the generation's artists turn, before
+     * the new week sends anything to Lidarr.
+     */
+    async processBeforeGeneration(userId: string, artistsTurn: ArtistsTurn): Promise<void> {
         const { lidarrFailed } = await this.clearDiscover(userId);
         // A regeneration only retries the suggestions' albums, so it can add to the tray row but not clear it.
         await reportLidarrFailures(userId, lidarrFailed, { complete: false });
+        await removeDiscoverArtists(artistsTurn);
     }
 }
 

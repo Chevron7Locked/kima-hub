@@ -21,6 +21,7 @@ import { failureCause } from "../utils/outcome";
 import { sourcePauseController } from "./sourcePauseController";
 import { updateBatchStatus } from "./discovery/optimisticBatchUpdate";
 import { removeDiscoveryArtist } from "./discovery/lidarrRemoval";
+import { takeDiscoverArtistsTurn, type ArtistsTurn } from "./discovery/discoverArtistCleanup";
 import { lidarrService } from "./lidarr";
 import { isLidarrConfigured } from "./lidarrClient";
 import { requestScan } from "../workers/scanRequest";
@@ -187,6 +188,9 @@ class DiscoverWeeklyService {
     async generatePlaylist(userId: string) {
         const logPath = discoveryLogger.start(userId);
         discoveryLogger.info(`Log file: ${logPath}`);
+        // Held from the artist removal until the batch records this week's albums: before then nothing marks their
+        // artists as in use, so a queued artist run must wait (discoverArtistCleanup).
+        let artistsTurn: ArtistsTurn | null = null;
 
         try {
             discoveryLogger.section("CONFIGURATION CHECK");
@@ -213,7 +217,8 @@ class DiscoverWeeklyService {
 
             // Likes from last week decide which albums stay before new ones are picked.
             discoveryLogger.section("PROCESSING PREVIOUS WEEK");
-            await discoveryAlbumLifecycle.processBeforeGeneration(userId);
+            artistsTurn = await takeDiscoverArtistsTurn();
+            await discoveryAlbumLifecycle.processBeforeGeneration(userId, artistsTurn);
 
             const targetCount = config.playlistSize;
 
@@ -363,6 +368,8 @@ class DiscoverWeeklyService {
 
                 return newBatch;
             });
+            await artistsTurn.release();
+            artistsTurn = null;
             discoveryLogger.success(
                 `Created ${recommended.length} download jobs`
             );
@@ -478,6 +485,8 @@ class DiscoverWeeklyService {
             discoveryLogger.error(`Generation failed: ${error.message}`);
             discoveryLogger.end(false, error.message);
             throw error;
+        } finally {
+            await artistsTurn?.release();
         }
     }
 
@@ -1423,43 +1432,55 @@ class DiscoverWeeklyService {
 
         let removed = 0;
         let kept = 0;
+        let failed = 0;
 
-        for (const lidarrArtist of discoveryArtists) {
-            const artistMbid = lidarrArtist.foreignArtistId;
-            const artistName = lidarrArtist.artistName;
+        // Another listener's generation may be picking albums; its artists are not marked in use until its batch exists.
+        const turn = await takeDiscoverArtistsTurn();
+        try {
+            for (const lidarrArtist of discoveryArtists) {
+                if (turn.signal.aborted) break;
+                const artistMbid = lidarrArtist.foreignArtistId;
+                const artistName = lidarrArtist.artistName;
 
-            if (!artistMbid) continue;
+                if (!artistMbid) continue;
 
-            if (successfulArtistMbids.has(artistMbid)) {
-                kept++;
-                continue;
+                if (successfulArtistMbids.has(artistMbid)) {
+                    kept++;
+                    continue;
+                }
+
+                const hasActiveOther = await prisma.discoveryAlbum.findFirst({
+                    where: {
+                        artistMbid,
+                        status: "ACTIVE",
+                        weekStartDate: { not: batch.weekStart },
+                    },
+                });
+
+                if (hasActiveOther) {
+                    logger.debug(
+                        `   Keeping ${artistName} - has active albums from other batches`
+                    );
+                    kept++;
+                    continue;
+                }
+
+                const removal = await removeDiscoveryArtist(lidarrArtist);
+                if (removal.outcome === "removed") {
+                    logger.debug(`Removed: ${artistName}`);
+                    removed++;
+                } else if (removal.outcome === "kept") {
+                    kept++;
+                } else {
+                    // Logged by removeDiscoveryArtist; the next clear's artist run tries it again and reports it in the tray.
+                    failed++;
+                }
             }
-
-            const hasActiveOther = await prisma.discoveryAlbum.findFirst({
-                where: {
-                    artistMbid,
-                    status: "ACTIVE",
-                    weekStartDate: { not: batch.weekStart },
-                },
-            });
-
-            if (hasActiveOther) {
-                logger.debug(
-                    `   Keeping ${artistName} - has active albums from other batches`
-                );
-                kept++;
-                continue;
-            }
-
-            if (await removeDiscoveryArtist(lidarrArtist)) {
-                logger.debug(`Removed: ${artistName}`);
-                removed++;
-            } else {
-                kept++;
-            }
+        } finally {
+            await turn.release();
         }
 
-        logger.debug(`   Cleanup complete: ${removed} removed, ${kept} kept`);
+        logger.debug(`   Cleanup complete: ${removed} removed, ${kept} kept, ${failed} failed`);
         await discoveryBatchLogger.info(
             batchId,
             `Lidarr cleanup: ${removed} failed artists removed`

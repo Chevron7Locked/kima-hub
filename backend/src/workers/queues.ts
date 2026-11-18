@@ -30,6 +30,13 @@ export const importQueue = new Queue("playlist-import", {
     },
 });
 
-export const queues = [scanQueue, discoverQueue, importQueue];
+// Discover's artists in Lidarr, removed after a clear. Its own queue, so a slow Lidarr holds up neither a clear's answer,
+// nor scans, nor the weekly jobs. One try: the next clear runs it again.
+export const discoverArtistsQueue = new Queue("discover-lidarr-artists", {
+    connection: queueConnection(),
+    defaultJobOptions: { ...defaultJobOptions, attempts: 1 },
+});
 
-logger.debug("BullMQ queues initialized (library-scan-v2, discover-weekly-v2, playlist-import)");
+export const queues = [scanQueue, discoverQueue, importQueue, discoverArtistsQueue];
+
+logger.debug("BullMQ queues initialized (library-scan-v2, discover-weekly-v2, playlist-import, discover-lidarr-artists)");

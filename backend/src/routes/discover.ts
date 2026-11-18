@@ -13,6 +13,7 @@ import { requestScan } from "../workers/scanRequest";
 import { getSystemSettings } from "../utils/systemSettings";
 import { lidarrService } from "../services/lidarr";
 import { discoveryArtistVerdict, otherSuggestionNeedsTag, removeDiscoveryArtist } from "../services/discovery/lidarrRemoval";
+import { requestDiscoverArtistCleanup } from "../services/discovery/discoverArtistCleanup";
 import { createDiscoveryDownloadJob } from "../services/discovery/discoveryDownloadJob";
 import { discoveryAlbumLifecycle, returnToDiscover, takeIntoLibrary } from "../services/discovery/discoveryAlbumLifecycle";
 import { findDiscoverAlbum, findScannedAlbum, recordedLidarrAlbumId, reportLidarrFailures } from "../services/discovery/discoverClearing";
@@ -972,9 +973,16 @@ router.delete("/clear", async (req, res) => {
         } catch (scanError: any) {
             logger.warn(`[Discover Clear] Library scan could not be queued: ${scanError.message}`);
         }
+        // Lidarr can take many seconds per artist, so the artists go after the answer, in their own run, which tells
+        // the admins of any Lidarr refuses.
+        try {
+            await requestDiscoverArtistCleanup();
+        } catch (queueError: any) {
+            logger.warn(`[Discover Clear] Lidarr artist removal could not be queued: ${queueError.message}`);
+        }
 
         logger.debug(
-            `[Discover Clear] Done: ${result.moved} moved to library, ${result.deleted} deleted, ${result.orphansCleared} orphans cleaned, ${result.lidarrArtistsRemoved} Lidarr artists removed`
+            `[Discover Clear] Done: ${result.moved} moved to library, ${result.deleted} deleted, ${result.orphansCleared} orphans cleaned`
         );
 
         // This clear tried every Lidarr album Discover holds, so it writes the listener's
@@ -987,7 +995,6 @@ router.delete("/clear", async (req, res) => {
             likedMoved: result.moved,
             activeDeleted: result.deleted,
             orphanedAlbumsDeleted: result.orphansCleared,
-            lidarrArtistsRemoved: result.lidarrArtistsRemoved,
             lidarrFailed: [...result.lidarrFailed, ...result.unnamedFailed],
         });
     } catch (error: any) {
@@ -1033,11 +1040,12 @@ router.post("/cleanup-lidarr", async (req, res) => {
                 continue;
             }
             try {
-                const removable = dryRun
-                    ? ["delete", "forget"].includes(await discoveryArtistVerdict(lidarrArtist))
+                const outcome = dryRun
+                    ? ["delete", "forget"].includes(await discoveryArtistVerdict(lidarrArtist)) ? { outcome: "removed" as const } : { outcome: "kept" as const }
                     : await removeDiscoveryArtist(lidarrArtist);
-                if (removable) artistsRemoved.push(artistName);
-                else artistsKept.push(`${artistName} (library, liked, in a current Discover week, or files Discover did not fetch)`);
+                if (outcome.outcome === "removed") artistsRemoved.push(artistName);
+                else if (outcome.outcome === "kept") artistsKept.push(`${artistName} (library, liked, in a current Discover week, or files Discover did not fetch)`);
+                else errors.push(`Failed to process ${artistName}: ${outcome.reason}`);
             } catch (error: any) {
                 errors.push(`Failed to process ${artistName}: ${error.message}`);
             }

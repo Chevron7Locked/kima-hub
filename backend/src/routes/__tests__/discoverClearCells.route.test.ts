@@ -38,8 +38,19 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
 import { discoveryAlbumLifecycle } from "../../services/discovery/discoveryAlbumLifecycle";
 import { discoverWeeklyService } from "../../services/discoverWeekly";
+import { takeDiscoverArtistsTurn } from "../../services/discovery/discoverArtistCleanup";
 import { deadPort, discoverApp } from "./helpers/discoverClear";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
+
+/** The pre-generation step as a generation runs it: inside the artists turn. */
+async function beforeGeneration(): Promise<void> {
+    const turn = await takeDiscoverArtistsTurn();
+    try {
+        await discoveryAlbumLifecycle.processBeforeGeneration(USER, turn);
+    } finally {
+        await turn.release();
+    }
+}
 
 jest.setTimeout(120_000);
 
@@ -331,7 +342,7 @@ describe("the weekly regeneration's cleanup", () => {
             data: { userId: USER, subject: `${ARTIST} - gone`, type: "album", status: "failed", discoveryBatchId: batch.id },
         });
 
-        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
+        await beforeGeneration();
 
         expect(fs.existsSync(orphan.file)).toBe(false);
         expect(await prisma.album.count({ where: { id: orphan.albumId } })).toBe(0);
@@ -343,7 +354,7 @@ describe("the weekly regeneration's cleanup", () => {
         await addSoulseekJob(`${P}_rg_wlast`, "Album wlast", { batchStatus: "completed" });
         await prisma.discoveryBatch.updateMany({ where: { userId: USER }, data: { completedAt: new Date() } });
 
-        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
+        await beforeGeneration();
         await discoverWeeklyService.reconcileDiscoveryTracks();
 
         expect(await prisma.discoveryAlbum.count({ where: { userId: USER, status: "ACTIVE" } })).toBe(0);
@@ -352,7 +363,7 @@ describe("the weekly regeneration's cleanup", () => {
 
     it("keeps a liked album", async () => {
         const liked = await addAlbum({ key: "wliked", rg: `${P}_rg_wliked`, suggestion: { status: "LIKED" } });
-        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
+        await beforeGeneration();
         expect(fs.existsSync(liked.file)).toBe(true);
         expect((await prisma.album.findUniqueOrThrow({ where: { id: liked.albumId } })).location).toBe("LIBRARY");
     });
@@ -360,7 +371,7 @@ describe("the weekly regeneration's cleanup", () => {
     it("deletes a Soulseek album's files as well as its rows", async () => {
         const soul = await addAlbum({ key: "wsoul", rg: `${P}_rg_wsoul`, suggestion: {} });
         await addSoulseekJob(`${P}_rg_wsoul`, "Album wsoul");
-        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
+        await beforeGeneration();
         expect(fs.existsSync(soul.file)).toBe(false);
         expect(fs.existsSync(soul.dir)).toBe(false);
         expect(await prisma.album.count({ where: { id: soul.albumId } })).toBe(0);
@@ -369,7 +380,7 @@ describe("the weekly regeneration's cleanup", () => {
     it("keeps a Lidarr-held album that Lidarr did not delete, and tells the listener in the tray", async () => {
         expectLog("warn");
         const held = await addAlbum({ key: "wheld", rg: `${P}_rg_wheld`, suggestion: { lidarrAlbumId: 903 } });
-        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
+        await beforeGeneration();
         expect(fs.existsSync(held.file)).toBe(true);
         expect(await prisma.album.count({ where: { id: held.albumId } })).toBe(1);
         expect((await prisma.discoveryAlbum.findUnique({ where: { id: held.suggestionId! } }))?.status).toBe("ACTIVE");
@@ -387,7 +398,7 @@ describe("the weekly regeneration's cleanup", () => {
         });
         const twin = await addAlbum({ key: "wtwin", rg: `${P}_rg_wtwin`, title: "Low Tide Hum", location: "LIBRARY" });
 
-        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
+        await beforeGeneration();
         expect((await prisma.album.findUnique({ where: { id: liked.albumId } }))?.location).toBe("LIBRARY");
         expect(await prisma.ownedAlbum.count({ where: { rgMbid: `${P}_rg_wlike_scanned`, source: "discovery_liked" } })).toBe(1);
         expect(await prisma.ownedAlbum.count({ where: { rgMbid: `${P}_rg_wtwin` } })).toBe(0);
@@ -518,7 +529,7 @@ describe("which albums Kima deletes files of", () => {
     it("the weekly regeneration also keeps an album with no download record and reports it", async () => {
         expectLog("warn");
         const album = await addAlbum({ key: "wnojob", rg: `${P}_rg_wnojob`, suggestion: {} });
-        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
+        await beforeGeneration();
         await expectKept(album);
         expect((await trayRow())!.message).toContain(UNKNOWN);
     });
@@ -587,7 +598,7 @@ describe("an error while clearing one album", () => {
     it("also reaches the tray from the weekly regeneration", async () => {
         expectLog("error");
         await boomAlbum("wboom");
-        await discoveryAlbumLifecycle.processBeforeGeneration(USER);
+        await beforeGeneration();
         expect((await trayRow())!.message).toContain("Kima hit an error clearing this album");
     });
 });

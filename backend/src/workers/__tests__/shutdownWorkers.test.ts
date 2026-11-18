@@ -26,7 +26,9 @@ jest.mock("../queues", () => ({
     scanQueue: { close: mockClose },
     discoverQueue: { close: mockClose },
     importQueue: { close: mockClose },
+    discoverArtistsQueue: { close: mockClose },
 }));
+jest.mock("../../services/discovery/discoverArtistCleanup", () => ({ runDiscoverArtistCleanup: jest.fn() }));
 jest.mock("../enrichmentQueues", () => ({ createWorkerConnection: jest.fn() }));
 jest.mock("../processors/scanProcessor", () => ({ processScan: jest.fn() }));
 jest.mock("../processors/refileProcessor", () => ({ processRefile: jest.fn() }));
@@ -70,8 +72,8 @@ describe("shutdownWorkers", () => {
         await shutdownWorkers();
 
         for (const stop of Object.values(mockStops)) expect(stop).toHaveBeenCalledTimes(1);
-        // three workers and three queues
-        expect(mockClose).toHaveBeenCalledTimes(6);
+        // four workers and four queues
+        expect(mockClose).toHaveBeenCalledTimes(8);
     });
 
     it("leaves enrichmentStateService to the server's close steps, which close it once", async () => {
@@ -89,8 +91,8 @@ describe("shutdownWorkers", () => {
         expect(mockSoulseekDisconnect).toHaveBeenCalledTimes(1);
         expect(mockRedisQuit).toHaveBeenCalledTimes(1);
         expect(mockDbDisconnect).toHaveBeenCalledTimes(1);
-        // the three workers and three queues of shutdownWorkers
-        expect(mockClose).toHaveBeenCalledTimes(6);
+        // the four workers and four queues of shutdownWorkers
+        expect(mockClose).toHaveBeenCalledTimes(8);
     });
 
     it("schedules nothing afterwards, even for a cycle that was still running when it cleared the timers", async () => {
