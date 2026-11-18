@@ -245,10 +245,23 @@ describe("clear with no suggestions", () => {
             {
                 artistName: "Unknown artist",
                 albumTitle: "Loose Fetch",
-                reason: "Kima's download record for this album has no artist or title, so it cannot rule out a listener's own copy and left it in Lidarr; delete it there if it is Discover's",
+                reason: "Kima's download record for this album has no artist name, so it cannot rule out a listener's own copy and left it in Lidarr; delete it there if it is Discover's",
             },
         ]);
         expect(await prisma.downloadJob.count({ where: { userId: USER } })).toBe(1);
+    });
+
+    it("goes to Lidarr with a download record that names its artist but not its title, by the record's subject", async () => {
+        expectLog("warn");
+        const batch = await prisma.discoveryBatch.create({ data: { userId: USER, weekStart: WEEK, targetSongCount: 10, status: "completed" } });
+        await prisma.downloadJob.create({
+            data: {
+                userId: USER, subject: `${ARTIST} - Loose Fetch`, type: "album", targetMbid: RG_ORPHAN, status: "completed", lidarrAlbumId: 901,
+                metadata: { artistName: ARTIST }, discoveryBatchId: batch.id, completedAt: new Date(),
+            },
+        });
+        const res = await request(discoverApp()).delete("/discover/clear");
+        expect(res.body.lidarrFailed).toEqual([{ artistName: ARTIST, albumTitle: `${ARTIST} - Loose Fetch`, reason: "Lidarr is turned off" }]);
     });
 
     it("does not report a nameless download record whose album the listener liked", async () => {

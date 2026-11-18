@@ -18,6 +18,7 @@ import { parseFile } from "music-metadata";
 import { prisma } from "../../utils/db";
 import { MusicScannerService } from "../musicScanner";
 import { clearOrphanedDiscoverAlbums } from "../discovery/discoverClearing";
+import * as downloadJobs from "../downloads/jobs";
 import { LINKED_OUT_REFUSAL } from "../../routes/library/trackPath";
 import { config } from "../../config";
 import { useLidarr } from "../../__tests__/helpers/lidarrSettings";
@@ -133,6 +134,7 @@ describe("a listener's own copy of an album Discover once downloaded", () => {
         // No suggestion covers it, so the weekly clear removes Discover's copy, and its download record goes with it.
         const { cleared } = await clearOrphanedDiscoverAlbums();
         expect(cleared).toBe(1);
+        await downloadJobs.whenIdle();
         expect(await prisma.downloadJob.count({ where: { subject: `${CLEARED.artist} - ${CLEARED.album}` } })).toBe(0);
 
         writeAlbum(CLEARED);

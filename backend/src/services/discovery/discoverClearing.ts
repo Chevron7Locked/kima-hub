@@ -272,7 +272,7 @@ function orArtistsJobs(ref: AlbumRef, byId: Prisma.DownloadJobWhereInput, named:
 }
 
 const UNNAMED_RECORD =
-    "Kima's download record for this album has no artist or title, so it cannot rule out a listener's own copy and left it in Lidarr; delete it there if it is Discover's";
+    "Kima's download record for this album has no artist name, so it cannot rule out a listener's own copy and left it in Lidarr; delete it there if it is Discover's";
 
 const UNKNOWN_SOURCE =
     "Kima can't tell where this album's files came from, so it left them; delete them in Lidarr or by hand";
@@ -500,11 +500,12 @@ export async function clearUnsuggestedDownloads(userId: string): Promise<ClearFa
     const failures: ClearFailure[] = [];
     for (const job of jobs) {
         const metadata = job.metadata as JobMetadata;
-        const unnamed = !metadata?.artistName?.trim() || !metadata.albumTitle?.trim();
+        // A record with no title is named by its subject ("artist - album"); one with no artist name is not named at all.
+        const unnamed = !metadata?.artistName?.trim();
         const ref: AlbumRef = {
             rgMbid: job.targetMbid as string,
             artistName: metadata?.artistName ?? "",
-            albumTitle: metadata?.albumTitle ?? "",
+            albumTitle: metadata?.albumTitle || job.subject,
             artistMbid: job.artistMbid,
         };
         // Empty names match nothing in these checks, so a nameless record is still skipped by its ids.

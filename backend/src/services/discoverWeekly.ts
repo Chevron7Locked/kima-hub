@@ -918,6 +918,13 @@ class DiscoverWeeklyService {
                 batchId,
                 "No tracks found after scan"
             );
+            eventBus.emit({
+                type: "discover:complete",
+                userId: batch.userId,
+                payload: { batchId, status: "failed" },
+            });
+            // Like the other ends of a batch, so a week that played nothing still removes the artists nothing keeps.
+            await this.cleanupFailedArtists(batchId);
             return;
         }
 

@@ -10,6 +10,7 @@ import { prisma } from "../../../utils/db";
 import { lidarrService } from "../../lidarr";
 import { discoverBuildFixtures } from "../../../__tests__/helpers/discoverBuildFixtures";
 import { discoverArtistsGroupKey } from "../discoverArtistCleanup";
+import { eventBus } from "../../eventBus";
 
 jest.mock("../../discovery", () => ({
     discoveryBatchLogger: { info: jest.fn(), error: jest.fn() },
@@ -107,5 +108,21 @@ describe("the artists at the end of a Discover batch", () => {
         const row = await trayRow();
         expect(row?.title).toBe("1 Discover artist not removed from Lidarr");
         expect(row?.message).toContain("Slint: timeout of 30000ms exceeded");
+    });
+
+    it("removes the artists and tells the page the batch failed when the scan found no songs", async () => {
+        lidarr.readDiscoveryTaggedArtists.mockResolvedValue([artist(1, "Interpol"), artist(2, "Low")]);
+        const batchId = `${P}batch-nosongs`;
+        await fx.seedScanningBatch(batchId, [
+            { artistName: "Interpol", albumTitle: "Antics", albumMbid: `${P}rg-1`, artistMbid: `${P}mbid-1` },
+        ]);
+
+        await discoverWeeklyService.buildFinalPlaylist(batchId);
+
+        expect((await fx.batch(batchId))?.status).toBe("failed");
+        expect(lidarr.deleteArtistById.mock.calls.map(([id]) => id)).toEqual([2]);
+        expect(eventBus.emit).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "discover:complete", payload: { batchId, status: "failed" } }),
+        );
     });
 });
