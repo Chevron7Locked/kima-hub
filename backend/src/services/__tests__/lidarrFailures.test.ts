@@ -10,7 +10,8 @@ import { prisma } from "../../utils/db";
 import { loadScenario, startLidarrReplay, type LidarrReplay, type LidarrScenario } from "../../__tests__/helpers/lidarrReplay";
 import { useLidarr, useNoLidarr } from "../../__tests__/helpers/lidarrSettings";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
-import { judgeQueueItem, rejectSingleTrackPost, removeFailedDownload, sweepFailedDownloads } from "../lidarrFailures";
+import { judgeQueueItem, rejectSingleTrackPost, sweepFailedDownloads } from "../lidarrFailures";
+import { removeFailedDownload } from "../lidarrRemovals";
 import { lidarrService } from "../lidarr";
 import type { LidarrQueueItem } from "../../types/lidarr";
 

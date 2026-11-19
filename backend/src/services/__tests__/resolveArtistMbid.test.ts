@@ -15,7 +15,6 @@ jest.mock("../musicbrainz", () => ({
     musicBrainzService: {
         searchArtist: (...a: unknown[]) => mockSearchArtist(...a),
         getAllReleaseGroups: (...a: unknown[]) => mockGetReleaseGroups(...a),
-        normalizeForSearch: (s: string) => s,
     },
 }));
 

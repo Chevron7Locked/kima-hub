@@ -43,6 +43,16 @@ export function stripEditionNote(str: string): string {
   return stripped;
 }
 
+/**
+ * A title without its bracketed parts and trailing edition note, spaces collapsed, for matching against release-group
+ * titles and building search queries; stored titles keep their markers.
+ */
+export function stripTitleNotes(str: string): string {
+  return stripEditionNote(str.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s*\[[^\]]*\]\s*/g, " "))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function stripTrackSuffix(str: string): string {
   return (
     stripEditionNote(normalizeApostrophes(str))

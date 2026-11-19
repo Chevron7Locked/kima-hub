@@ -1,7 +1,7 @@
 /**
  * titlesAgree decides whether a MusicBrainz hit is the album we asked for. It
  * folds Unicode-aware, and two titles that fold to nothing never agree. The real
- * normalizeForSearch runs, because its edition stripping is part of the compare.
+ * stripTitleNotes runs, because its edition stripping is part of the compare.
  */
 
 jest.mock("../../utils/redis", () => ({ redisClient: { get: jest.fn(), setEx: jest.fn() } }));

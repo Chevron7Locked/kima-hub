@@ -40,6 +40,7 @@ import request from "supertest";
 import notificationRoutes from "../notifications";
 import { prisma } from "../../utils/db";
 import { mergeMetadata, whenIdle } from "../../services/downloads/jobs";
+import { connectJobOwners } from "../../services/downloads/owners";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { expectLog } from "../../__tests__/helpers/expectedLogs";
 import { mountAsServer } from "./helpers/serverMount";
@@ -91,6 +92,7 @@ const importTold = async () => {
 const retry = (id: string) => request(app).post(`/notifications/downloads/${id}/retry`);
 
 beforeAll(async () => {
+    connectJobOwners();
     await prisma.user.deleteMany({ where: { id: USER } });
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
 });

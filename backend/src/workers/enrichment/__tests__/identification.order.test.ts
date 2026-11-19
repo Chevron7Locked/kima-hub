@@ -46,7 +46,6 @@ jest.mock("../../../services/musicbrainz", () => ({
         }),
         lookupRecordingsByIsrc: (...args: unknown[]) => mockLookupRecordingsByIsrc(...args),
         getAlbumCatalogue: (...args: unknown[]) => mockGetAlbumCatalogue(...args),
-        normalizeForSearch: (s: string) => s,
     },
 }));
 

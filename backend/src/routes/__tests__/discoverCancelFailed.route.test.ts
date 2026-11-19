@@ -23,6 +23,7 @@ import { WEEK_STARTS_ON } from "../../lib/discoveryWeek";
 import { redisClient } from "../../utils/redis";
 import { closeClient } from "../../utils/closeRedisClient";
 import * as downloadJobs from "../../services/downloads/jobs";
+import { connectJobOwners } from "../../services/downloads/owners";
 import { mountAsServer } from "./helpers/serverMount";
 
 const MARK = "zz-cancel";
@@ -43,7 +44,10 @@ async function cleanup() {
     await prisma.user.deleteMany({ where: { username: { startsWith: MARK } } });
 }
 
-beforeAll(cleanup);
+beforeAll(async () => {
+    connectJobOwners();
+    await cleanup();
+});
 afterAll(async () => {
     await cleanup();
     await prisma.$disconnect();

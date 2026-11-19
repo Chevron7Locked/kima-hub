@@ -19,7 +19,8 @@
  *
  * A move answers once the rows and the user's notice are written. The Discover batch's
  * and the import's completion checks run after it, detached (a batch check can wait
- * 60 s for Lidarr), one at a time per batch and per import, with a failure logged.
+ * 60 s for Lidarr), one at a time per batch and per import, with a failure logged. This
+ * module imports neither: each owner registers its check through `onOwnerSettled` at start (`owners.ts`).
  * `whenIdle` waits for them, and for any move that tells (park, complete, fail, cancel) still writing or
  * telling, for tests and shutdown. `withoutFailureMarks` is the metadata of a job with what a failure left
  * on it removed, for a retry or a re-queue.
@@ -650,7 +651,7 @@ export async function remove(jobs: JobRef[]): Promise<number> {
     const deletionsInLanes: Promise<void>[] = [];
     for (const row of rows) {
         const importId = (row.metadata as { spotifyImportJobId?: string } | null)?.spotifyImportJobId;
-        const lanes = [row.discoveryBatchId && `batch:${row.discoveryBatchId}`, importId && `import:${importId}`].filter(
+        const lanes = [row.discoveryBatchId && ownerLane("discoverBatch", row.discoveryBatchId), importId && ownerLane("import", importId)].filter(
             (key): key is string => !!key
         );
         if (lanes.length === 0) {
@@ -760,36 +761,59 @@ export async function whenIdle(timeoutMs?: number): Promise<void> {
     clearTimeout(timer);
 }
 
+/** What a job can belong to, and is told of when the job settles: a Discover batch, or a playlist import. */
+export type JobOwner = "discoverBatch" | "import";
+
+/** Each owner kind's completion check, registered by the module that owns it (see `owners.ts`). */
+const ownerChecks = new Map<JobOwner, (ownerId: string) => Promise<void>>();
+
+/**
+ * Registers the check an owner of this kind runs when one of its jobs settles, in place of any earlier one. This
+ * module imports no owner: each is reached only through the check it registered. Returns a remover.
+ */
+export function onOwnerSettled(owner: JobOwner, check: (ownerId: string) => Promise<void>): () => void {
+    ownerChecks.set(owner, check);
+    return () => {
+        if (ownerChecks.get(owner) === check) ownerChecks.delete(owner);
+    };
+}
+
+const OWNER_NAMES: Record<JobOwner, string> = { discoverBatch: "batch", import: "import" };
+
+/** The lane an owner's checks run in; a delete of its jobs queues in the same lane, behind any check that reads them. */
+function ownerLane(owner: JobOwner, ownerId: string): string {
+    return `${OWNER_NAMES[owner]}:${ownerId}`;
+}
+
+/**
+ * Runs the owner's check in its lane. A check that throws, or one never registered, is logged: the job has settled.
+ * A sweep that finds an owner still waiting on jobs that have all settled calls it again, since a check that threw is
+ * not retried here.
+ */
+export function tellOwner(owner: JobOwner, ownerId: string): Promise<void> {
+    const name = OWNER_NAMES[owner];
+    return inLane(ownerLane(owner, ownerId), async () => {
+        const check = ownerChecks.get(owner);
+        if (!check) {
+            logger.error(`No check is registered for a ${name}, so ${name} ${ownerId} was not told of a settled download`);
+            return;
+        }
+        try {
+            await check(ownerId);
+        } catch (checkError) {
+            logger.error(`Failed to tell ${name} ${ownerId} of a settled download:`, checkError);
+        }
+    });
+}
+
 /**
  * Starts the batch and import completion checks and returns. A check can run a scan and wait on a queue for a minute,
- * which a user cancelling a download must not wait for. A check that throws is logged: the job has settled already.
+ * which a user cancelling a download must not wait for.
  */
 function tellBatchesAndImports(batches: Set<string>, imports: Set<string>): void {
     const tasks: Promise<void>[] = [];
-    for (const batchId of batches) {
-        tasks.push(
-            inLane(`batch:${batchId}`, async () => {
-                try {
-                    const { discoverWeeklyService } = await import("../discoverWeekly");
-                    await discoverWeeklyService.checkBatchCompletion(batchId);
-                } catch (batchError) {
-                    logger.error(`Failed to tell batch ${batchId} of a settled download:`, batchError);
-                }
-            })
-        );
-    }
-    for (const importId of imports) {
-        tasks.push(
-            inLane(`import:${importId}`, async () => {
-                try {
-                    const { playlistImportService } = await import("../playlistImport");
-                    await playlistImportService.checkImportCompletion(importId);
-                } catch (importError) {
-                    logger.error(`Failed to tell import ${importId} of a settled download:`, importError);
-                }
-            })
-        );
-    }
+    for (const batchId of batches) tasks.push(tellOwner("discoverBatch", batchId));
+    for (const importId of imports) tasks.push(tellOwner("import", importId));
     const run = Promise.all(tasks).then(() => undefined);
     inFlight.add(run);
     void run.finally(() => inFlight.delete(run));

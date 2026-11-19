@@ -14,7 +14,8 @@ jest.mock("../../middleware/auth", () => ({
     requireAdmin: (_req: any, _res: any, next: any) => next(),
 }));
 jest.mock("../../services/lidarr", () => ({ lidarrService: { isEnabled: jest.fn().mockResolvedValue(true), unmonitorAlbum: jest.fn() } }));
-jest.mock("../../services/lidarrFailures", () => ({ sweepFailedDownloads: jest.fn(), removeFailedDownload: jest.fn() }));
+jest.mock("../../services/lidarrFailures", () => ({ sweepFailedDownloads: jest.fn() }));
+jest.mock("../../services/lidarrRemovals", () => ({ removeFailedDownload: jest.fn() }));
 const mockCheckBatchCompletion = jest.fn();
 jest.mock("../../services/discoverWeekly", () => ({
     discoverWeeklyService: { checkBatchCompletion: (...a: unknown[]) => mockCheckBatchCompletion(...a) },
@@ -25,6 +26,7 @@ import request from "supertest";
 import downloadsRouter from "../downloads";
 import { prisma } from "../../utils/db";
 import * as downloadJobs from "../../services/downloads/jobs";
+import { connectJobOwners } from "../../services/downloads/owners";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 import { mountAsServer } from "./helpers/serverMount";
 
@@ -39,6 +41,7 @@ const job = (id: string, status: string, data: Record<string, unknown> = {}) =>
     });
 
 beforeAll(async () => {
+    connectJobOwners();
     await prisma.user.deleteMany({ where: { id: USER } });
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
 });

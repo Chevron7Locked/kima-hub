@@ -5,6 +5,7 @@ import { prisma, Prisma } from "../../utils/db";
 import { redisClient } from "../../utils/redis";
 import { eventBus } from "../eventBus";
 import * as jobMoves from "../downloads/jobs";
+import { simpleDownloadManager } from "../simpleDownloadManager";
 import type { ImportJob } from "./types";
 export const jobLoggers = new Map<string, ReturnType<typeof createPlaylistLogger>>();
 
@@ -169,7 +170,6 @@ export async function stopImportDownloadsAtSource(importJobId: string): Promise<
   });
   if (unfinished.length === 0) return unfinished;
   try {
-    const { simpleDownloadManager } = await import("../simpleDownloadManager");
     await simpleDownloadManager.cancelJobs(unfinished);
   } catch (error) {
     logger.error(`[Spotify Import] Job ${importJobId}: could not stop its downloads in Lidarr:`, error);

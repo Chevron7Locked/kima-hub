@@ -8,6 +8,7 @@ import { redisClient, waitForRedisReady } from "../../utils/redis";
 import { playlistImportService, failImportJob } from "../playlistImport";
 import { trackImportSearches } from "../playlistImport/jobState";
 import * as downloadJobs from "../downloads/jobs";
+import { connectJobOwners } from "../downloads/owners";
 import { notificationService } from "../notificationService";
 import { eventBus } from "../eventBus";
 import { useLidarrCancelScenario } from "../../__tests__/helpers/lidarrCancelScenario";
@@ -41,6 +42,7 @@ const searching = (importJobId: string) => {
 };
 
 beforeAll(async () => {
+    connectJobOwners();
     await waitForRedisReady();
     await prisma.user.deleteMany({ where: { id: USER } });
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });

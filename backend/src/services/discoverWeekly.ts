@@ -11,7 +11,7 @@ import { nameWords } from "./nameFold";
 import type { SeedArtist } from "./discovery/discoverySeeding";
 import { prisma } from "../utils/db";
 import { LIBRARY_LOCATION } from "./libraryFilters";
-import { removeFailedDownload } from "./lidarrFailures";
+import { removeFailedDownload } from "./lidarrRemovals";
 import {
     getSimilarArtists,
     type SimilarArtist,
@@ -639,6 +639,9 @@ class DiscoverWeeklyService {
                 );
 
                 forcedCount++;
+            } else if (pendingJobs.length === 0) {
+                // Every job has settled but the batch has not moved on: its check after the last one failed.
+                await downloadJobs.tellOwner("discoverBatch", batch.id);
             }
         }
 

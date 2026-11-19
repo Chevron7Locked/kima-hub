@@ -5,7 +5,6 @@ import { getSystemSettings } from "../utils/systemSettings";
 import { onSystemSettingsChange } from "../utils/systemSettingsListeners";
 import { createLidarrClient } from "./lidarrClient";
 import { sourcePauseController } from "./sourcePauseController";
-import { lidarrHealthMonitor } from "./lidarrHealth";
 import { UserFacingError } from "../utils/errors";
 import type {
     LidarrAlbum,
@@ -141,11 +140,21 @@ class LidarrService {
         }
     }
 
-    /** An outage seen by any request triggers a health check at once. */
+    private readonly outageListeners = new Set<() => void>();
+
+    /**
+     * Calls `listener` each time a request fails as an outage would (no answer, or a 5xx), so the Lidarr health check
+     * can run at once. Returns a remover.
+     */
+    onOutage(listener: () => void): () => void {
+        this.outageListeners.add(listener);
+        return () => void this.outageListeners.delete(listener);
+    }
+
     private createClient(baseURL: string, apiKey: string): AxiosInstance {
         const client = createLidarrClient(baseURL, apiKey, this.API_TIMEOUT_DEFAULT);
         client.interceptors.response.use(undefined, (error) => {
-            if (isTransient(error)) lidarrHealthMonitor.reportFailure();
+            if (isTransient(error)) for (const listener of this.outageListeners) listener();
             return Promise.reject(error);
         });
         return client;
@@ -1331,7 +1340,7 @@ class LidarrService {
     /**
      * Delete a queue item; with blocklist Lidarr never grabs that release again,
      * and unless skipRedownload it searches for another. A 404 counts as success.
-     * Callers go through lidarrFailures.removeFailedDownload.
+     * Callers go through lidarrRemovals.removeFailedDownload.
      */
     async removeQueueItem(
         item: { id: number; title?: string },

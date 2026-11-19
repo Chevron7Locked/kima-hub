@@ -6,6 +6,7 @@
 import { prisma } from "../../utils/db";
 import { staleJobCleanupService } from "../staleJobCleanup";
 import * as downloadJobs from "../downloads/jobs";
+import { connectJobOwners } from "../downloads/owners";
 import { closeEngineConnections } from "../../__tests__/helpers/engineConnections";
 
 jest.setTimeout(30_000);
@@ -14,6 +15,7 @@ const USER = "stale_jobs_user";
 const HOURS = 60 * 60 * 1000;
 
 beforeAll(async () => {
+    connectJobOwners();
     await prisma.user.deleteMany({ where: { id: USER } });
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
 });

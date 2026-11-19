@@ -9,8 +9,8 @@ import { foldIdentityText, artistSortName } from "./artistIdentity";
 import { pgCollapseSpace, pgLower, pgTrim, stripNonAlnum } from "./pgTextRules";
 import { nameKey } from "./nameFold";
 import { LIBRARY_LOCATION } from "./libraryFilters";
-import { musicBrainzService } from "./musicbrainz";
 import { stripAlbumEdition } from "../utils/artistNormalization";
+import { stripTitleNotes } from "../utils/normalization";
 import { DuplicateMbidError, REPLACEABLE_SOURCES, isKimaChosen, reassignAlbumRgMbid } from "./mbidReassign";
 
 /**
@@ -207,7 +207,7 @@ export async function resolveAlbum(
  * markers. It only compares, never renames, so "Playing the Angel (Deluxe)" stays its own album locally.
  */
 export function titlesAgree(a: string, b: string): boolean {
-    const bare = (t: string) => nameKey(musicBrainzService.normalizeForSearch(t));
+    const bare = (t: string) => nameKey(stripTitleNotes(t));
     if (!a || !b) return false;
     // Identical text agrees even when nothing survives the fold ("!!!"); an empty fold never matches different text.
     const exact = (t: string) => t.normalize("NFKC").toLowerCase().trim();

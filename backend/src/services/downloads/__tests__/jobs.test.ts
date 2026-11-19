@@ -9,6 +9,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../../utils/db";
 import * as downloadJobs from "../jobs";
+import { connectJobOwners } from "../owners";
 import { notificationPolicyService } from "../../notificationPolicyService";
 import { closeEngineConnections } from "../../../__tests__/helpers/engineConnections";
 
@@ -40,6 +41,7 @@ const batchOf = (totalAlbums: number) =>
     });
 
 beforeAll(async () => {
+    connectJobOwners();
     await prisma.user.deleteMany({ where: { id: USER } });
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
 });
@@ -1038,6 +1040,55 @@ describe("settling answers promptly", () => {
 
         expect((await row(j.id)).status).toBe("failed");
         expect(logged).toHaveBeenCalledWith(expect.stringContaining(batch.id), expect.any(Error));
+    });
+});
+
+describe("the owner of a settled job", () => {
+    // Each case registers its own check for the owner it settles a job of, and puts the server's back after.
+    afterEach(() => connectJobOwners());
+
+    it("is told through the check registered for its kind, and the job's module imports no owner", async () => {
+        const batches: string[] = [];
+        const imports: string[] = [];
+        downloadJobs.onOwnerSettled("discoverBatch", async (id) => void batches.push(id));
+        downloadJobs.onOwnerSettled("import", async (id) => void imports.push(id));
+        const batch = await batchOf(1);
+        const a = await job("dl_owner_batch", { discoveryBatchId: batch.id });
+        const b = await job("dl_owner_import", { metadata: { spotifyImportJobId: "imp-owner" } });
+
+        await downloadJobs.complete([a, b]);
+        await downloadJobs.whenIdle();
+
+        expect(batches).toEqual([batch.id]);
+        expect(imports).toEqual(["imp-owner"]);
+    });
+
+    it("replaces an earlier check of the same kind", async () => {
+        const first = jest.fn(async () => undefined);
+        const second = jest.fn(async () => undefined);
+        downloadJobs.onOwnerSettled("import", first);
+        downloadJobs.onOwnerSettled("import", second);
+        const j = await job("dl_owner_replaced", { metadata: { spotifyImportJobId: "imp-replaced" } });
+
+        await downloadJobs.fail([j], "gone");
+        await downloadJobs.whenIdle();
+
+        expect(first).not.toHaveBeenCalled();
+        expect(second.mock.calls).toEqual([["imp-replaced"]]);
+    });
+
+    it("with no check registered, is logged as not told, and the job still settles", async () => {
+        downloadJobs.onOwnerSettled("discoverBatch", async () => undefined)();
+        const { logger } = await import("../../../utils/logger");
+        const logged = jest.spyOn(logger, "error").mockImplementation(() => undefined);
+        const batch = await batchOf(1);
+        const j = await job("dl_owner_missing", { discoveryBatchId: batch.id });
+
+        await expect(downloadJobs.fail([j], "gone")).resolves.toHaveLength(1);
+        await downloadJobs.whenIdle();
+
+        expect((await row(j.id)).status).toBe("failed");
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining(batch.id));
     });
 });
 

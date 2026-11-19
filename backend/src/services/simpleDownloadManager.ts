@@ -19,7 +19,7 @@ import { sourcePauseController } from "./sourcePauseController";
 import { isRateLimited } from "./enrichmentErrorCodeClassifier";
 import { failureCause } from "../utils/outcome";
 import { ensureDiscoverTag } from "./discovery/lidarrRemoval";
-import { failImportedDownload, removeFailedDownload } from "./lidarrFailures";
+import { failImportedDownload, removeFailedDownload } from "./lidarrRemovals";
 import type { LidarrQueueItem } from "../types/lidarr";
 
 type CompletableJob = {

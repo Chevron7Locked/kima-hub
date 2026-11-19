@@ -109,3 +109,20 @@ it("ignores old and unrelated log errors", async () => {
     expect(lidarrHealthMonitor.getState().status).toBe("ok");
     expect(sourcePauseController.pause).not.toHaveBeenCalled();
 });
+
+it("checks at once when a request elsewhere finds Lidarr down, and stops listening when stopped", async () => {
+    const { lidarrService } = require("../lidarr");
+    const listen = jest.spyOn(lidarrService, "onOutage");
+    lidarrHealthMonitor.start();
+    const outage: () => void = listen.mock.calls[0][0] as () => void;
+    const scheduled = jest.spyOn(global, "setTimeout");
+
+    outage();
+    expect(scheduled).toHaveBeenCalledWith(expect.any(Function), 0);
+
+    lidarrHealthMonitor.stop();
+    scheduled.mockClear();
+    outage();
+    expect(scheduled).not.toHaveBeenCalled();
+    scheduled.mockRestore();
+});

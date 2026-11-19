@@ -140,15 +140,9 @@ class QueueCleanerService {
                     `[IMPORT STUCK] Job ${job.id} stuck in downloading for ${Math.round(jobAge / 60000)}min - forcing completion check`
                 );
 
-                try {
-                    const playlistImportService = await this.getPlaylistImportService();
-                    await playlistImportService.checkImportCompletion(job.id);
-                    recoveredCount++;
-                } catch (err: any) {
-                    logger.debug(
-                        `[IMPORT STUCK] Failed to force completion check for ${job.id}: ${err.message}`
-                    );
-                }
+                // In the import's lane, so it does not run alongside a check a settling job started.
+                await downloadJobs.tellOwner("import", job.id);
+                recoveredCount++;
             }
         }
 

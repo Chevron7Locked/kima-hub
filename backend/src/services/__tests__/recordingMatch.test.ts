@@ -3,13 +3,6 @@
  * track only when title, version, artist and length agree. Cases are wrong matches
  * seen on a real library.
  */
-jest.mock("../musicbrainz", () => ({
-    musicBrainzService: {
-        normalizeForSearch: (s: string) =>
-            s.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s*\[[^\]]*\]\s*/g, " ").replace(/\s+/g, " ").trim(),
-    },
-}));
-
 import {
     LENGTH_TOLERANCE_SEC,
     artistsAgree,

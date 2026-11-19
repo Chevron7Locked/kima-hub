@@ -11,7 +11,7 @@ import {
     permanent,
 } from "../utils/outcome";
 import { USER_AGENT } from "../config";
-import { stripEditionNote } from "../utils/normalization";
+import { stripTitleNotes } from "../utils/normalization";
 import {
     normalizeIsrc,
     pickRecording,
@@ -550,8 +550,8 @@ class MusicBrainzService {
 
     /** The exact then fuzzy name queries for a recording; none when the title is all brackets. */
     private recordingQueries(expected: ExpectedRecording): string[] {
-        const title = this.escapeLucene(this.normalizeForSearch(expected.title));
-        const name = this.escapeLucene(this.normalizeForSearch(expected.artists[0] ?? ""));
+        const title = this.escapeLucene(stripTitleNotes(expected.title));
+        const name = this.escapeLucene(stripTitleNotes(expected.artists[0] ?? ""));
         if (!title.trim()) return [];
         return [`recording:"${title}" AND artist:"${name}"`, `${title} AND artist:${name}`];
     }
@@ -559,20 +559,6 @@ class MusicBrainzService {
     /** MusicBrainz's Lucene syntax needs these escaped: + - && || ! ( ) { } [ ] ^ " ~ * ? : \ / */
     private escapeLucene(str: string): string {
         return str.replace(/([+\-&|!(){}[\]^"~*?:\\/])/g, "\\$1");
-    }
-
-    /**
-     * The title without edition markers, for matching against release-group
-     * titles only; stored titles keep their markers.
-     */
-    normalizeForSearch(str: string): string {
-        return stripEditionNote(
-            str
-                .replace(/\s*\([^)]*\)\s*/g, " ")
-                .replace(/\s*\[[^\]]*\]\s*/g, " ")
-        )
-            .replace(/\s+/g, " ")
-            .trim();
     }
 
     /**

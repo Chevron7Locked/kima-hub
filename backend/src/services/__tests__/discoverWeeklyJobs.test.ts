@@ -10,6 +10,7 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { discoveryAlbumLifecycle, discoverySeeding } from "../discovery";
 import { acquisitionService } from "../acquisitionService";
 import * as downloadJobs from "../downloads/jobs";
+import { connectJobOwners } from "../downloads/owners";
 
 jest.setTimeout(60_000);
 
@@ -19,6 +20,7 @@ const MINUTES = 60 * 1000;
 let discoverWeeklyService: typeof import("../discoverWeekly").discoverWeeklyService;
 
 beforeAll(async () => {
+    connectJobOwners();
     ({ discoverWeeklyService } = await import("../discoverWeekly"));
     await prisma.user.deleteMany({ where: { id: USER } });
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
@@ -135,6 +137,19 @@ describe("a batch that ran too long", () => {
         const row = await prisma.downloadJob.findUniqueOrThrow({ where: { id: waiting.id } });
         expect(row).toMatchObject({ status: "failed", error: "Batch timeout - download took too long" });
         expect(row.metadata).toHaveProperty("failedAt");
+        expect(await prisma.discoveryBatch.findUniqueOrThrow({ where: { id: batch.id } })).toMatchObject({
+            status: "scanning", completedAlbums: 1, failedAlbums: 1,
+        });
+    });
+
+    it("moves on a batch whose jobs have all settled when its check after the last one failed", async () => {
+        const batch = await batchWith(5 * MINUTES, "2026-09-21T00:00:00.000Z");
+        await job(batch.id, "completed");
+        await job(batch.id, "failed");
+
+        await discoverWeeklyService.checkStuckBatches();
+        await downloadJobs.whenIdle();
+
         expect(await prisma.discoveryBatch.findUniqueOrThrow({ where: { id: batch.id } })).toMatchObject({
             status: "scanning", completedAlbums: 1, failedAlbums: 1,
         });

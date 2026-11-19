@@ -14,6 +14,7 @@ import { closeEngineConnections } from "../../__tests__/helpers/engineConnection
 import { soulseekService } from "../soulseek";
 import { simpleDownloadManager } from "../simpleDownloadManager";
 import * as downloadJobs from "../downloads/jobs";
+import { connectJobOwners } from "../downloads/owners";
 import { acquisitionService } from "../acquisitionService";
 import { distributedLock } from "../../utils/distributedLock";
 import { LockHeldError, LockUnavailableError } from "../../utils/lockErrors";
@@ -42,6 +43,7 @@ const newJob = (status = "pending", extra: Record<string, unknown> = {}) =>
 const read = (id: string) => prisma.downloadJob.findUniqueOrThrow({ where: { id } });
 
 beforeAll(async () => {
+    connectJobOwners();
     await prisma.user.deleteMany({ where: { id: USER } });
     await prisma.user.create({ data: { id: USER, username: USER, passwordHash: "x", role: "user", tokenVersion: 0 } });
 });

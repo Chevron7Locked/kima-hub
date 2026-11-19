@@ -14,6 +14,7 @@ import {
     reportEmbeddingWritePathAtStartup,
 } from "./services/embeddingsHealth";
 import { lidarrHealthMonitor } from "./services/lidarrHealth";
+import { connectJobOwners } from "./services/downloads/owners";
 import { combineAnalyzerStatus, heartbeatFresh } from "./utils/analyzerStatus";
 import { errorHandler } from "./middleware/errorHandler";
 import { resetAdminPassword } from "./services/users/accounts";
@@ -222,6 +223,9 @@ async function checkPasswordReset() {
 const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
 
 async function main() {
+    // Before anything can settle a download job: a settled job tells its Discover batch or import through these.
+    connectJobOwners();
+
     // Verify database connections before accepting traffic
     await checkPostgresConnection();
     await checkRedisConnection();

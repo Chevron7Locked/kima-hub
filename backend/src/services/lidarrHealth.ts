@@ -12,6 +12,8 @@ import { sourcePauseController } from "./sourcePauseController";
 import { notificationService } from "./notificationService";
 import { createLidarrClient, isLidarrConfigured } from "./lidarrClient";
 import { configureLidarrWebhook } from "./lidarrWebhookSetup";
+import { lidarrService } from "./lidarr";
+import { simpleDownloadManager } from "./simpleDownloadManager";
 
 const LIDARR_UNHEALTHY = "LIDARR_UNHEALTHY";
 const ALERT_KEY = "lidarr-health";
@@ -44,15 +46,19 @@ class LidarrHealthMonitor {
     private state: LidarrHealthState = { status: "off", since: new Date() };
     // This Lidarr did not keep a new secret, so asking it again each check would change nothing.
     private secretRefused = false;
+    private stopListening?: () => void;
 
     start(): void {
         if (this.started) return;
         this.started = true;
+        this.stopListening = lidarrService.onOutage(() => this.reportFailure());
         this.schedule(0);
     }
 
     stop(): void {
         this.started = false;
+        this.stopListening?.();
+        this.stopListening = undefined;
         clearTimeout(this.timer);
     }
 
@@ -74,7 +80,6 @@ class LidarrHealthMonitor {
             const settings = await getSystemSettings();
             if (!isLidarrConfigured(settings)) {
                 await this.recover("off");
-                const { simpleDownloadManager } = await import("./simpleDownloadManager");
                 await simpleDownloadManager.failHeldDownloads();
                 return delay;
             }
@@ -83,7 +88,6 @@ class LidarrHealthMonitor {
                 delay = await this.degrade(reason);
             } else {
                 await this.recover("ok");
-                const { simpleDownloadManager } = await import("./simpleDownloadManager");
                 await simpleDownloadManager.resumeHeldDownloads();
                 await this.repairWebhook(settings);
             }
