@@ -28,6 +28,8 @@ export enum AcquisitionErrorType {
 }
 
 /** An acquisition failure carrying its type and whether the fallback may try again. */
+const ARTIST_ALREADY_REMOVED = "Artist already removed";
+
 export class AcquisitionError extends Error {
     public readonly type: AcquisitionErrorType;
     public readonly isRecoverable: boolean;
@@ -121,6 +123,8 @@ class LidarrService {
     private readonly METADATA_FETCH_MAX_ATTEMPTS = 10;
     private readonly METADATA_FETCH_DELAY = 2000;
     private readonly ARTIST_REFRESH_WAIT_MS = 5000;
+    private readonly REFRESH_POLL_MS = 2000;
+    private readonly REFRESH_WAIT_LIMIT_MS = 120_000;
 
     private artistCache: { data: LidarrArtist[]; fetchedAt: number } | null = null;
     private readonly ARTIST_CACHE_TTL = 30_000; // 30 seconds
@@ -672,12 +676,16 @@ class LidarrService {
     async albumsBeingSearched(): Promise<Set<number>> {
         await this.ensureInitialized();
         if (!this.enabled || !this.client) return new Set();
-        const { data } = await this.client.get<{ name: string; status: string; body?: { albumIds?: number[] } }[]>("/api/v1/command");
-        return new Set(
-            data
-                .filter((c) => c.name === "AlbumSearch" && (c.status === "queued" || c.status === "started"))
-                .flatMap((c) => c.body?.albumIds ?? [])
+        return new Set((await this.activeCommands("AlbumSearch")).flatMap((c) => c.body?.albumIds ?? []));
+    }
+
+    /** Lidarr's commands of one kind that are queued or running. */
+    private async activeCommands(name: string): Promise<{ body?: { albumIds?: number[]; artistIds?: number[] } }[]> {
+        const { data } = await this.client!.get<{ name: string; status: string; body?: { albumIds?: number[]; artistIds?: number[] } }[]>(
+            "/api/v1/command",
+            { timeout: this.API_TIMEOUT_DEFAULT }
         );
+        return data.filter((c) => c.name === name && (c.status === "queued" || c.status === "started"));
     }
 
     private async refreshArtistAndWait(artistId: number): Promise<void> {
@@ -828,7 +836,9 @@ class LidarrService {
         }
 
         try {
-            const artists = await this.getArtists();
+            // A fresh list: an id from the cached one may be of an artist Lidarr has since added back under a new id.
+            this.invalidateArtistCache();
+            const artists = await this.getArtistList();
             const lidarrArtist = artists.find(
                 (a) => a.foreignArtistId === mbid
             );
@@ -848,14 +858,8 @@ class LidarrService {
                 `[LIDARR] Deleting artist: ${lidarrArtist.artistName} (ID: ${lidarrArtist.id})`
             );
 
-            await this.client.delete(`/api/v1/artist/${lidarrArtist.id}`, {
-                params: {
-                    deleteFiles: deleteFiles,
-                    addImportListExclusion: false,
-                },
-                timeout: this.API_TIMEOUT_DEFAULT,
-            });
-
+            const removed = await this.removeArtist(lidarrArtist.id, deleteFiles);
+            if (!removed.success || removed.message === ARTIST_ALREADY_REMOVED) return removed;
             logger.debug(
                 `[LIDARR] Successfully deleted artist: ${lidarrArtist.artistName}`
             );
@@ -1252,21 +1256,61 @@ class LidarrService {
         }
 
         try {
-            await this.client.delete(`/api/v1/artist/${lidarrId}`, {
-                params: {
-                    deleteFiles,
-                    addImportListExclusion: false,
-                },
-                timeout: this.API_TIMEOUT_DEFAULT,
-            });
-
-            return { success: true, message: "Artist deleted" };
+            return await this.removeArtist(lidarrId, deleteFiles);
         } catch (error: any) {
-            if (error.response?.status === 404) {
-                return { success: true, message: "Artist already removed" };
-            }
             logger.error("[LIDARR] Delete artist by ID error:", error.message);
             return { success: false, message: error.message };
+        }
+    }
+
+    /**
+     * Deletes one artist so that it stays deleted. An artist deleted while Lidarr's refresh of it still runs is added
+     * back when that refresh saves its albums ("Adding missing parent artist"), so the delete waits for any refresh of
+     * the artist, before and after, and counts only once Lidarr has no artist with its MusicBrainz id.
+     */
+    private async removeArtist(lidarrId: number, deleteFiles: boolean): Promise<{ success: boolean; message: string }> {
+        const client = this.client!;
+        let artist: LidarrArtist;
+        try {
+            artist = (await client.get<LidarrArtist>(`/api/v1/artist/${lidarrId}`, { timeout: this.API_TIMEOUT_DEFAULT })).data;
+        } catch (error: any) {
+            if (error.response?.status === 404) return { success: true, message: ARTIST_ALREADY_REMOVED };
+            throw error;
+        }
+        if (!(await this.waitForArtistRefresh(lidarrId))) {
+            return { success: false, message: `Lidarr is still refreshing ${artist.artistName}, and would add it back if deleted now` };
+        }
+        try {
+            await client.delete(`/api/v1/artist/${lidarrId}`, {
+                params: { deleteFiles, addImportListExclusion: false },
+                timeout: this.API_TIMEOUT_DEFAULT,
+            });
+        } catch (error: any) {
+            if (error.response?.status !== 404) throw error;
+        }
+        this.invalidateArtistCache();
+        if (!(await this.waitForArtistRefresh(lidarrId))) {
+            return { success: false, message: `Lidarr is still refreshing ${artist.artistName} and may add it back` };
+        }
+        const mbid = artist.foreignArtistId;
+        const { data: artists } = await client.get<LidarrArtist[]>("/api/v1/artist", { timeout: this.API_TIMEOUT_DEFAULT });
+        if (mbid && artists.some((a) => a.foreignArtistId === mbid)) {
+            return { success: false, message: `Lidarr added ${artist.artistName} back while refreshing it` };
+        }
+        return { success: true, message: "Artist deleted" };
+    }
+
+    /**
+     * Waits until Lidarr has no refresh of this artist queued or running; false when one still is at the time limit.
+     * Lidarr records a refresh of one artist, Kima's `{ artistId }` included, as `artistIds: [id]`.
+     */
+    private async waitForArtistRefresh(lidarrId: number): Promise<boolean> {
+        const deadline = Date.now() + this.REFRESH_WAIT_LIMIT_MS;
+        for (;;) {
+            const refreshing = (await this.activeCommands("RefreshArtist")).some((c) => (c.body?.artistIds ?? []).includes(lidarrId));
+            if (!refreshing) return true;
+            if (Date.now() >= deadline) return false;
+            await new Promise((resolve) => setTimeout(resolve, this.REFRESH_POLL_MS));
         }
     }
 
