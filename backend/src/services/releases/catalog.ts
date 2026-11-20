@@ -116,7 +116,7 @@ export const RELEASES: Release[] = [
         title: "Kima 1.13",
         summary:
             "Listening history that survives a song leaving, playlists that mark songs that can't play, stats for your library only, two-factor recovery, and a large round of fixes.",
-        date: "2026-11-16",
+        date: "2026-11-20",
         items: [
             {
                 kind: "note",
