@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The image's PostgreSQL is fixed at 16.16.** It used to take whatever 16.x was current when the image was built, so two builds of one release could carry different versions. Every build now carries 16.16, a minor update on the same data, with nothing to do on upgrade.
 - **Your listening history survives when a song leaves the library.** When the same recording is on another album in your library, for example a deluxe edition, its plays, your like and its spots in your playlists move to that copy. When no copy is left, its plays stay in your stats under the song's name, and return to the song if it comes back.
 - **On a phone, the what's new window opens on the release's summary**, above its list, instead of on the list alone.
 - **Saving settings reloads only what changed.** Changing one setting no longer drops the Soulseek connection or reloads Lidarr, Audiobookshelf and fanart; each reloads only when its own settings change, and turning Audiobookshelf on or off takes effect at once.

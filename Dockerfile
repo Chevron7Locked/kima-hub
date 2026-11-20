@@ -43,6 +43,7 @@ RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* && apt-g
 RUN apt-get install -y --no-install-recommends \
     gnupg lsb-release curl ca-certificates && \
     echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
+    echo "deb http://apt-archive.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg-archive main" >> /etc/apt/sources.list.d/pgdg.list && \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg && \
     apt-get update
 
@@ -50,8 +51,12 @@ RUN apt-get install -y --no-install-recommends \
 # pgvector pinned to the 0.8.x series (0.8.6 verified running): ef_search /
 # iterative_scan behaviour is version-sensitive and an unpinned PGDG package
 # floats across releases on rebuild.
+# PostgreSQL pinned to one exact build for the same reason: a cached layer once
+# shipped 16.15 while a fresh build gated 16.16 (Kevin 2026-11-20: 16.16). The
+# archive repo above keeps the pin installable after PGDG moves to a newer minor.
 RUN apt-get install -y --no-install-recommends \
-    postgresql-16 \
+    postgresql-16=16.16-1.pgdg12+1 \
+    postgresql-client-16=16.16-1.pgdg12+1 \
     postgresql-contrib-16 \
     postgresql-16-pgvector=0.8.* \
     redis-server \
