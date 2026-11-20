@@ -11,8 +11,7 @@ import { nightZone } from "./nightPlays";
 import { selectRadioTracks } from "./stationSelection";
 
 /** The station types that have tiles (radioRow.ts lists them). */
-const COVER_STATION_TYPES = ["all", "workout", "discovery", "favorites", "mood", "genre", "decade"] as const;
-export type CoverStationType = (typeof COVER_STATION_TYPES)[number];
+export type CoverStationType = "all" | "workout" | "discovery" | "favorites" | "mood" | "genre" | "decade";
 
 export interface CoverStation {
   type: CoverStationType;
