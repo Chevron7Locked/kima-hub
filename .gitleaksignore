@@ -4,4 +4,5 @@
 backend/src/utils/encryption.ts:generic-api-key:3
 # The AcoustID key in this test is a made-up value the test saves and reads back.
 0ec803e7dea703a5e2f67ed0bb0fe0488d81f8a8:backend/src/routes/__tests__/systemSettings.acoustid.test.ts:generic-api-key:88
-backend/src/routes/__tests__/systemSettings.acoustid.test.ts:generic-api-key:88
+9f4cd1d2db848510ed6dbee6b0afc183591f2e96:backend/src/routes/__tests__/systemSettings.acoustid.test.ts:generic-api-key:59
+backend/src/routes/__tests__/systemSettings.acoustid.test.ts:generic-api-key:60
